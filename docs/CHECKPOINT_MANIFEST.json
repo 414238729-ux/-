@@ -2,8 +2,14 @@
   "schema_version": "1.0",
   "generated_on": "2026-08-01",
   "git": {
-    "available": false,
-    "reason": "当前目录没有.git元数据；不得伪造提交号"
+    "available": true,
+    "branch": "main",
+    "baseline_commit": "858d6ced315dfa3df78636528c720c0117fdf3de",
+    "repository_local_identity": {
+      "name": "Codex Development",
+      "email": "codex-local@example.invalid"
+    },
+    "historical_note": "CP-01至CP-04的原始哈希检查点继续保留；从该基线后优先使用Git提交"
   },
   "stage_status": {
     "1_source_and_callchain_audit": "passed",
