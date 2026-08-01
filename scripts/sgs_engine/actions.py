@@ -494,6 +494,29 @@ def apply_action(
 ) -> GameState:
     """Apply only an action present in the freshly enumerated legal set."""
 
+    current = validate_action(state, context, action, registry)
+    adapter = registry.resolve(context.mode, context.phase)
+    updated = adapter.apply_action(state, context, current)
+    if not isinstance(updated, GameState):
+        raise TypeError("规则处理器apply_action必须返回GameState")
+    updated.assert_card_conservation()
+    return updated
+
+
+def validate_action(
+    state: GameState,
+    context: ActionContext,
+    action: LegalAction,
+    registry: RuleRegistry,
+) -> LegalAction:
+    """Validate an issued action against the freshly enumerated legal set.
+
+    The returned value is the canonical action emitted by the current adapter.
+    Keeping validation as a public, side-effect-free step lets controllers and
+    replay executors follow the explicit ``enumerate -> validate -> apply``
+    pipeline without duplicating the anti-forgery checks.
+    """
+
     if not isinstance(action, LegalAction):
         raise TypeError("action必须是LegalAction")
     if action.action_id is None:
@@ -509,12 +532,7 @@ def apply_action(
         raise InvalidActionError("动作不在当前最新合法动作集合中，可能已过期或系伪造")
     if _action_value(current) != _action_value(action):
         raise InvalidActionError("动作内容与action_id绑定内容不一致，拒绝伪造动作")
-    adapter = registry.resolve(context.mode, context.phase)
-    updated = adapter.apply_action(state, context, current)
-    if not isinstance(updated, GameState):
-        raise TypeError("规则处理器apply_action必须返回GameState")
-    updated.assert_card_conservation()
-    return updated
+    return current
 
 
 __all__ = [
@@ -529,4 +547,5 @@ __all__ = [
     "UnsupportedRuleError",
     "apply_action",
     "enumerate_legal_actions",
+    "validate_action",
 ]

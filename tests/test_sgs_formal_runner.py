@@ -9,6 +9,7 @@ import pytest
 
 import scripts.sgs_formal_runner as formal_runner
 from scripts.sgs_engine_gate import FormalSimulationBlockedError, GateIssueCode
+from scripts.sgs_engine.duel import TEST_ONLY_DUEL_MODE
 from scripts.sgs_formal_runner import (
     FORMAL_DECK_PATH,
     REPOSITORY_ROOT,
@@ -91,6 +92,18 @@ def test_current_status_is_stable_structured_and_does_not_claim_full_engine() ->
     assert GateIssueCode.MODE_NOT_IMPLEMENTED.value in codes
     assert GateIssueCode.AI_NOT_IMPLEMENTED.value in codes
     assert GateIssueCode.AUTHORITATIVE_CORE_NOT_USED.value not in codes
+
+
+def test_test_only_vertical_slice_cannot_enter_formal_runner() -> None:
+    status = build_current_status(mode_name=TEST_ONLY_DUEL_MODE)
+
+    assert status["formal_run_ready"] is False
+    assert status["simulation_executed"] is False
+    assert status["capabilities"]["authoritative_full_game_core"] is False
+    assert status["capabilities"]["unsupported_rules"] == 1
+    codes = {issue["code"] for issue in status["gate_issues"]}
+    assert GateIssueCode.UNSUPPORTED_RULES.value in codes
+    assert GateIssueCode.MODE_NOT_IMPLEMENTED.value in codes
 
 
 def test_bad_or_missing_deck_becomes_structured_blocked_status(

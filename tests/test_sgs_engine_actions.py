@@ -15,6 +15,7 @@ from scripts.sgs_engine.actions import (
     UnsupportedRuleError,
     apply_action,
     enumerate_legal_actions,
+    validate_action,
 )
 from scripts.sgs_engine.model import (
     DISCARD_PILE,
@@ -155,6 +156,21 @@ def test_real_game_state_action_moves_card_and_is_stable():
 
     with pytest.raises(InvalidActionError, match="最新合法动作集合"):
         apply_action(updated, _context(), first[0], registry)
+
+
+def test_validate_action_is_explicit_and_has_no_side_effects():
+    state = _state()
+    registry = _registry()
+    issued = enumerate_legal_actions(state, _context(), registry)[0]
+
+    canonical = validate_action(state, _context(), issued, registry)
+
+    assert canonical == issued
+    assert state.location_of("c1") == ZoneRef.hand("p1")
+    assert state.revision == 0
+    forged = replace(issued, payload={"destination": "hand"})
+    with pytest.raises(InvalidActionError, match="伪造动作"):
+        validate_action(state, _context(), forged, registry)
 
 
 def test_missing_exact_mode_or_phase_fails_closed():

@@ -27,3 +27,11 @@ def test_public_package_does_not_claim_complete_game_support() -> None:
 
 def test_public_engine_version_explicitly_identifies_scaffold_scope() -> None:
     assert "scaffold" in sgs_engine.ENGINE_VERSION
+
+
+def test_public_package_exports_test_only_duel_and_strict_reexecution() -> None:
+    assert sgs_engine.TEST_ONLY_DUEL_MODE == "test_only_duel_vertical_slice"
+    assert sgs_engine.REEXECUTION_SCHEMA == "sgs-duel-reexecution-v1"
+    assert sgs_engine.TestOnlyDuelGame.__test__ is False
+    assert callable(sgs_engine.record_reference_duel)
+    assert callable(sgs_engine.reexecute_duel_replay)

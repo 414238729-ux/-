@@ -14,7 +14,12 @@ from scripts.sgs_engine.replay import (
     canonical_json,
     state_sha256,
 )
-from scripts.sgs_engine.rng import DeterministicRNG
+from scripts.sgs_engine.rng import (
+    RNG_ALGORITHM,
+    RNG_IMPLEMENTATION,
+    RNG_STATE_SCHEMA,
+    DeterministicRNG,
+)
 
 
 def test_rng_uses_one_persistent_stream_and_records_every_consumption() -> None:
@@ -82,6 +87,77 @@ def test_rng_call_snapshot_is_deeply_frozen_and_export_is_independent_copy() -> 
     exported = rng.export_calls()
     exported[0]["arguments"]["population"][0]["tags"].append("仅改导出副本")
     assert "仅改导出副本" not in rng.calls[0].arguments["population"][0]["tags"]
+
+
+def test_rng_initial_state_exports_complete_canonical_random_state() -> None:
+    rng = DeterministicRNG(20260801)
+    exported = rng.export_initial_state()
+    expected_state = random.Random(20260801).getstate()
+
+    assert exported["schema"] == RNG_STATE_SCHEMA
+    assert exported["implementation"] == RNG_IMPLEMENTATION
+    assert exported["algorithm"] == RNG_ALGORITHM
+    assert exported["state_version"] == random.Random.VERSION
+    assert exported["seed"] == 20260801
+    assert exported["call_count"] == 0
+    assert exported["getstate"][0] == expected_state[0]
+    assert exported["getstate"][1] == list(expected_state[1])
+    assert exported["getstate"][2] == expected_state[2]
+    assert len(exported["getstate"][1]) == len(expected_state[1])
+    assert rng.export_current_state() == exported
+    assert rng.current_state_sha256 == rng.initial_state_sha256
+    assert rng.call_count == 0
+
+
+def test_rng_state_hash_changes_after_consumption_and_initial_state_is_stable() -> None:
+    rng = DeterministicRNG(31)
+    initial = rng.export_initial_state()
+    initial_hash = rng.initial_state_sha256
+
+    rng.randrange(10)
+    current = rng.export_current_state()
+
+    assert current["call_count"] == 1
+    assert current["getstate"] != initial["getstate"]
+    assert rng.current_state_sha256 != initial_hash
+    assert rng.export_initial_state() == initial
+    assert rng.initial_state_sha256 == initial_hash
+    assert rng.call_count == 1
+
+
+def test_same_seed_and_consumptions_have_same_rng_state_hash() -> None:
+    first = DeterministicRNG(88)
+    second = DeterministicRNG(88)
+
+    for rng in (first, second):
+        rng.choice(["杀", "闪", "桃"])
+        cards = [1, 2, 3, 4]
+        rng.shuffle(cards)
+
+    assert first.export_initial_state() == second.export_initial_state()
+    assert first.initial_state_sha256 == second.initial_state_sha256
+    assert first.export_current_state() == second.export_current_state()
+    assert first.current_state_sha256 == second.current_state_sha256
+
+
+def test_rng_state_exports_are_independent_mutable_copies() -> None:
+    rng = DeterministicRNG(19)
+    initial_hash = rng.initial_state_sha256
+    initial = rng.export_initial_state()
+    current = rng.export_current_state()
+
+    initial["algorithm"] = "tampered"
+    initial["getstate"][1][0] = -1
+    current["getstate"][1].append(-1)
+    current["call_count"] = 999
+
+    assert rng.export_initial_state()["algorithm"] == RNG_ALGORITHM
+    assert rng.export_initial_state()["getstate"][1][0] != -1
+    assert len(rng.export_current_state()["getstate"][1]) == 625
+    assert rng.export_current_state()["call_count"] == 0
+    assert rng.initial_state_sha256 == initial_hash
+    assert rng.current_state_sha256 == initial_hash
+    assert rng.call_count == 0
 
 
 @pytest.mark.parametrize(

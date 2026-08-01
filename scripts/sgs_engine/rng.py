@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
+import hashlib
 import json
 import math
 from numbers import Real
@@ -19,6 +20,11 @@ from typing import Any, Mapping, MutableSequence, Sequence, TypeVar
 
 
 T = TypeVar("T")
+
+
+RNG_STATE_SCHEMA = "sgs-deterministic-rng-state-v1"
+RNG_IMPLEMENTATION = "python.random.Random"
+RNG_ALGORITHM = "MT19937"
 
 
 def _deep_freeze(value: Any) -> Any:
@@ -43,6 +49,22 @@ def _deep_copy_json(value: Any) -> Any:
     if isinstance(value, list):
         return [_deep_copy_json(item) for item in value]
     return value
+
+
+def _canonical_json(value: Any) -> str:
+    """Return a stable JSON representation for an already auditable value."""
+
+    return json.dumps(
+        _json_value(value),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+
+
+def _sha256_json(value: Any) -> str:
+    return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
 
 
 def _require_integer(value: Any, name: str, *, minimum: int | None = None) -> int:
@@ -171,6 +193,7 @@ class DeterministicRNG:
         self._seed = seed
         self._random = random.Random(seed)
         self._calls: list[RNGCall] = []
+        self._initial_state = _deep_freeze(self._state_payload(call_count=0))
 
     @property
     def seed(self) -> int:
@@ -190,6 +213,45 @@ class DeterministicRNG:
         """返回可直接写入回放的 JSON 兼容调用列表。"""
 
         return [call.to_dict() for call in self._calls]
+
+    def _state_payload(self, *, call_count: int) -> dict[str, Any]:
+        """Build the complete, canonical replay checkpoint for this stream."""
+
+        return {
+            "schema": RNG_STATE_SCHEMA,
+            "implementation": RNG_IMPLEMENTATION,
+            "algorithm": RNG_ALGORITHM,
+            "state_version": random.Random.VERSION,
+            "seed": self._seed,
+            "call_count": call_count,
+            "getstate": _json_value(self._random.getstate(), path="$.getstate"),
+        }
+
+    def export_initial_state(self) -> dict[str, Any]:
+        """返回首次随机消费前的完整状态独立副本。
+
+        快照包含算法标识、``random.Random.VERSION``、种子、调用计数和完整
+        ``getstate()``。调用方修改返回值不会影响内部保存的初始状态。
+        """
+
+        return _deep_copy_json(self._initial_state)
+
+    def export_current_state(self) -> dict[str, Any]:
+        """返回当前随机流的完整状态独立副本，且不消费随机数。"""
+
+        return _deep_copy_json(self._state_payload(call_count=self.call_count))
+
+    @property
+    def initial_state_sha256(self) -> str:
+        """首次随机消费前状态的规范 JSON SHA-256。"""
+
+        return _sha256_json(self._initial_state)
+
+    @property
+    def current_state_sha256(self) -> str:
+        """当前状态的规范 JSON SHA-256；读取本属性不会消费随机数。"""
+
+        return _sha256_json(self._state_payload(call_count=self.call_count))
 
     def _record(self, method: str, arguments: Mapping[str, Any], result: Any) -> None:
         normalized_arguments = _json_value(dict(arguments), path="$.arguments")
@@ -355,4 +417,10 @@ class DeterministicRNG:
         self._record("shuffle", {"before": before}, {"after": list(values)})
 
 
-__all__ = ["DeterministicRNG", "RNGCall"]
+__all__ = [
+    "RNG_ALGORITHM",
+    "RNG_IMPLEMENTATION",
+    "RNG_STATE_SCHEMA",
+    "DeterministicRNG",
+    "RNGCall",
+]
