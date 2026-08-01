@@ -1,0 +1,118 @@
+"""三国杀唯一权威规则核心的公共基础设施接口。
+
+当前包只公开不可变状态、事件、合法动作路由、确定性随机、回放完整性与
+失败关闭会话。具体卡牌、模式、武将、AI 和完整对局尚未接入；调用
+``AuthoritativeCoreSession.run_game`` 会明确抛出 ``UnsupportedRuleError``。
+"""
+
+from .actions import (
+    ActionContext,
+    ActionError,
+    ActionType,
+    InvalidActionError,
+    LegalAction,
+    RuleAdapter,
+    RuleRegistrationError,
+    RuleRegistry,
+    UnsupportedRuleError,
+    apply_action,
+    enumerate_legal_actions,
+)
+from .engine import (
+    DEFAULT_DECK_PATH,
+    ENGINE_VERSION,
+    AuthoritativeCoreSession,
+    CoreSessionError,
+    DeckInitializationError,
+    EventValidationError,
+    canonical_state_snapshot,
+)
+from .events import (
+    DamageEvent,
+    EventQueue,
+    EventType,
+    GameEvent,
+    ResponseDecision,
+    ResponseRecord,
+    ResponseWindow,
+    ResponseWindowSnapshot,
+    validate_event_contract,
+)
+from .model import (
+    DISCARD_PILE,
+    DRAW_PILE,
+    PROCESSING_ZONE,
+    REMOVED_FROM_GAME,
+    CardInstance,
+    GameState,
+    ModelValidationError,
+    PlayerState,
+    ZoneKind,
+    ZoneRef,
+)
+from .replay import (
+    NOT_LOADED_HASH,
+    ReplayEntry,
+    ReplayError,
+    ReplayFormatError,
+    ReplayHeader,
+    ReplayIntegrityError,
+    ReplayRecord,
+    canonical_json,
+    sha256_value,
+    state_sha256,
+)
+from .rng import DeterministicRNG, RNGCall
+
+
+__all__ = [
+    "DEFAULT_DECK_PATH",
+    "DISCARD_PILE",
+    "DRAW_PILE",
+    "ENGINE_VERSION",
+    "PROCESSING_ZONE",
+    "REMOVED_FROM_GAME",
+    "ActionContext",
+    "ActionError",
+    "ActionType",
+    "AuthoritativeCoreSession",
+    "CardInstance",
+    "CoreSessionError",
+    "DamageEvent",
+    "DeckInitializationError",
+    "DeterministicRNG",
+    "EventQueue",
+    "EventType",
+    "EventValidationError",
+    "GameEvent",
+    "GameState",
+    "InvalidActionError",
+    "LegalAction",
+    "ModelValidationError",
+    "NOT_LOADED_HASH",
+    "PlayerState",
+    "RNGCall",
+    "ReplayEntry",
+    "ReplayError",
+    "ReplayFormatError",
+    "ReplayHeader",
+    "ReplayIntegrityError",
+    "ReplayRecord",
+    "ResponseDecision",
+    "ResponseRecord",
+    "ResponseWindow",
+    "ResponseWindowSnapshot",
+    "RuleAdapter",
+    "RuleRegistrationError",
+    "RuleRegistry",
+    "UnsupportedRuleError",
+    "ZoneKind",
+    "ZoneRef",
+    "apply_action",
+    "canonical_json",
+    "canonical_state_snapshot",
+    "enumerate_legal_actions",
+    "sha256_value",
+    "state_sha256",
+    "validate_event_contract",
+]

@@ -1,0 +1,94 @@
+{
+  "schema_version": "1.0",
+  "generated_on": "2026-08-01",
+  "git": {
+    "available": false,
+    "reason": "当前目录没有.git元数据；不得伪造提交号"
+  },
+  "stage_status": {
+    "1_source_and_callchain_audit": "passed",
+    "2_legacy_invalidation_and_fail_closed_gate": "passed",
+    "3_existing_engine_inventory": "passed",
+    "4_authoritative_core": "in_progress",
+    "5_cards_and_modes": "not_started",
+    "6_generals": "not_started",
+    "7_web_and_replay_ui": "not_started",
+    "8_unified_ai": "not_started",
+    "9_multiprocess_formal_winrate": "not_started"
+  },
+  "checkpoints": [
+    {
+      "id": "CP-01-SOURCE-AUDIT",
+      "status": "passed",
+      "evidence": "docs/SOURCE_AND_CALLCHAIN_AUDIT.md"
+    },
+    {
+      "id": "CP-02-LEGACY-STATUS",
+      "status": "passed",
+      "evidence": "docs/LEGACY_RESULTS_INVALID.md"
+    },
+    {
+      "id": "CP-03-ENGINE-INVENTORY",
+      "status": "passed",
+      "evidence": "docs/IMPLEMENTATION_MATRIX.md"
+    },
+    {
+      "id": "CP-04-CORE-FOUNDATION",
+      "status": "in_progress",
+      "evidence": "scripts/sgs_engine",
+      "unmet_gate": "尚无从开局到胜负的无技能完整对局与规则重执行回放"
+    }
+  ],
+  "final_verification": {
+    "pytest": {
+      "command": ".\\.venv\\Scripts\\python.exe -m pytest -q",
+      "passed": 1094,
+      "failed": 0,
+      "skipped": 0
+    },
+    "compileall": {
+      "command": ".\\.venv\\Scripts\\python.exe -m compileall -q scripts tests",
+      "passed": true
+    },
+    "source_integrity": {
+      "command": ".\\.venv\\Scripts\\python.exe -m scripts.sgs_source_integrity_audit . --fail-on-defect --pretty",
+      "scanned_python_files": 99,
+      "defect_count": 0,
+      "audit_item_count": 43
+    },
+    "formal_status": {
+      "formal_run_ready": false,
+      "authoritative_core_foundation": true,
+      "authoritative_full_game_core": false,
+      "deck_card_count": 160,
+      "unsupported_rules": 1,
+      "approximation_count": 0,
+      "run_exit_code": 2,
+      "result_file_created": false
+    },
+    "not_configured": [
+      "mypy",
+      "ruff",
+      "frontend_tests",
+      "ci"
+    ]
+  },
+  "sha256": {
+    "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "23b56a0edf0c85657b332100538013de16be4d71ea6a8214ac862a6708105af6",
+    "docs/LEGACY_RESULTS_INVALID.md": "267d51329b65b4435ed770b9fe90a0d53148d17cc9b0dae3e6d3406b06c0c0cc",
+    "docs/ENGINE_STATUS.md": "3fcc72bff9773cf9e24a9515e4663ae0524f50ba272acb7db2c2bdf8827200be",
+    "docs/IMPLEMENTATION_MATRIX.md": "e2fbdbba59fabd69bc6226b96ab158008c655217ffeee7e30716fb1ba5b8af0c",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "705a1a1b939cf91afda285cae6549266aab8b3f111518bae75b0e76a556c8bd8",
+    "scripts/sgs_engine_gate.py": "acdfa735982f234462080de4b4137e1b1f3cfcadb709b7258ffb73c4aeb2e925",
+    "scripts/sgs_formal_runner.py": "840aa483354a80bcb8867c197352d34f32f985a92cb2287dc2593812c0260be2",
+    "scripts/sgs_source_integrity_audit.py": "d6efbe6428e6b24627f0974bed6b045ed2192cd97ae87776a89562808a0c1c72",
+    "scripts/sgs_engine/__init__.py": "1fc748ed0b9951766dd291e5a6c1df34b78d0418fea9985cc6086e724ff8c64b",
+    "scripts/sgs_engine/model.py": "8f7ffba33068978cfb319176dd466c93dd9a8814e6767824fe678e7c28f4a540",
+    "scripts/sgs_engine/events.py": "5243b73e3ec7b0db4e68885acb9dc8ebe743d9ef326f0164fa53ea9e91bf77f7",
+    "scripts/sgs_engine/actions.py": "4310963d42eaa9a65c55ba53693dd2930aa5ccc097a1b20c95bcfabc13d2efbc",
+    "scripts/sgs_engine/rng.py": "9427f8bb1a3c2746bb0b86b77d2d030141c66e5b7be69d546fbfaad3dfa0ef43",
+    "scripts/sgs_engine/replay.py": "27cd09a98e9ea09d03a6de3542d13abc94341fde4d33a5fdc5e8bdc5497580b1",
+    "scripts/sgs_engine/engine.py": "b8f9f46381d245dbddcebab9dab8977f61af52a32be34579705531483e74d4de",
+    "knowledge/三国杀牌堆数据.csv": "ad643e13ca7fad0905e0efaaf04bf4dff09fad1fd81e1503dab1a83dc67dd4fd"
+  }
+}
