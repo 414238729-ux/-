@@ -1,15 +1,25 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "generated_on": "2026-08-01",
   "git": {
     "available": true,
     "branch": "main",
     "baseline_commit": "858d6ced315dfa3df78636528c720c0117fdf3de",
+    "baseline_metadata_commit": "5eac686",
+    "milestone_a_commit": "455685d6eaa1c297e9ec48a0cfaeb803b81f3406",
     "repository_local_identity": {
       "name": "Codex Development",
       "email": "codex-local@example.invalid"
     },
-    "historical_note": "CP-01至CP-04的原始哈希检查点继续保留；从该基线后优先使用Git提交"
+    "historical_note": "CP-01至CP-04的原始哈希检查点已收入Git基线；里程碑A另有独立代码提交"
+  },
+  "feature_status": {
+    "authoritative_core_foundation": true,
+    "minimal_duel_vertical_slice": true,
+    "reexecution_replay_supported": true,
+    "authoritative_full_game_core": false,
+    "formal_duel_no_skill_ready": false,
+    "formal_run_ready": false
   },
   "stage_status": {
     "1_source_and_callchain_audit": "passed",
@@ -40,15 +50,27 @@
     },
     {
       "id": "CP-04-CORE-FOUNDATION",
-      "status": "in_progress",
-      "evidence": "scripts/sgs_engine",
-      "unmet_gate": "尚无从开局到胜负的无技能完整对局与规则重执行回放"
+      "status": "passed",
+      "evidence": "scripts/sgs_engine；基线提交858d6ced315dfa3df78636528c720c0117fdf3de"
+    },
+    {
+      "id": "CP-04A-TEST-ONLY-DUEL-VERTICAL-SLICE",
+      "status": "passed",
+      "commit": "455685d6eaa1c297e9ec48a0cfaeb803b81f3406",
+      "evidence": "scripts/sgs_engine/duel.py、scripts/sgs_engine/duel_replay.py、scripts/sgs_dev_runner.py及对应测试",
+      "scope": "test_only；24张杀/闪/桃牌堆；双无技能角色；不构成正式160张单挑"
+    },
+    {
+      "id": "CP-04B-FORMAL-160-CARD-NO-SKILL-DUEL",
+      "status": "blocked",
+      "evidence": "docs/ENGINE_STATUS.md与docs/IMPLEMENTATION_MATRIX.md",
+      "unmet_gate": "正式单挑规则范围及边界未闭合；38种牌尚无生产适配器；AuthoritativeCoreSession.run_game仍失败关闭"
     }
   ],
   "final_verification": {
     "pytest": {
       "command": ".\\.venv\\Scripts\\python.exe -m pytest -q",
-      "passed": 1094,
+      "passed": 1135,
       "failed": 0,
       "skipped": 0
     },
@@ -58,9 +80,30 @@
     },
     "source_integrity": {
       "command": ".\\.venv\\Scripts\\python.exe -m scripts.sgs_source_integrity_audit . --fail-on-defect --pretty",
-      "scanned_python_files": 99,
+      "scanned_python_files": 105,
       "defect_count": 0,
-      "audit_item_count": 43
+      "audit_item_count": 53
+    },
+    "test_only_duel_status": {
+      "test_only": true,
+      "formal_result": false,
+      "deck_card_count": 24,
+      "implemented_card_names": [
+        "杀",
+        "闪",
+        "桃"
+      ],
+      "seed_matrix": {
+        "seed_start": 0,
+        "seed_end": 49,
+        "game_count": 50,
+        "completed": 50,
+        "safety_cap_failures": 0,
+        "max_steps": 187
+      },
+      "unsupported_rules": 0,
+      "approximation_count": 0,
+      "reexecution_replay_supported": true
     },
     "formal_status": {
       "formal_run_ready": false,
@@ -72,6 +115,15 @@
       "run_exit_code": 2,
       "result_file_created": false
     },
+    "milestone_b_blockers": [
+      "Knowledge未闭合正式160张无技能单挑的适用范围、同将许可与首轮摸牌修正",
+      "AuthoritativeCoreSession.run_game仍明确抛出UnsupportedRuleError",
+      "38种正式卡牌定义尚未建立生产规则适配器",
+      "正式卡牌处理区与完整生命周期规则尚未全部接入",
+      "五谷丰登部分牌去向、无懈可击事件映射等边界尚未闭合",
+      "观看、亮牌及判定彻底耗尽仍是分析约定，不能用于approximation_count=0的正式入口",
+      "尚无正式160张单挑100-seed验收运行器"
+    ],
     "not_configured": [
       "mypy",
       "ruff",
@@ -82,19 +134,22 @@
   "sha256": {
     "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "23b56a0edf0c85657b332100538013de16be4d71ea6a8214ac862a6708105af6",
     "docs/LEGACY_RESULTS_INVALID.md": "267d51329b65b4435ed770b9fe90a0d53148d17cc9b0dae3e6d3406b06c0c0cc",
-    "docs/ENGINE_STATUS.md": "3fcc72bff9773cf9e24a9515e4663ae0524f50ba272acb7db2c2bdf8827200be",
-    "docs/IMPLEMENTATION_MATRIX.md": "e2fbdbba59fabd69bc6226b96ab158008c655217ffeee7e30716fb1ba5b8af0c",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "705a1a1b939cf91afda285cae6549266aab8b3f111518bae75b0e76a556c8bd8",
+    "docs/ENGINE_STATUS.md": "c61a48b413a2b1fe74089ca80d306b270d6c1f8c7d9961c83d42f057be703dbd",
+    "docs/IMPLEMENTATION_MATRIX.md": "effb07c79b9f6d7afccd9f4d95122d01c8e21a97a1de4662881a584547fc6f9e",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "52610ee2c093d64cf95f34807105d6172a92e829cde7f08f8d0ecc75ca264ddb",
     "scripts/sgs_engine_gate.py": "acdfa735982f234462080de4b4137e1b1f3cfcadb709b7258ffb73c4aeb2e925",
     "scripts/sgs_formal_runner.py": "840aa483354a80bcb8867c197352d34f32f985a92cb2287dc2593812c0260be2",
     "scripts/sgs_source_integrity_audit.py": "d6efbe6428e6b24627f0974bed6b045ed2192cd97ae87776a89562808a0c1c72",
-    "scripts/sgs_engine/__init__.py": "1fc748ed0b9951766dd291e5a6c1df34b78d0418fea9985cc6086e724ff8c64b",
+    "scripts/sgs_engine/__init__.py": "0ffa5730ca86ae21737000d74bfb24a2d9135759c3824d20cd7ab80356ab540a",
     "scripts/sgs_engine/model.py": "8f7ffba33068978cfb319176dd466c93dd9a8814e6767824fe678e7c28f4a540",
     "scripts/sgs_engine/events.py": "5243b73e3ec7b0db4e68885acb9dc8ebe743d9ef326f0164fa53ea9e91bf77f7",
-    "scripts/sgs_engine/actions.py": "4310963d42eaa9a65c55ba53693dd2930aa5ccc097a1b20c95bcfabc13d2efbc",
-    "scripts/sgs_engine/rng.py": "9427f8bb1a3c2746bb0b86b77d2d030141c66e5b7be69d546fbfaad3dfa0ef43",
+    "scripts/sgs_engine/actions.py": "92c76be32afa52a79f76e8439ec95a1dff04e1df2592966b461681ae7b346fff",
+    "scripts/sgs_engine/rng.py": "3cb67017556535802c2b323e8002217961955ffee7ff161de85d804d86d5ead6",
     "scripts/sgs_engine/replay.py": "27cd09a98e9ea09d03a6de3542d13abc94341fde4d33a5fdc5e8bdc5497580b1",
     "scripts/sgs_engine/engine.py": "b8f9f46381d245dbddcebab9dab8977f61af52a32be34579705531483e74d4de",
+    "scripts/sgs_engine/duel.py": "4e2b716e68346948b8b50fc09bac2c0160f30f43410b09aa7e6f7caaebf01218",
+    "scripts/sgs_engine/duel_replay.py": "99661777d171928d6c8c0a12ff45da7bf4b051a2f26a21ae78424068a1fc1231",
+    "scripts/sgs_dev_runner.py": "6f88baa78fc9c22106188defda7190cd2a4412325db46f3964d217fd0e61c755",
     "knowledge/三国杀牌堆数据.csv": "ad643e13ca7fad0905e0efaaf04bf4dff09fad1fd81e1503dab1a83dc67dd4fd"
   }
 }
