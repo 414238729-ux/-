@@ -22,11 +22,13 @@ from scripts.sgs_engine.actions import (
     validate_action,
 )
 from scripts.sgs_engine.events import DamageEvent, EventType
-from scripts.sgs_engine.model import DISCARD_PILE, PROCESSING_ZONE, GameState, PlayerState, ZoneRef
+from scripts.sgs_engine.model import DISCARD_PILE, DRAW_PILE, PROCESSING_ZONE, GameState, PlayerState, ZoneRef
 from scripts.sgs_engine.production_batch import (
     PRODUCTION_BASIC_CARDS_MODE,
     BatchActionIdController,
+    ProductionBatchDeckExhaustedError,
     ProductionBatchError,
+    ProductionBatchSafetyLimitError,
     ScriptedBatchController,
     ProductionBasicCardBatch,
     ProductionBatchFinishedError,
@@ -930,3 +932,114 @@ def test_finished_game_rejects_further_actions() -> None:
     assert len(game.events) == event_count
     assert game.state.revision == revision
     assert game.winner_id == result.winner_id
+
+# ---------------------------------------------------------------------
+# 36 批次失败分支：非法上限、安全上限、牌堆耗尽与重洗
+# ---------------------------------------------------------------------
+
+def test_run_rejects_invalid_max_steps_parameters() -> None:
+    game = ProductionBasicCardBatch(seed=1)
+    for bad_value in (0, -1, True, 1.5, "500"):
+        with pytest.raises(ValueError, match="安全动作上限"):
+            game.run(max_steps=bad_value)
+    assert game.step_count == 0
+
+
+def test_run_safety_limit_fails_closed_without_forced_win() -> None:
+    game = ProductionBasicCardBatch(seed=1)
+    with pytest.raises(ProductionBatchSafetyLimitError):
+        game.run(max_steps=1)
+    assert game.step_count == 1
+    assert game.winner_id is None
+    assert not game.is_finished
+    assert not any(
+        event.event_type is EventType.VICTORY for event in game.events
+    )
+    game.state.assert_card_conservation()
+
+
+def test_deck_exhaustion_fails_closed_through_public_turn_flow() -> None:
+    game = ProductionBasicCardBatch(seed=1, initial_hand_count=79)
+    script = ScriptedBatchController(
+        [{"operation": "end_play_phase"}, {"operation": "end_turn"}]
+    )
+    game.step(script)
+    with pytest.raises(ProductionBatchDeckExhaustedError):
+        game.step(script)
+    assert game.step_count == 1
+    assert not game.is_finished
+    assert game.winner_id is None
+    assert len(game.state.card_ids_in(DRAW_PILE)) + len(
+        game.state.card_ids_in(DISCARD_PILE)
+    ) < 2
+    zone_total = sum(
+        len(game.state.card_ids_in(zone)) for zone in game.state.zone_order
+    )
+    assert zone_total == len(game.state.cards) == 160
+    game.state.assert_card_conservation()
+
+
+def test_draw_reshuffle_continues_current_draw_with_auditable_events() -> None:
+    game = ProductionBasicCardBatch(seed=1, initial_hand_count=79)
+    script = ScriptedBatchController(
+        [
+            {"operation": "use_wine_buff"},
+            {"operation": "use_slash"},
+            {"operation": "pass_slash_response"},
+            {"operation": "end_play_phase"},
+            {"operation": "end_turn"},
+        ]
+    )
+    for _ in range(5):
+        game.step(script)
+
+    assert game.runtime.turn_number == 2
+    assert game.current_player_id == "p2"
+    assert game.phase is ProductionPhase.PLAY
+
+    reshuffles = [
+        event
+        for event in game.events
+        if event.payload.get("reason") == "reshuffle"
+    ]
+    assert len(reshuffles) == 2
+    assert all(event.event_type is EventType.CARD_MOVED for event in reshuffles)
+    assert all(
+        event.payload["source"]["kind"] == "discard_pile"
+        and event.payload["destination"]["kind"] == "draw_pile"
+        for event in reshuffles
+    )
+    reshuffled_ids = {event.card_instance_id for event in reshuffles}
+    assert len(reshuffled_ids) == 2
+
+    draws_after_reshuffle = [
+        event
+        for event in game.events
+        if event.event_type is EventType.CARD_MOVED
+        and event.payload.get("reason") == "draw_phase"
+        and event.card_instance_id in reshuffled_ids
+    ]
+    assert len(draws_after_reshuffle) == 2
+    assert all(
+        event.payload["destination"]["kind"] == "hand"
+        and event.payload["destination"]["owner_id"] == "p2"
+        for event in draws_after_reshuffle
+    )
+    for reshuffle in reshuffles:
+        draw = next(
+            event
+            for event in draws_after_reshuffle
+            if event.card_instance_id == reshuffle.card_instance_id
+        )
+        assert reshuffle.sequence < draw.sequence
+
+    p2_hand = set(game.state.card_ids_in(ZoneRef.hand("p2")))
+    assert reshuffled_ids <= p2_hand
+    assert len(game.state.card_ids_in(DRAW_PILE)) == 0
+    assert len(game.state.card_ids_in(DISCARD_PILE)) == 0
+    assert any(call.method == "shuffle" for call in game.rng_calls)
+    zone_total = sum(
+        len(game.state.card_ids_in(zone)) for zone in game.state.zone_order
+    )
+    assert zone_total == len(game.state.cards) == 160
+    game.state.assert_card_conservation()

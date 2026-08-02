@@ -99,7 +99,7 @@ approximation_count=0
 
 ### 2.5 正式基本牌批次：六种基本牌生产适配器
 
-正式基本牌批次在正式160张牌堆上新增六种基本牌的生产适配器，全部规则以正式 Knowledge（`knowledge/三国杀卡牌效果.md`、`knowledge/三国杀卡牌使用方式.md`、`knowledge/三国杀牌堆数据.csv`）为唯一来源：
+正式基本牌批次在正式160张牌堆上新增六种基本牌的生产适配器，全部规则以正式 Knowledge（`knowledge/三国杀卡牌效果.md`、`knowledge/三国杀卡牌使用方式.csv`、`knowledge/三国杀牌堆数据.csv`）为唯一来源：
 
 - 模式 ID：`production_basic_cards_batch`；正式牌堆总实体牌数仍为160，实例ID唯一；
 - 六种基本牌真实读取 CSV 的实体数量：普通【杀】30、火【杀】5、雷【杀】9、【闪】24、【桃】12、【酒】5，合计85张；

@@ -3,7 +3,8 @@
   "generated_on": "2026-08-02",
   "git": {
     "available": true,
-    "branch": "grok-eval-basic-cards",
+    "implementation_branch": "grok-eval-basic-cards",
+    "implementation_branch_note": "检查点记录时的实现分支，不代表当前运行分支",
     "baseline_commit": "858d6ced315dfa3df78636528c720c0117fdf3de",
     "baseline_metadata_commit": "5eac686",
     "milestone_a_commit": "455685d6eaa1c297e9ec48a0cfaeb803b81f3406",

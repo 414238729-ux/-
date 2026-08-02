@@ -185,6 +185,46 @@ def test_excludes_venv_and_pycache_and_never_modifies_sources(tmp_path: Path) ->
     assert formal.read_bytes() == before
 
 
+def test_excludes_pytest_temp_but_still_detects_real_defects(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        ".pytest-temp/run/test_fixture/bad_sample.py",
+        "chosen = expected\nassert chosen == expected\n",
+    )
+    _write(
+        tmp_path,
+        "scripts/real_defect.py",
+        "chosen = expected\nassert chosen == expected\n",
+    )
+    _write(
+        tmp_path,
+        "tests/real_legacy_fixture.py",
+        'fixture_path = "sgs_sim_engine_worker.py"\n',
+    )
+
+    report = scan_python_sources(tmp_path)
+
+    assert ".pytest-temp" not in " ".join(report.scanned_files)
+    assert report.scanned_files == (
+        "scripts/real_defect.py",
+        "tests/real_legacy_fixture.py",
+    )
+    defects = [
+        finding
+        for finding in report.findings
+        if finding.classification is FindingClassification.DEFECT
+    ]
+    assert len(defects) == 1
+    assert defects[0].path == "scripts/real_defect.py"
+    assert defects[0].kind is FindingKind.SELF_CONFIRMING_ASSERTION
+    assert any(
+        finding.path == "tests/real_legacy_fixture.py"
+        and finding.kind is FindingKind.LEGACY_PATH_REFERENCE
+        and finding.classification is FindingClassification.AUDIT_ITEM
+        for finding in report.findings
+    )
+
+
 def test_syntax_error_is_visible_and_does_not_abort_other_files(tmp_path: Path) -> None:
     _write(tmp_path, "a_broken.py", "def broken(:\n")
     _write(tmp_path, "b_valid.py", "value = 1\n")

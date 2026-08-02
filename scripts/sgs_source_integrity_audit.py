@@ -25,7 +25,9 @@ from typing import Iterable, Iterator, Sequence
 
 
 SCHEMA_VERSION = "1.0"
-_IGNORED_DIRECTORY_NAMES = frozenset({".venv", "__pycache__"})
+_IGNORED_DIRECTORY_NAMES = frozenset(
+    {".venv", "__pycache__", ".pytest-temp"}
+)
 
 # 分段拼接是为了避免扫描器审计自身时，把默认规则清单误判成路径引用。
 DEFAULT_LEGACY_FILENAMES = (
@@ -452,7 +454,7 @@ def scan_python_sources(
 ) -> SourceIntegrityAuditReport:
     """递归审计 ``root`` 内的 Python 文件并返回稳定报告。
 
-    ``.venv`` 和 ``__pycache__`` 目录始终排除。读取或解析失败会成为缺陷项，
+    ``.venv``、``__pycache__`` 和 ``.pytest-temp`` 目录始终排除。读取或解析失败会成为缺陷项，
     不会被吞掉，也不会触发任何源码写入。
     """
 
