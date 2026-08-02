@@ -31,7 +31,7 @@
 | `MILESTONE-B1-PRODUCTION-BASIC-CARDS` | 正式160张牌堆中六种基本牌（普通【杀】、火【杀】、雷【杀】、【闪】、【桃】、【酒】）的生产适配器批次 | 六种基本牌共85张实体牌接入生产注册表；37项批次验收测试、严格规则重执行与篡改失败关闭；完整测试 `1172 passed` | 本批次提交（feat: implement production basic-card adapter batch） |
 | `MILESTONE-B2-SINGLE-TARGET-TRICK-SLICE` | 正式160张牌堆最小普通锦囊垂直切片：【无中生有】（4张）与【无懈可击】（7张）接入生产适配器及普通锦囊无效响应基础设施 | 两种锦囊共11张实体牌接入生产注册表；无效响应窗口、连续【无懈可击】响应、放弃响应、被无效仍记已使用、牌区生命周期与严格规则重执行、篡改失败关闭均有验收测试；完整测试 `1197 passed` | 提交 `18fb9916796a34a60b62fd490529d80bd9eb75ef`（feat: implement production single-target trick slice） |
 | `MILESTONE-B2-ZONE-TARGET-TRICKS` | 正式160张牌堆目标区域选牌批次：【过河拆桥】（6张）与【顺手牵羊】（5张）接入生产适配器，及共用“目标区域选牌、隐藏手牌选择、实体牌移动”基础设施 | 两牌共11张实体牌接入生产注册表；目标区域选牌动作、公开区域实体候选、隐藏手牌HMAC-SHA256不透明句柄、直接弃置／直接获得事件、连续【无懈可击】响应、无合法区域牌结算、严格规则重执行与失败关闭均有验收测试；完整测试 `1252 passed`；隐藏句柄HMAC安全修复后完整测试 `1281 passed` | 提交 `2a73e5c3b3d17dab87bb13168db6e0e4e05a5130`（feat: implement production zone-target trick slice） |
-| `MILESTONE-B2-ZONE-TARGET-HANDLE-HMAC-FIX` | 目标区域选牌隐藏手牌句柄安全定点修复：裸SHA-256（可被160项公开预计算表还原，独立只读审计判 AUDIT_FAILED）改为会话级 `secrets.token_bytes(32)` 随机秘密的HMAC-SHA256句柄，绑定会话／窗口／目标／区域／手牌快照；权威回放以 `authoritative_private` 保存会话标识与密钥，`player_visible` 导出不含秘密或私有映射 | 新增29项安全回归测试（160项枚举攻击匹配数为0、伪造／过期／跨会话／跨窗口／跨目标／跨区域／手牌变化失败关闭、回放私有材料删除或篡改失败关闭）；完整测试 `1281 passed`，失败0、跳过0 | 代码与测试已完成，等待用户在外部PowerShell提交 |
+| `MILESTONE-B2-ZONE-TARGET-HANDLE-HMAC-FIX` | 目标区域选牌隐藏手牌句柄安全定点修复：裸SHA-256（可被160项公开预计算表还原，独立只读审计判 AUDIT_FAILED）改为会话级 `secrets.token_bytes(32)` 随机秘密的HMAC-SHA256句柄，绑定会话／窗口／目标／区域／手牌快照；权威回放以 `authoritative_private` 保存会话标识与密钥，`player_visible` 导出不含秘密或私有映射 | 新增29项安全回归测试（160项枚举攻击匹配数为0、伪造／过期／跨会话／跨窗口／跨目标／跨区域／手牌变化失败关闭、回放私有材料删除或篡改失败关闭）；完整测试 `1281 passed`，失败0、跳过0 | 已由用户在外部PowerShell提交（提交哈希 1b5e125ad0baa129458b42043aac08b18dcfad96，fix: secure hidden hand choice handles） |
 
 ## 2. 阶段总览
 

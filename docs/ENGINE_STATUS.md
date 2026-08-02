@@ -287,6 +287,7 @@ AI合法动作枚举完整
 - 阶段4 foundation：`858d6ce`；
 - 审计基线文档：`5eac686`；
 - 里程碑 A 测试专用单挑纵向切片：`455685d6eaa1c297e9ec48a0cfaeb803b81f3406`。
+- 隐藏手牌句柄HMAC安全修复：`1b5e125ad0baa129458b42043aac08b18dcfad96`（fix: secure hidden hand choice handles）。
 
 里程碑 A 的提交只证明隔离三牌切片，不证明正式160张牌无技能单挑完成。
 
