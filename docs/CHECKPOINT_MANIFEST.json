@@ -12,7 +12,7 @@
       "email": "codex-local@example.invalid"
     },
     "historical_note": "CP-01至CP-04的原始哈希检查点已收入Git基线；里程碑A另有独立代码提交",
-    "milestone_b1_commit": "本批次提交（待提交后回填）"
+    "milestone_b1_commit": "bffe5516322452b90b7b150d7c4ae35c5b690a0b"
   },
   "feature_status": {
     "authoritative_core_foundation": true,
