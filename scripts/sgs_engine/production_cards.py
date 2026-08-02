@@ -1,0 +1,680 @@
+# -*- coding: utf-8 -*-
+"""正式160张牌堆中六种基本牌的生产适配器与正式卡牌注册表。
+
+这是里程碑B"正式160张牌无技能单挑"的第一批生产卡牌批次：普通【杀】、
+火【杀】、雷【杀】、【闪】、【桃】、【酒】。六种牌的全部规则都以正式
+Knowledge（《三国杀卡牌效果》《三国杀卡牌使用方式》《三国杀牌堆数据》）
+为唯一来源，并从正式牌堆CSV的真实行读取实体牌元数据，不建立与CSV脱节
+的假牌表。
+
+本模块不包含任何概率近似、固定收益替代或fallback结算。未实现卡牌在
+:class:`FormalCardRegistry` 中明确标记，任何结算入口遇到它们都会失败
+关闭。本批次不是完整整局引擎：它只提供六种基本牌的生产规则，正式整局
+仍需在全部38种卡牌接完后另行验收，本批次不得被解释为里程碑B完成。
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Mapping, Sequence
+
+from ..deck_data import DeckRecord, load_deck_csv
+from .actions import (
+    ActionContext,
+    ActionType,
+    InvalidActionError,
+    LegalAction,
+    RuleAdapter,
+    UnsupportedRuleError,
+)
+from .engine import DEFAULT_DECK_PATH, AuthoritativeCoreSession
+from .model import GameState, ZoneRef
+
+if TYPE_CHECKING:
+    from .production_batch import ProductionBasicCardBatch
+
+
+PRODUCTION_BASIC_CARD_KEYS: tuple[str, ...] = (
+    "sgs_basic_sha",
+    "sgs_basic_huosha",
+    "sgs_basic_leisha",
+    "sgs_basic_shan",
+    "sgs_basic_tao",
+    "sgs_basic_jiu",
+)
+
+CARD_NAMES_BY_KEY: Mapping[str, str] = {
+    "sgs_basic_sha": "杀",
+    "sgs_basic_huosha": "火杀",
+    "sgs_basic_leisha": "雷杀",
+    "sgs_basic_shan": "闪",
+    "sgs_basic_tao": "桃",
+    "sgs_basic_jiu": "酒",
+}
+
+SLASH_CARD_KEYS: tuple[str, ...] = (
+    "sgs_basic_sha",
+    "sgs_basic_huosha",
+    "sgs_basic_leisha",
+)
+
+DEFAULT_ATTACK_RANGE = 1
+
+
+def attack_range_of(state: GameState, player_id: str) -> int:
+    """返回角色的当前攻击范围；本批次未实现武器，装备栏必须为空。
+
+    武器是后续批次的范围；在武器实现前，若武器栏被占用则失败关闭，
+    绝不返回近似攻击范围。
+    """
+
+    weapon_ids = state.card_ids_in(ZoneRef.equipment(player_id, "weapon"))
+    if weapon_ids:
+        raise UnsupportedRuleError(
+            "武器尚未实现，不能计算装备武器后的攻击范围；本批次失败关闭"
+        )
+    return DEFAULT_ATTACK_RANGE
+
+
+def actual_distance(state: GameState, source_id: str, target_id: str) -> int:
+    """按当前座次的环形座次计算实际距离。
+
+    距离 = 顺时针与逆时针座位步数中的较小值。本批次未实现坐骑，距离
+    修正不适用；若将来接入坐骑，必须在本函数同步补充。
+    """
+
+    players = state.players_by_id
+    if source_id not in players or target_id not in players:
+        raise UnsupportedRuleError(f"计算距离时找不到角色{source_id!r}或{target_id!r}")
+    if source_id == target_id:
+        return 0
+    seats = sorted(player.seat for player in state.players)
+    source_seat = players[source_id].seat
+    target_seat = players[target_id].seat
+    span = abs(source_seat - target_seat)
+    ring_size = len(seats)
+    return min(span, ring_size - span)
+
+
+def is_valid_slash_target(state: GameState, attacker_id: str, target_id: str) -> bool:
+    """真实执行【杀】系列的目标与距离合法性检查。"""
+
+    if attacker_id == target_id:
+        return False
+    return actual_distance(state, attacker_id, target_id) <= attack_range_of(
+        state, attacker_id
+    )
+
+
+class BasicCardAdapter(RuleAdapter):
+    """六种基本牌生产适配器的公共基类。
+
+    适配器自身是无状态规则对象；所有可变运行状态都存放在生产批处理
+    会话的运行时中，由会话统一提交。适配器被正式注册表按 ``card_key``
+    映射，并被会话注册表绑定到 ``(模式, "card:<key>")`` 以便动作防伪
+    指纹覆盖每一张生产卡牌的版本。
+    """
+
+    card_key: str
+    card_name: str
+
+    def __init__(self, session: "ProductionBasicCardBatch | None" = None) -> None:
+        self._session = session
+
+    @property
+    def adapter_version(self) -> str:
+        return f"production-basic-cards.{self.card_key}.v1"
+
+    def audit_state(self) -> Mapping[str, object]:
+        return {}
+
+    @property
+    def implemented(self) -> bool:
+        return True
+
+    @property
+    def tested(self) -> bool:
+        return True
+
+    @property
+    def production_adapter(self) -> bool:
+        return True
+
+    def rule_spec(self) -> dict[str, object]:
+        raise NotImplementedError
+
+    def _require_session(self) -> "ProductionBasicCardBatch":
+        if self._session is None:
+            raise UnsupportedRuleError(
+                f"卡牌适配器{self.card_key}尚未绑定生产批处理会话，不能单独结算"
+            )
+        return self._session
+
+
+class SlashAdapter(BasicCardAdapter):
+    """普通【杀】／火【杀】／雷【杀】的生产适配器。
+
+    三种【杀】的区别落实到伤害属性事件：``damage_type`` 分别记录为
+    "无属性"、"火属性"、"雷属性"，而不是只体现在牌名上。
+    """
+
+    def __init__(
+        self,
+        card_key: str,
+        damage_nature: str,
+        session: "ProductionBasicCardBatch | None" = None,
+    ) -> None:
+        super().__init__(session)
+        if card_key not in SLASH_CARD_KEYS:
+            raise ValueError(f"{card_key}不是本批次的【杀】卡牌键")
+        self.card_key = card_key
+        self.card_name = CARD_NAMES_BY_KEY[card_key]
+        self._damage_nature = damage_nature
+
+    @property
+    def damage_nature(self) -> str:
+        return self._damage_nature
+
+    def rule_spec(self) -> dict[str, object]:
+        return {
+            "card_key": self.card_key,
+            "card_name": self.card_name,
+            "use_timing": "own_play_phase",
+            "use_limit": "one_slash_per_play_phase",
+            "target_count": 1,
+            "target_filter": "one_character_in_attack_range_excluding_self",
+            "distance_rule": "actual_distance(actor,target)<=attack_range(actor)",
+            "response_requirements": [
+                {
+                    "response_card_key": "sgs_basic_shan",
+                    "action": "use",
+                    "event_type": "card_used",
+                }
+            ],
+            "nullification_eligible": False,
+            "movement_lifecycle": "hand->processing->discard",
+            "effect_resolution": "dodge_cancels_effect;otherwise_damage_event",
+            "damage_nature": self._damage_nature,
+            "completion_event": (
+                "card_effect_cancelled|damage(+dying_rescue) then card_moved_to_discard"
+            ),
+            "adapter_version": self.adapter_version,
+            "implemented": self.implemented,
+            "tested": self.tested,
+            "production_adapter": self.production_adapter,
+        }
+
+    def enumerate_legal_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        session = self._require_session()
+        if session.phase.value != "play":
+            return ()
+        if session.runtime.slash_used:
+            return ()
+        actions: list[LegalAction] = []
+        for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
+            card = state.cards_by_id[instance_id]
+            if card.card_key != self.card_key:
+                continue
+            target = session.opponent_of(context.actor_id)
+            if not is_valid_slash_target(state, context.actor_id, target):
+                continue
+            actions.append(
+                LegalAction(
+                    action_type=ActionType.USE_CARD,
+                    actor_id=context.actor_id,
+                    card_instance_id=instance_id,
+                    target_ids=(target,),
+                    payload={
+                        "operation": "use_slash",
+                        "card_key": self.card_key,
+                        "card_name": self.card_name,
+                    },
+                )
+            )
+        return tuple(actions)
+
+    def apply_action(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        session = self._require_session()
+        if session.phase.value == "play":
+            return session.apply_slash_use(state, context, action, self)
+        if (
+            session.phase.value == "slash_response"
+            and action.action_type is ActionType.PASS
+        ):
+            return session.apply_slash_damage(state, context, action, self)
+        raise InvalidActionError(
+            f"{self.card_name}生产适配器不能处理当前阶段的动作"
+        )
+
+
+class DodgeAdapter(BasicCardAdapter):
+    """【闪】的生产适配器。
+
+    本批次只实现响应三种【杀】的正式生产路径：动作类型是"使用一张
+    【闪】"，生成 ``card_used`` 且不生成普通 ``card_played``。响应
+    【万箭齐发】的"打出【闪】"不属于本批次，遇到该响应上下文时失败
+    关闭，不提前伪造结算。
+    """
+
+    def __init__(self, session: "ProductionBasicCardBatch | None" = None) -> None:
+        super().__init__(session)
+        self.card_key = "sgs_basic_shan"
+        self.card_name = "闪"
+
+    def rule_spec(self) -> dict[str, object]:
+        return {
+            "card_key": self.card_key,
+            "card_name": self.card_name,
+            "use_timing": "slash_response_window",
+            "use_limit": "no_independent_quota;requires_real_entity_and_legal_window",
+            "target_count": 0,
+            "target_filter": "self",
+            "distance_rule": "not_applicable",
+            "response_requirements": [
+                {
+                    "response_to": "杀|火杀|雷杀",
+                    "action": "use",
+                    "event_type": "card_used",
+                }
+            ],
+            "nullification_eligible": False,
+            "movement_lifecycle": "hand->processing->discard",
+            "effect_resolution": "respond_to_slash:card_used_and_cancel_slash",
+            "damage_nature": "不适用",
+            "completion_event": (
+                "card_used(no card_played) + card_effect_cancelled(source slash)"
+            ),
+            "adapter_version": self.adapter_version,
+            "implemented": self.implemented,
+            "tested": self.tested,
+            "production_adapter": self.production_adapter,
+        }
+
+    def enumerate_legal_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        session = self._require_session()
+        if session.phase.value != "slash_response":
+            return ()
+        actions: list[LegalAction] = []
+        for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
+            card = state.cards_by_id[instance_id]
+            if card.card_key != self.card_key:
+                continue
+            actions.append(
+                LegalAction(
+                    action_type=ActionType.USE_CARD,
+                    actor_id=context.actor_id,
+                    card_instance_id=instance_id,
+                    payload={
+                        "operation": "play_dodge",
+                        "card_key": self.card_key,
+                        "card_name": self.card_name,
+                    },
+                )
+            )
+        return tuple(actions)
+
+    def apply_action(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        session = self._require_session()
+        if session.phase.value == "slash_response":
+            return session.apply_dodge(state, context, action, self)
+        raise InvalidActionError("【闪】生产适配器只能响应【杀】响应窗口")
+
+
+class PeachAdapter(BasicCardAdapter):
+    """【桃】的生产适配器。
+
+    三种用途分别结算：出牌阶段受伤自用、濒死自救、救援其他濒死角色。
+    三种用途均无基础次数限制且不共享额度；回复不能超过体力上限。
+    """
+
+    def __init__(self, session: "ProductionBasicCardBatch | None" = None) -> None:
+        super().__init__(session)
+        self.card_key = "sgs_basic_tao"
+        self.card_name = "桃"
+
+    def rule_spec(self) -> dict[str, object]:
+        return {
+            "card_key": self.card_key,
+            "card_name": self.card_name,
+            "use_timing": "own_play_phase|legal_dying_rescue_window",
+            "use_limit": "no_basic_quota;context_checked_each_time",
+            "target_count": 1,
+            "target_filter": "wounded_self(play)|dying_character(rescue)",
+            "distance_rule": "not_applicable",
+            "response_requirements": [],
+            "nullification_eligible": False,
+            "movement_lifecycle": "hand->processing->discard",
+            "effect_resolution": "heal_1_capped_at_max_hp;rescue_stops_at_hp>=1",
+            "damage_nature": "不适用",
+            "completion_event": "card_used + heal; card_moved_to_discard",
+            "adapter_version": self.adapter_version,
+            "implemented": self.implemented,
+            "tested": self.tested,
+            "production_adapter": self.production_adapter,
+        }
+
+    def enumerate_legal_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        session = self._require_session()
+        actions: list[LegalAction] = []
+        if session.phase.value == "play":
+            player = state.players_by_id[context.actor_id]
+            if player.hp >= player.max_hp:
+                return ()
+            for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
+                card = state.cards_by_id[instance_id]
+                if card.card_key != self.card_key:
+                    continue
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.USE_CARD,
+                        actor_id=context.actor_id,
+                        card_instance_id=instance_id,
+                        target_ids=(context.actor_id,),
+                        payload={
+                            "operation": "heal_self",
+                            "card_key": self.card_key,
+                            "card_name": self.card_name,
+                        },
+                    )
+                )
+            return tuple(actions)
+        if session.phase.value == "dying_rescue":
+            dying_id = session.runtime.pending_dying_id
+            assert dying_id is not None
+            for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
+                card = state.cards_by_id[instance_id]
+                if card.card_key != self.card_key:
+                    continue
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.USE_CARD,
+                        actor_id=context.actor_id,
+                        card_instance_id=instance_id,
+                        target_ids=(dying_id,),
+                        payload={
+                            "operation": "rescue_with_peach",
+                            "card_key": self.card_key,
+                            "card_name": self.card_name,
+                        },
+                    )
+                )
+            return tuple(actions)
+        return ()
+
+    def apply_action(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        session = self._require_session()
+        if session.phase.value == "play":
+            return session.apply_peach_self_heal(state, context, action, self)
+        if session.phase.value == "dying_rescue":
+            return session.apply_peach_rescue(state, context, action, self)
+        raise InvalidActionError("【桃】生产适配器不能处理当前阶段的动作")
+
+
+class WineAdapter(BasicCardAdapter):
+    """【酒】的生产适配器。
+
+    两种用途分开记录：出牌阶段强化下一张【杀】（每个独立出牌阶段限
+    一次）与濒死自救回复1点体力（无基础次数限制）。两种用途不共享
+    额度；濒死自救不建立加伤状态，出牌阶段强化不直接回复体力。
+    """
+
+    def __init__(self, session: "ProductionBasicCardBatch | None" = None) -> None:
+        super().__init__(session)
+        self.card_key = "sgs_basic_jiu"
+        self.card_name = "酒"
+
+    def rule_spec(self) -> dict[str, object]:
+        return {
+            "card_key": self.card_key,
+            "card_name": self.card_name,
+            "use_timing": "own_play_phase|dying_self_rescue",
+            "use_limit": (
+                "slash_buff_once_per_own_play_phase;dying_self_rescue_unlimited"
+            ),
+            "target_count": 1,
+            "target_filter": "self",
+            "distance_rule": "not_applicable",
+            "response_requirements": [],
+            "nullification_eligible": False,
+            "movement_lifecycle": "hand->processing->discard",
+            "effect_resolution": (
+                "buff_next_qualifying_slash_damage+1|dying_self_heal_1"
+            ),
+            "damage_nature": "由受其加成的杀决定；濒死自救不造成伤害",
+            "completion_event": (
+                "card_used(purpose split);buff_consumed_by_next_slash_or_cleared_at_turn_end"
+            ),
+            "adapter_version": self.adapter_version,
+            "implemented": self.implemented,
+            "tested": self.tested,
+            "production_adapter": self.production_adapter,
+        }
+
+    def enumerate_legal_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        session = self._require_session()
+        actions: list[LegalAction] = []
+        if session.phase.value == "play":
+            if session.runtime.wine_buff_used_this_play_phase:
+                return ()
+            for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
+                card = state.cards_by_id[instance_id]
+                if card.card_key != self.card_key:
+                    continue
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.USE_CARD,
+                        actor_id=context.actor_id,
+                        card_instance_id=instance_id,
+                        target_ids=(context.actor_id,),
+                        payload={
+                            "operation": "use_wine_buff",
+                            "card_key": self.card_key,
+                            "card_name": self.card_name,
+                        },
+                    )
+                )
+            return tuple(actions)
+        if session.phase.value == "dying_rescue":
+            dying_id = session.runtime.pending_dying_id
+            assert dying_id is not None
+            if context.actor_id != dying_id:
+                return ()
+            for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
+                card = state.cards_by_id[instance_id]
+                if card.card_key != self.card_key:
+                    continue
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.USE_CARD,
+                        actor_id=context.actor_id,
+                        card_instance_id=instance_id,
+                        target_ids=(context.actor_id,),
+                        payload={
+                            "operation": "rescue_with_wine",
+                            "card_key": self.card_key,
+                            "card_name": self.card_name,
+                        },
+                    )
+                )
+            return tuple(actions)
+        return ()
+
+    def apply_action(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        session = self._require_session()
+        if session.phase.value == "play":
+            return session.apply_wine_buff(state, context, action, self)
+        if session.phase.value == "dying_rescue":
+            return session.apply_wine_self_rescue(state, context, action, self)
+        raise InvalidActionError("【酒】生产适配器不能处理当前阶段的动作")
+
+
+def _default_adapters() -> dict[str, BasicCardAdapter]:
+    return {
+        "sgs_basic_sha": SlashAdapter("sgs_basic_sha", "无属性"),
+        "sgs_basic_huosha": SlashAdapter("sgs_basic_huosha", "火属性"),
+        "sgs_basic_leisha": SlashAdapter("sgs_basic_leisha", "雷属性"),
+        "sgs_basic_shan": DodgeAdapter(),
+        "sgs_basic_tao": PeachAdapter(),
+        "sgs_basic_jiu": WineAdapter(),
+    }
+
+
+class FormalCardRegistry:
+    """由正式160张牌堆CSV建立的正式卡牌注册表。
+
+    注册表保证：总实体牌数仍为160、每张牌实例ID唯一、六种基本牌映射到
+    生产适配器、其他卡牌明确标记为未实现。未实现卡牌不能通过fallback
+    继续结算；测试专用适配器永远不会进入本注册表。
+    """
+
+    def __init__(
+        self,
+        records: Sequence[DeckRecord],
+        *,
+        adapters: Mapping[str, BasicCardAdapter] | None = None,
+        session: "ProductionBasicCardBatch | None" = None,
+    ) -> None:
+        prepared = tuple(records)
+        if not prepared:
+            raise UnsupportedRuleError("正式卡牌注册表不能为空")
+        if len(prepared) != 160:
+            raise UnsupportedRuleError(
+                f"正式卡牌注册表必须恰好包含160张实体牌；当前为{len(prepared)}"
+            )
+        instance_ids = [record.instance_id for record in prepared]
+        if any(not instance_id.strip() for instance_id in instance_ids):
+            raise UnsupportedRuleError("正式卡牌注册表的实例ID不能为空")
+        if len(instance_ids) != len(set(instance_ids)):
+            raise UnsupportedRuleError("正式卡牌注册表的实例ID必须全局唯一")
+        self._records = prepared
+        self._by_key: dict[str, tuple[DeckRecord, ...]] = {}
+        for record in prepared:
+            self._by_key.setdefault(record.card_key, []).append(record)
+        self._by_key = {
+            key: tuple(items) for key, items in self._by_key.items()
+        }
+        selected = dict(adapters) if adapters is not None else _default_adapters()
+        for key, adapter in selected.items():
+            if not isinstance(adapter, BasicCardAdapter):
+                raise TypeError(f"卡牌{key}的生产适配器必须是BasicCardAdapter")
+            if adapter.card_key != key:
+                raise UnsupportedRuleError(
+                    f"适配器声明键{adapter.card_key}与注册键{key}不一致"
+                )
+            adapter._session = session
+        self._adapters = dict(selected)
+        self._implemented_instances = frozenset(
+            record.instance_id
+            for record in prepared
+            if record.card_key in self._adapters
+        )
+        self._unimplemented_keys = tuple(
+            sorted(set(self._by_key).difference(self._adapters))
+        )
+
+    @classmethod
+    def from_formal_csv(
+        cls,
+        deck_path: str | Path = DEFAULT_DECK_PATH,
+        *,
+        session: "ProductionBasicCardBatch | None" = None,
+        adapters: Mapping[str, BasicCardAdapter] | None = None,
+    ) -> "FormalCardRegistry":
+        records, audit = load_deck_csv(Path(deck_path), expected_total=160)
+        AuthoritativeCoreSession._validate_formal_deck(records, audit)
+        return cls(records, adapters=adapters, session=session)
+
+    @property
+    def records(self) -> tuple[DeckRecord, ...]:
+        return self._records
+
+    @property
+    def card_count(self) -> int:
+        return len(self._records)
+
+    @property
+    def instance_ids(self) -> tuple[str, ...]:
+        return tuple(record.instance_id for record in self._records)
+
+    @property
+    def implemented_card_keys(self) -> tuple[str, ...]:
+        return tuple(sorted(self._adapters))
+
+    @property
+    def unimplemented_card_keys(self) -> tuple[str, ...]:
+        return self._unimplemented_keys
+
+    @property
+    def adapters(self) -> Mapping[str, BasicCardAdapter]:
+        return MappingProxyType(dict(self._adapters))
+
+    def instances_of(self, card_key: str) -> tuple[DeckRecord, ...]:
+        try:
+            return self._by_key[card_key]
+        except KeyError as exc:
+            raise UnsupportedRuleError(f"正式牌堆不存在卡牌{card_key!r}") from exc
+
+    def adapter_for(self, card_key: str) -> BasicCardAdapter:
+        try:
+            return self._adapters[card_key]
+        except KeyError as exc:
+            raise UnsupportedRuleError(
+                f"卡牌{card_key!r}尚未实现生产适配器；禁止fallback或近似结算"
+            ) from exc
+
+    def rule_spec_for(self, card_key: str) -> dict[str, object]:
+        return self.adapter_for(card_key).rule_spec()
+
+    def is_implemented_instance(self, instance_id: str) -> bool:
+        return instance_id in self._implemented_instances
+
+    def ensure_all_basic_cards_implemented(self) -> bool:
+        missing = set(PRODUCTION_BASIC_CARD_KEYS).difference(self._adapters)
+        if missing:
+            raise UnsupportedRuleError(
+                "六种基本牌必须全部接入生产适配器；缺少："
+                + "、".join(sorted(missing))
+            )
+        return True
+
+    def assert_no_unimplemented_fallback(self) -> None:
+        if self._unimplemented_keys:
+            raise UnsupportedRuleError(
+                "正式整局仍被未实现卡牌阻塞："
+                + "、".join(self._unimplemented_keys)
+                + "；不得跳过这些卡牌继续整局"
+            )
+
+
+__all__ = [
+    "CARD_NAMES_BY_KEY",
+    "DEFAULT_ATTACK_RANGE",
+    "PRODUCTION_BASIC_CARD_KEYS",
+    "SLASH_CARD_KEYS",
+    "BasicCardAdapter",
+    "DodgeAdapter",
+    "FormalCardRegistry",
+    "PeachAdapter",
+    "SlashAdapter",
+    "WineAdapter",
+    "actual_distance",
+    "attack_range_of",
+    "is_valid_slash_target",
+]

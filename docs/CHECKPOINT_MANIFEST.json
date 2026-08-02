@@ -1,9 +1,9 @@
 {
   "schema_version": "1.1",
-  "generated_on": "2026-08-01",
+  "generated_on": "2026-08-02",
   "git": {
     "available": true,
-    "branch": "main",
+    "branch": "grok-eval-basic-cards",
     "baseline_commit": "858d6ced315dfa3df78636528c720c0117fdf3de",
     "baseline_metadata_commit": "5eac686",
     "milestone_a_commit": "455685d6eaa1c297e9ec48a0cfaeb803b81f3406",
@@ -11,7 +11,8 @@
       "name": "Codex Development",
       "email": "codex-local@example.invalid"
     },
-    "historical_note": "CP-01至CP-04的原始哈希检查点已收入Git基线；里程碑A另有独立代码提交"
+    "historical_note": "CP-01至CP-04的原始哈希检查点已收入Git基线；里程碑A另有独立代码提交",
+    "milestone_b1_commit": "本批次提交（待提交后回填）"
   },
   "feature_status": {
     "authoritative_core_foundation": true,
@@ -19,7 +20,8 @@
     "reexecution_replay_supported": true,
     "authoritative_full_game_core": false,
     "formal_duel_no_skill_ready": false,
-    "formal_run_ready": false
+    "formal_run_ready": false,
+    "production_basic_cards_batch": true
   },
   "stage_status": {
     "1_source_and_callchain_audit": "passed",
@@ -65,22 +67,28 @@
       "status": "blocked",
       "evidence": "docs/ENGINE_STATUS.md与docs/IMPLEMENTATION_MATRIX.md",
       "unmet_gate": "正式单挑规则范围及边界未闭合；38种牌尚无生产适配器；AuthoritativeCoreSession.run_game仍失败关闭"
+    },
+    {
+      "id": "CP-04C-PRODUCTION-BASIC-CARD-BATCH",
+      "status": "passed",
+      "evidence": "scripts/sgs_engine/production_cards.py、scripts/sgs_engine/production_batch.py、scripts/sgs_engine/production_replay.py、tests/test_sgs_production_basic_cards.py；正式160张牌堆六种基本牌生产批次",
+      "scope": "formal；普通【杀】30、火【杀】5、雷【杀】9、【闪】24、【桃】12、【酒】5共85张实体牌接入生产注册表与权威核心；其余32种正式卡牌保持未实现并失败关闭；不构成完整正式整局"
     }
   ],
   "final_verification": {
     "pytest": {
-      "command": ".\\.venv\\Scripts\\python.exe -m pytest -q",
-      "passed": 1135,
+      "command": ".\\venv\\Scripts\\python.exe -m pytest -q",
+      "passed": 1172,
       "failed": 0,
       "skipped": 0
     },
     "compileall": {
-      "command": ".\\.venv\\Scripts\\python.exe -m compileall -q scripts tests",
+      "command": ".\\venv\\Scripts\\python.exe -m compileall -q scripts tests",
       "passed": true
     },
     "source_integrity": {
-      "command": ".\\.venv\\Scripts\\python.exe -m scripts.sgs_source_integrity_audit . --fail-on-defect --pretty",
-      "scanned_python_files": 105,
+      "command": ".\\venv\\Scripts\\python.exe -m scripts.sgs_source_integrity_audit . --fail-on-defect --pretty",
+      "scanned_python_files": 109,
       "defect_count": 0,
       "audit_item_count": 53
     },
@@ -116,10 +124,10 @@
       "result_file_created": false
     },
     "milestone_b_blockers": [
-      "Knowledge未闭合正式160张无技能单挑的适用范围、同将许可与首轮摸牌修正",
+      "Knowledge未闭合正式160张无技能单挑的适用范围、同将许可与首轮摸牌修正（基本牌批次已锁定双人、先手摸2约定）",
       "AuthoritativeCoreSession.run_game仍明确抛出UnsupportedRuleError",
-      "38种正式卡牌定义尚未建立生产规则适配器",
-      "正式卡牌处理区与完整生命周期规则尚未全部接入",
+      "38种正式卡牌定义中六种基本牌已建立生产规则适配器；其余32种（普通／延时锦囊、武器、防具、坐骑）仍未建立",
+      "正式卡牌处理区与完整生命周期规则仅六种基本牌接入，其余卡牌与整局重洗调度未接入",
       "五谷丰登部分牌去向、无懈可击事件映射等边界尚未闭合",
       "观看、亮牌及判定彻底耗尽仍是分析约定，不能用于approximation_count=0的正式入口",
       "尚无正式160张单挑100-seed验收运行器"
@@ -129,27 +137,56 @@
       "ruff",
       "frontend_tests",
       "ci"
-    ]
+    ],
+    "production_basic_cards_batch": {
+      "implemented": true,
+      "tested": true,
+      "card_types": 6,
+      "entity_counts_by_key": {
+        "sgs_basic_sha": 30,
+        "sgs_basic_huosha": 5,
+        "sgs_basic_leisha": 9,
+        "sgs_basic_shan": 24,
+        "sgs_basic_tao": 12,
+        "sgs_basic_jiu": 5
+      },
+      "total_implemented_entities": 85,
+      "total_deck_entities": 160,
+      "remaining_unimplemented_card_keys": 32,
+      "test_only_adapters_in_production_registry": false,
+      "fallback_for_unimplemented": false,
+      "unsupported_rules": 1,
+      "approximation_count": 0,
+      "reexecution_replay_supported": true,
+      "reference_path_seed": 5,
+      "formal_result": false,
+      "milestone_b_complete": false
+    }
   },
   "sha256": {
-    "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "23b56a0edf0c85657b332100538013de16be4d71ea6a8214ac862a6708105af6",
-    "docs/LEGACY_RESULTS_INVALID.md": "267d51329b65b4435ed770b9fe90a0d53148d17cc9b0dae3e6d3406b06c0c0cc",
-    "docs/ENGINE_STATUS.md": "c61a48b413a2b1fe74089ca80d306b270d6c1f8c7d9961c83d42f057be703dbd",
-    "docs/IMPLEMENTATION_MATRIX.md": "effb07c79b9f6d7afccd9f4d95122d01c8e21a97a1de4662881a584547fc6f9e",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "52610ee2c093d64cf95f34807105d6172a92e829cde7f08f8d0ecc75ca264ddb",
-    "scripts/sgs_engine_gate.py": "acdfa735982f234462080de4b4137e1b1f3cfcadb709b7258ffb73c4aeb2e925",
-    "scripts/sgs_formal_runner.py": "840aa483354a80bcb8867c197352d34f32f985a92cb2287dc2593812c0260be2",
-    "scripts/sgs_source_integrity_audit.py": "d6efbe6428e6b24627f0974bed6b045ed2192cd97ae87776a89562808a0c1c72",
-    "scripts/sgs_engine/__init__.py": "0ffa5730ca86ae21737000d74bfb24a2d9135759c3824d20cd7ab80356ab540a",
-    "scripts/sgs_engine/model.py": "8f7ffba33068978cfb319176dd466c93dd9a8814e6767824fe678e7c28f4a540",
-    "scripts/sgs_engine/events.py": "5243b73e3ec7b0db4e68885acb9dc8ebe743d9ef326f0164fa53ea9e91bf77f7",
-    "scripts/sgs_engine/actions.py": "92c76be32afa52a79f76e8439ec95a1dff04e1df2592966b461681ae7b346fff",
-    "scripts/sgs_engine/rng.py": "3cb67017556535802c2b323e8002217961955ffee7ff161de85d804d86d5ead6",
-    "scripts/sgs_engine/replay.py": "27cd09a98e9ea09d03a6de3542d13abc94341fde4d33a5fdc5e8bdc5497580b1",
-    "scripts/sgs_engine/engine.py": "b8f9f46381d245dbddcebab9dab8977f61af52a32be34579705531483e74d4de",
-    "scripts/sgs_engine/duel.py": "4e2b716e68346948b8b50fc09bac2c0160f30f43410b09aa7e6f7caaebf01218",
-    "scripts/sgs_engine/duel_replay.py": "99661777d171928d6c8c0a12ff45da7bf4b051a2f26a21ae78424068a1fc1231",
-    "scripts/sgs_dev_runner.py": "6f88baa78fc9c22106188defda7190cd2a4412325db46f3964d217fd0e61c755",
-    "knowledge/三国杀牌堆数据.csv": "ad643e13ca7fad0905e0efaaf04bf4dff09fad1fd81e1503dab1a83dc67dd4fd"
+    "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "57093ee848831938eadc821070931b59f4420e04f6babe8ac6f9285f78e8f4af",
+    "docs/LEGACY_RESULTS_INVALID.md": "49b4d882e2fdd12f5074a9a9d1aae4377a8ac2c6d334e0a852d81081dfdbb294",
+    "docs/ENGINE_STATUS.md": "67e6434a332aa9378939faab07d700051fe3932224f4e0fce44d95a804a25a50",
+    "docs/IMPLEMENTATION_MATRIX.md": "24454bd9626f06134fa706843a5791078e16b082fc0550abaae6c9bc6a79428f",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "e7628844a0232a8df4eb02dd83713aece8758fb1ad60cbaea33cce0823414d59",
+    "scripts/sgs_engine_gate.py": "c2f1384f0607588907f4721ec7be5edde1142afc89ed3d1b473fa627a631bc04",
+    "scripts/sgs_formal_runner.py": "d139ef9b172c8840245fd659cc570f462f3590febe622a48f7863446bb8a6e00",
+    "scripts/sgs_source_integrity_audit.py": "5ecd50bf903695724b19ef4f57f4072384b42f7fbf5a40a7cb2f4ea88f45bdfd",
+    "scripts/sgs_engine/__init__.py": "89ef833c12bca92aec1fff6c165c1d87217055c8bdaee8feb40c2078fb890c4a",
+    "scripts/sgs_engine/model.py": "316d05db3d0cc053eae1f0cda569b631efb82d27a233b96eb81ddb548b8b7fbc",
+    "scripts/sgs_engine/events.py": "93d36619258cc2c8ec8e06cc3c2e08debe3fdb13a5c943dc1f6cf0743aaf7e3a",
+    "scripts/sgs_engine/actions.py": "c72a128e5786fb4028f96741152fd0b2cf4f05c901bb120b915244422245f030",
+    "scripts/sgs_engine/rng.py": "66257cc2d44c66a2749fbe3029a590e892447e90a422cace063a0e7f974b39a5",
+    "scripts/sgs_engine/replay.py": "d1da6bcf007c2f47dc56847ac81bb1a284da488b7863077c9f69a71209eef5a2",
+    "scripts/sgs_engine/engine.py": "ae0e3341b416d6e2a96e18a297d479e1fb59c70af301339770648352a1b2665e",
+    "scripts/sgs_engine/duel.py": "1bd1a274606764195aaf300b8cb0c9a7a0eb14396cb18e4ac00949b5d908124d",
+    "scripts/sgs_engine/duel_replay.py": "5c0806db8063bfd5b68a51ce4bf5ad4a50f77ce04837a2b58bde817a1cc4266b",
+    "scripts/sgs_dev_runner.py": "bcedeeca6d74fcd5715d5b9797c32bb9d09b70ee0928b3aba94d0ff81415329c",
+    "knowledge/三国杀牌堆数据.csv": "ad643e13ca7fad0905e0efaaf04bf4dff09fad1fd81e1503dab1a83dc67dd4fd",
+    "hash_note": "本表为当前工作树文件原始字节的SHA-256（UTF-8无BOM）；仅作状态记录，不参与门禁校验",
+    "scripts/sgs_engine/production_batch.py": "2c2b788e3f66e51694ae75063f1b6335a73b182cb1f7aea46c9f2623bdda2cd5",
+    "scripts/sgs_engine/production_cards.py": "1cd467e9ee107c8b5602ad3319bd51c8903ca37a3078a78170650a73f6852bf6",
+    "scripts/sgs_engine/production_replay.py": "934e6546485e4d4fbdf306087ef3db7b3f15d11d01e80a740661313f8a2978e8",
+    "tests/test_sgs_production_basic_cards.py": "5a3e136e1322a456c237d4fe7243d47091a9704dce39b3b22b2b9b69300307db"
   }
 }

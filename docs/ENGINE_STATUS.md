@@ -1,7 +1,7 @@
 # 三国杀正式引擎状态
 
-> 更新日期：2026-08-01  
-> 状态：已有权威核心 foundation 和隔离的测试专用最小单挑纵向切片，但没有完整正式对局引擎；当前还包括正式 Knowledge 与轻量、可测试的规则／技能／策略组件库。
+> 更新日期：2026-08-02
+> 状态：已有权威核心 foundation、测试专用最小单挑纵向切片，以及正式160张牌堆上六种基本牌的生产适配器批次；但正式整局引擎仍未完成，正式入口继续失败关闭。
 > 本文是运行能力状态页，不得用测试总数或文档完整度替换完整引擎验收。
 
 ## 0. 机器可读状态摘要
@@ -10,12 +10,13 @@
 authoritative_core_foundation=true
 minimal_duel_vertical_slice=true
 reexecution_replay_supported=true
+production_basic_cards_batch=true
 authoritative_full_game_core=false
 formal_duel_no_skill_ready=false
 formal_run_ready=false
 ```
 
-上述三个 `true` 只描述 foundation 与 `test_only_duel_vertical_slice` 隔离范围，不表示正式160张牌无技能单挑已经完成。当前计数口径必须分开：
+`production_basic_cards_batch=true` 只描述正式160张牌堆中六种基本牌（普通【杀】、火【杀】、雷【杀】、【闪】、【桃】、【酒】）已接入生产适配器批次，不表示正式160张牌无技能单挑完成；其余32种正式卡牌仍未实现，正式整局入口继续失败关闭。当前计数口径必须分开：
 
 ```text
 [test_only_duel_vertical_slice]
@@ -23,8 +24,15 @@ unsupported_rules=0
 approximation_count=0
 
 [formal]
-unsupported_rules=1  # 至少存在一个完整正式整局能力阻塞的哨兵，不是精确缺项数
+unsupported_rules=1  # 至少存在一个完整正式整局能力阻塞的哨兵，不是精确缺项数（38种正式卡牌中仍有32种未接生产适配器）
 approximation_count=0  # 正式入口拒绝执行，所以没有运行近似
+
+[production_basic_cards_batch]
+implemented=true
+tested=true
+card_types=6
+unsupported_rules=1  # 批次范围外（锦囊、装备等32种正式卡牌）仍失败关闭
+approximation_count=0
 ```
 
 ## 1. 当前可执行结论
@@ -40,7 +48,7 @@ approximation_count=0  # 正式入口拒绝执行，所以没有运行近似
 | 当前是否存在正式多进程胜率入口 | 否 |
 | 外部 `sgs_sim_engine_worker.py` 是否是正式引擎 | 否；它位于 Downloads，未被仓库导入，是独立近似器 |
 | 外部 `sgs_ai_audit_20260729.py` 是否调用真实 AI | 否；它使用本文件内微场景与自证式 `chosen = expected` |
-| 当前组件测试是否通过 | 是；本轮最终完整测试为 `1135 passed`，失败0 |
+| 当前组件测试是否通过 | 是；本轮最终完整测试为 `1172 passed`，失败0 |
 
 ## 2. 当前正式资产
 
@@ -87,6 +95,33 @@ approximation_count=0  # 正式入口拒绝执行，所以没有运行近似
 - 在这个明确声明的三牌切片范围内，`unsupported_rules=0`、`approximation_count=0`。
 
 这不是160张正式牌堆，也不是正式无技能单挑。不得将本节结果用于正式胜率、正式模式覆盖或 `formal_run_ready=true`。
+
+
+### 2.5 正式基本牌批次：六种基本牌生产适配器
+
+正式基本牌批次在正式160张牌堆上新增六种基本牌的生产适配器，全部规则以正式 Knowledge（`knowledge/三国杀卡牌效果.md`、`knowledge/三国杀卡牌使用方式.md`、`knowledge/三国杀牌堆数据.csv`）为唯一来源：
+
+- 模式 ID：`production_basic_cards_batch`；正式牌堆总实体牌数仍为160，实例ID唯一；
+- 六种基本牌真实读取 CSV 的实体数量：普通【杀】30、火【杀】5、雷【杀】9、【闪】24、【桃】12、【酒】5，合计85张；
+- 所有动作都经过 `enumerate_legal_actions → validate_action → apply_action`，动作绑定状态指纹与适配器版本，伪造／过期动作失败关闭；
+- 三种【杀】的差异落实到伤害属性事件（无属性／火属性／雷属性），各自建立真实响应窗口；
+- 【闪】响应三种【杀】生成 `card_used` 且不生成普通 `card_played`；【万箭齐发】的“打出【闪】”不属于本批次，遇到时失败关闭；
+- 【桃】实现出牌阶段受伤自用、濒死自救与救援他人三种用途，回复不超过体力上限，救援在体力恢复至至少1点后停止；
+- 【酒】区分出牌阶段强化下一张【杀】（每出牌阶段限一次、不立即回复体力、状态被下一张【杀】消费或在回合结束时清除）与濒死自救（仅对自己、回复1点、无基础次数限制、不共享强化额度）；
+- 未实现卡牌（普通／延时锦囊、武器、防具、坐骑共32种）在注册表层明确标记为未实现，任何结算入口遇到它们都失败关闭，不得 fallback 或跳过继续整局；
+- 含【杀】【闪】【桃】【酒】的固定生产路径（seed=5 参考局）支持严格规则重执行回放；篡改动作、事件或随机消费均失败关闭；
+- 游戏结束后任何后续动作均被拒绝。
+
+| 卡牌 | card_key | 实体数量 | implemented | tested | production_adapter | replay_verified | remaining_interactions |
+|---|---|---|---|---|---|---|---|
+| 普通【杀】 | `sgs_basic_sha` | 30 | true | true | true | true | 武器转化／技能转化【杀】、南蛮入侵等“打出【杀】”响应、铁索传导等后续批次 |
+| 火【杀】 | `sgs_basic_huosha` | 5 | true | true | true | true | 藤甲火属性增伤、铁索连环传导、技能转化等后续批次 |
+| 雷【杀】 | `sgs_basic_leisha` | 9 | true | true | true | true | 铁索连环传导、闪电／技能联动等后续批次 |
+| 【闪】 | `sgs_basic_shan` | 24 | true | true | true | true | 响应【万箭齐发】（打出）、八卦阵判定、技能转化等后续批次 |
+| 【桃】 | `sgs_basic_tao` | 12 | true | true | true | true | 桃园结义联动、技能无效／转化等后续批次 |
+| 【酒】 | `sgs_basic_jiu` | 5 | true | true | true | true | 技能令效果无效、酒杀与铁索联动等后续批次 |
+
+本批次是里程碑 B（正式160张牌无技能单挑）的第一步，不是里程碑 B 完成：正式整局仍被其余32种正式卡牌阻塞。
 
 ## 3. foundation 已有接口与完整对局缺口
 
@@ -199,11 +234,11 @@ AI合法动作枚举完整
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
-# 1135 passed；失败0
+# 1172 passed；失败0
 .\.venv\Scripts\python.exe -m compileall -q scripts tests
 # 通过
 .\.venv\Scripts\python.exe -m scripts.sgs_source_integrity_audit . --fail-on-defect --pretty
-# 扫描99个Python文件，defect_count=0；43项均为显式门禁字段或测试证据等audit_item
+# 扫描109个Python文件，defect_count=0；53项均为显式门禁字段或测试证据等audit_item
 ```
 
 当前开发依赖仅声明 pytest 与 pandas；未发现 mypy、ruff、前端 `package.json` 或 CI 配置。因此类型检查、lint、前端测试和 CI 是“未配置”，不是“已通过”。
@@ -222,9 +257,9 @@ AI合法动作枚举完整
 
 下一版本最小目标不是网页或全武将，而是里程碑 B“正式160张牌无技能单挑”。当前明确阻塞为：
 
-1. 正式 Knowledge 尚未把当前160张牌堆纳入单挑适用范围；同名武将、先手首轮摸牌修正等单挑配置仍须由资料或显式配置确定；
+1. 正式 Knowledge 尚未把当前160张牌堆纳入单挑适用范围；同名武将、先手首轮摸牌修正等单挑配置仍须由资料或显式配置确定（六种基本牌批次已锁定双人、先手摸2的确定性开局约定）；
 2. `AuthoritativeCoreSession.run_game` 仍是失败关闭占位，尚未接入正式对局循环；
-3. 38 个正式 `card_key` 尚无全部接入权威 `GameState` 的生产适配器；
+3. 38 个正式 `card_key` 中已有六种基本牌接入生产适配器批次，其余32种（普通／延时锦囊、武器、防具、坐骑）仍未接入权威 `GameState` 的生产适配器；
 4. 普通使用牌、响应牌、判定牌和死亡后牌区清理等完整牌生命周期仍有资料或统一实现缺口；
 5. 【五谷丰登】未被选取亮出牌的最终去向、【无懈可击】的精确 `card_used/card_played` 事件语义，以及非摸牌操作彻底耗尽后的处理仍存在歧义或分析约定；
 6. 里程碑 B 要求的正式100-seed 门槛尚未执行；测试切片的50-seed 结果不能替代它。

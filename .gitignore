@@ -19,3 +19,5 @@ output/
 *.local
 .DS_Store
 Thumbs.db
+
+.pytest-temp/
