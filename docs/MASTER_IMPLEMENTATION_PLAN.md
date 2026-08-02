@@ -30,7 +30,8 @@
 | `MILESTONE-A-DUEL-VERTICAL-SLICE` | `test_only_duel_vertical_slice` 无技能单挑最小闭环及严格规则重执行 | 50 个 seed 全部自然结束；最大 187 动作；完整测试 `1135 passed` | `455685d6eaa1c297e9ec48a0cfaeb803b81f3406` |
 | `MILESTONE-B1-PRODUCTION-BASIC-CARDS` | 正式160张牌堆中六种基本牌（普通【杀】、火【杀】、雷【杀】、【闪】、【桃】、【酒】）的生产适配器批次 | 六种基本牌共85张实体牌接入生产注册表；37项批次验收测试、严格规则重执行与篡改失败关闭；完整测试 `1172 passed` | 本批次提交（feat: implement production basic-card adapter batch） |
 | `MILESTONE-B2-SINGLE-TARGET-TRICK-SLICE` | 正式160张牌堆最小普通锦囊垂直切片：【无中生有】（4张）与【无懈可击】（7张）接入生产适配器及普通锦囊无效响应基础设施 | 两种锦囊共11张实体牌接入生产注册表；无效响应窗口、连续【无懈可击】响应、放弃响应、被无效仍记已使用、牌区生命周期与严格规则重执行、篡改失败关闭均有验收测试；完整测试 `1197 passed` | 提交 `18fb9916796a34a60b62fd490529d80bd9eb75ef`（feat: implement production single-target trick slice） |
-| `MILESTONE-B2-ZONE-TARGET-TRICKS` | 正式160张牌堆目标区域选牌批次：【过河拆桥】（6张）与【顺手牵羊】（5张）接入生产适配器，及共用“目标区域选牌、隐藏手牌选择、实体牌移动”基础设施 | 两牌共11张实体牌接入生产注册表；目标区域选牌动作、公开区域实体候选、隐藏手牌不透明句柄、直接弃置／直接获得事件、连续【无懈可击】响应、无合法区域牌结算、严格规则重执行与失败关闭均有验收测试；完整测试 `1252 passed` | 提交 `2a73e5c3b3d17dab87bb13168db6e0e4e05a5130`（feat: implement production zone-target trick slice） |
+| `MILESTONE-B2-ZONE-TARGET-TRICKS` | 正式160张牌堆目标区域选牌批次：【过河拆桥】（6张）与【顺手牵羊】（5张）接入生产适配器，及共用“目标区域选牌、隐藏手牌选择、实体牌移动”基础设施 | 两牌共11张实体牌接入生产注册表；目标区域选牌动作、公开区域实体候选、隐藏手牌HMAC-SHA256不透明句柄、直接弃置／直接获得事件、连续【无懈可击】响应、无合法区域牌结算、严格规则重执行与失败关闭均有验收测试；完整测试 `1252 passed`；隐藏句柄HMAC安全修复后完整测试 `1281 passed` | 提交 `2a73e5c3b3d17dab87bb13168db6e0e4e05a5130`（feat: implement production zone-target trick slice） |
+| `MILESTONE-B2-ZONE-TARGET-HANDLE-HMAC-FIX` | 目标区域选牌隐藏手牌句柄安全定点修复：裸SHA-256（可被160项公开预计算表还原，独立只读审计判 AUDIT_FAILED）改为会话级 `secrets.token_bytes(32)` 随机秘密的HMAC-SHA256句柄，绑定会话／窗口／目标／区域／手牌快照；权威回放以 `authoritative_private` 保存会话标识与密钥，`player_visible` 导出不含秘密或私有映射 | 新增29项安全回归测试（160项枚举攻击匹配数为0、伪造／过期／跨会话／跨窗口／跨目标／跨区域／手牌变化失败关闭、回放私有材料删除或篡改失败关闭）；完整测试 `1281 passed`，失败0、跳过0 | 代码与测试已完成，等待用户在外部PowerShell提交 |
 
 ## 2. 阶段总览
 
@@ -116,11 +117,11 @@
 
 - 从正式160张牌堆 CSV 真实读取【过河拆桥】6张（♣3、♣4、♥Q、♠3、♠4、♠Q）与【顺手牵羊】5张（♦3、♦4、♠3、♠4、♠J）并绑定生产适配器，实例ID唯一、总实体牌数仍为160；
 - 两张牌继续复用【无中生有】／【无懈可击】已审计通过的普通锦囊使用窗口与逐张【无懈可击】响应链；被无效后不打开选牌窗口、不移动目标牌、原锦囊仍记已使用并进入弃牌堆；
-- 目标区域选牌动作经过 `enumerate_legal_actions → validate_action → apply_action`；公开区域（装备区、判定区）以明确实体候选展示，隐藏手牌只暴露绑定选择窗口的SHA-256不透明句柄，决策输入不泄露牌名、花色、点数或实体ID；过期／伪造句柄、区域、实体与状态哈希一律失败关闭；
+- 目标区域选牌动作经过 `enumerate_legal_actions → validate_action → apply_action`；公开区域（装备区、判定区）以明确实体候选展示，隐藏手牌只暴露绑定“会话＋选择窗口＋目标＋区域＋当前手牌快照”的HMAC-SHA256不透明句柄（会话级 `secrets.token_bytes(32)` 随机秘密，输出128位；公开窗口ID、正式牌堆160个实体ID、正式CSV牌面与公开seed均不足以重建句柄；原裸SHA-256设计已被独立只读审计判定可被160项枚举攻击还原并定点修复），决策输入不泄露牌名、花色、点数、实体ID、会话秘密或私有映射；过期、伪造、跨会话、跨窗口、跨目标、跨区域、手牌变化后的句柄与状态哈希不符一律失败关闭；
 - 【过河拆桥】把目标区域牌直接置入弃牌堆（不发生先获得再弃置）；【顺手牵羊】把目标区域牌直接从原区域移入使用者手牌；两者均记录原区域、原所有者、新所有者与来源锦囊；
 - 【顺手牵羊】距离条件调用正式 `actual_distance` 接口，坐骑修正未实现时失败关闭；【过河拆桥】不继承距离限制；
 - 结算时目标已无合法区域牌时不凭空选牌或移动，按“无合法区域牌”原因完成结算；
-- 新增50项生产路径验收测试；完整 pytest 为 `1252 passed`；`production_zone_target_trick_batch=true`，`authoritative_full_game_core=false`、`formal_run_ready=false`、`formal_duel_no_skill_ready=false`。
+- 新增50项生产路径验收测试；隐藏句柄HMAC安全修复另新增29项安全回归测试（160项枚举攻击匹配数为0）；完整 pytest 为 `1281 passed`；`production_zone_target_trick_batch=true`，`hidden_handle_hmac_security_fix=true`，`authoritative_full_game_core=false`、`formal_run_ready=false`、`formal_duel_no_skill_ready=false`。
 
 阶段 4 仍不得标记为“通过”：里程碑 B 的正式 160 张牌无技能单挑尚未实现。六种基本牌生产批次（里程碑 B1）与两张普通锦囊批次（里程碑 B2）只是步骤，当前阻塞不是缺少测试闭环，而是必须先锁定正式单挑的规则适用范围，并把正式牌堆实际包含的 38 种卡牌逐一接入同一权威状态、事件、响应和动作路径；目前仍有28种（含8种普通锦囊、3种延时锦囊、17种装备）未接入。不得用测试小牌堆、概率替代或跳过未实现卡牌来伪造里程碑 B。
 
@@ -214,7 +215,7 @@ approximation_count > 0
 3. 后续新增类型检查、lint、前端测试或 CI 后，将真实命令补入本文件；
 4. 不把 `chosen = expected; assert chosen == expected` 或未调用真实程序路径的测试计入验收；
 5. 失败、跳过和未运行必须分别报告；
-6. 修改前基线 `947 passed in 3.39s` 只证明当时组件测试通过；Git 基线建立后为 `1094 passed`；里程碑 A 验收为 `1135 passed`；正式基本牌批次验收为 `1172 passed`；最小普通锦囊垂直切片验收为 `1197 passed`；目标区域选牌批次验收为 `1252 passed`。这些结果证明对应范围的实现与回归测试，不把测试专用垂直切片或基本牌批次扩大解释为正式160张牌完整引擎。
+6. 修改前基线 `947 passed in 3.39s` 只证明当时组件测试通过；Git 基线建立后为 `1094 passed`；里程碑 A 验收为 `1135 passed`；正式基本牌批次验收为 `1172 passed`；最小普通锦囊垂直切片验收为 `1197 passed`；目标区域选牌批次验收为 `1252 passed`；隐藏句柄HMAC安全修复验收为 `1281 passed`（在1252基础上新增29项安全回归测试）。这些结果证明对应范围的实现与回归测试，不把测试专用垂直切片或基本牌批次扩大解释为正式160张牌完整引擎。
 
 ## 6. 下一验收目标
 
@@ -232,4 +233,4 @@ approximation_count > 0
 
 在此之前，网页、完整武将池和正式多进程胜率均保持“未开始”。
 
-里程碑 A 最终验收实际结果：完整 pytest 为 `1135 passed`；50 个 seed 全部自然结束，最大187个动作；规则重执行回放及篡改拒绝测试通过。正式基本牌批次最终验收实际结果：完整 pytest 为 `1172 passed`，compileall 通过，源码完整性审计 `defect_count=0`（扫描109个Python文件）。最小普通锦囊垂直切片最终验收实际结果：完整 pytest 为 `1197 passed`（新增20项均为生产路径测试，失败0、跳过0），compileall 通过，源码完整性审计 `defect_count=0`（扫描110个Python文件）。目标区域选牌批次最终验收实际结果：完整 pytest 为 `1252 passed`（新增50项均为生产路径测试，失败0、跳过0），compileall 通过，源码完整性审计 `defect_count=0`（扫描111个Python文件）。阶段 4 总体和里程碑 B 仍未通过，`authoritative_full_game_core=false`、`formal_run_ready=false`、`formal_duel_no_skill_ready=false`。项目没有 mypy、ruff、前端工程或 CI 配置，因此类型检查、lint、前端测试和 CI 均为“未配置”，不得表述为通过。
+里程碑 A 最终验收实际结果：完整 pytest 为 `1135 passed`；50 个 seed 全部自然结束，最大187个动作；规则重执行回放及篡改拒绝测试通过。正式基本牌批次最终验收实际结果：完整 pytest 为 `1172 passed`，compileall 通过，源码完整性审计 `defect_count=0`（扫描109个Python文件）。最小普通锦囊垂直切片最终验收实际结果：完整 pytest 为 `1197 passed`（新增20项均为生产路径测试，失败0、跳过0），compileall 通过，源码完整性审计 `defect_count=0`（扫描110个Python文件）。目标区域选牌批次最终验收实际结果：完整 pytest 为 `1252 passed`（新增50项均为生产路径测试，失败0、跳过0），compileall 通过，源码完整性审计 `defect_count=0`（扫描111个Python文件）。隐藏句柄HMAC安全修复最终验收实际结果：完整 pytest 为 `1281 passed`（新增29项均为安全回归测试，失败0、跳过0），160项公开枚举攻击匹配数为0，回放私有材料删除或篡改均失败关闭，compileall 通过，源码完整性审计 `defect_count=0`。阶段 4 总体和里程碑 B 仍未通过，`authoritative_full_game_core=false`、`formal_run_ready=false`、`formal_duel_no_skill_ready=false`。项目没有 mypy、ruff、前端工程或 CI 配置，因此类型检查、lint、前端测试和 CI 均为“未配置”，不得表述为通过。

@@ -29,7 +29,8 @@
     "formal_run_ready": false,
     "production_basic_cards_batch": true,
     "production_single_target_trick_slice": true,
-    "production_zone_target_trick_batch": true
+    "production_zone_target_trick_batch": true,
+    "hidden_handle_hmac_security_fix": true
   },
   "stage_status": {
     "1_source_and_callchain_audit": "passed",
@@ -97,12 +98,20 @@
       "evidence": "scripts/sgs_engine/production_cards.py、scripts/sgs_engine/production_batch.py、tests/test_sgs_production_zone_target_tricks.py；正式160张牌堆目标区域选牌批次",
       "scope": "formal；【过河拆桥】6张与【顺手牵羊】5张接入生产注册表与权威核心；目标区域选牌动作、公开区域实体候选、隐藏手牌不透明句柄选择、直接弃置／直接获得实体牌、连续【无懈可击】响应、无合法区域牌结算、牌区生命周期、牌守恒与严格规则重执行；不构成普通锦囊批次或完整正式整局",
       "commit": "2a73e5c3b3d17dab87bb13168db6e0e4e05a5130"
+    },
+    {
+      "id": "CP-04F-HIDDEN-HANDLE-HMAC-FIX",
+      "status": "passed",
+      "commit": null,
+      "commit_note": "针对独立只读审计 AUDIT_FAILED 项（裸SHA-256句柄可被160项公开预计算表还原为目标手牌）的定点修复：改为会话级 secrets.token_bytes(32) 随机秘密的 HMAC-SHA256 句柄，绑定会话／窗口／目标／区域／手牌快照；权威回放以 authoritative_private 保存会话标识与密钥，player_visible 导出不含秘密或私有映射；新增29项安全回归测试。代码与测试已完成，等待用户在外部 PowerShell 提交。",
+      "evidence": "scripts/sgs_engine/production_batch.py、scripts/sgs_engine/production_replay.py、tests/test_sgs_production_hidden_handle_security.py",
+      "scope": "formal；仅修复隐藏手牌选择句柄信息泄露，不改变【过河拆桥】／【顺手牵羊】结算、正式距离、无懈链、三区域合法性、正式160张牌CSV与已实现卡牌数量"
     }
   ],
   "final_verification": {
     "pytest": {
       "command": ".\\venv\\Scripts\\python.exe -m pytest -q",
-      "passed": 1252,
+      "passed": 1281,
       "failed": 0,
       "skipped": 0
     },
@@ -112,7 +121,7 @@
     },
     "source_integrity": {
       "command": ".\\venv\\Scripts\\python.exe -m scripts.sgs_source_integrity_audit . --fail-on-defect --pretty",
-      "scanned_python_files": 111,
+      "scanned_python_files": 112,
       "defect_count": 0,
       "audit_item_count": 54
     },
@@ -232,15 +241,27 @@
       "milestone_b_complete": false,
       "authoritative_full_game_core": false,
       "formal_run_ready": false,
-      "formal_duel_no_skill_ready": false
+      "formal_duel_no_skill_ready": false,
+      "hidden_handle_mechanism": "hmac_sha256_session_secret",
+      "hidden_handle_security_fix": true
+    },
+    "hidden_handle_security_fix": {
+      "tests_added": 29,
+      "test_file": "tests/test_sgs_production_hidden_handle_security.py",
+      "enumeration_attack_matches": 0,
+      "original_zone_target_tests_kept": 50,
+      "private_material_field": "authoritative_private",
+      "player_visible_marker": "player_visible",
+      "secret_bits": 256,
+      "mechanism": "session_hmac_sha256"
     }
   },
   "sha256": {
     "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "57093ee848831938eadc821070931b59f4420e04f6babe8ac6f9285f78e8f4af",
     "docs/LEGACY_RESULTS_INVALID.md": "49b4d882e2fdd12f5074a9a9d1aae4377a8ac2c6d334e0a852d81081dfdbb294",
-    "docs/ENGINE_STATUS.md": "9a1f8f85dc874b65bbcb4be2b36e7922b24c7e182318898c6a1d87561f339d51",
-    "docs/IMPLEMENTATION_MATRIX.md": "5eed8f1e6bad924e09afb2136a42dc3e2147d208b14dbd071270fd2e14d0da2f",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "f947eccbc7a405b0aa3418109aa4955fc4c1abaf49bcf3f3d5f6a2b7100cf598",
+    "docs/ENGINE_STATUS.md": "77e5ffff5dad792cb95117a31d049c0b4348c1e6a2cdff00c2fd4c2fff9cb24b",
+    "docs/IMPLEMENTATION_MATRIX.md": "4fb529f4a87ead955c5f1572daed841ffbf14c3037cb0c4ddd4dfed8325a2509",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "6e74e098870a686ded2f7283e418d43ab42f34b4cf36d94d915ce33b76cb7114",
     "scripts/sgs_engine_gate.py": "c2f1384f0607588907f4721ec7be5edde1142afc89ed3d1b473fa627a631bc04",
     "scripts/sgs_formal_runner.py": "d139ef9b172c8840245fd659cc570f462f3590febe622a48f7863446bb8a6e00",
     "scripts/sgs_source_integrity_audit.py": "927ace5500cd11d066b7cef65213d087cc3fb5a19b3d7b5e4e0a22371c59836c",
@@ -256,11 +277,12 @@
     "scripts/sgs_dev_runner.py": "bcedeeca6d74fcd5715d5b9797c32bb9d09b70ee0928b3aba94d0ff81415329c",
     "knowledge/三国杀牌堆数据.csv": "ad643e13ca7fad0905e0efaaf04bf4dff09fad1fd81e1503dab1a83dc67dd4fd",
     "hash_note": "本表为当前工作树文件原始字节的SHA-256（UTF-8无BOM）；仅作状态记录，不参与门禁校验",
-    "scripts/sgs_engine/production_batch.py": "d7b1d42f77317725461f8ee197e734f1c0cbb74c72369f856be18b5bcc6c9977",
+    "scripts/sgs_engine/production_batch.py": "83b6ab883a10eae5e9609847859bf771e7f1cbdce918d6f2fb447b24ac3f050a",
     "scripts/sgs_engine/production_cards.py": "712d0f70d73784120d0baeb6ea7faa68c55d5d8fbf250883072d43499dae5595",
-    "scripts/sgs_engine/production_replay.py": "934e6546485e4d4fbdf306087ef3db7b3f15d11d01e80a740661313f8a2978e8",
+    "scripts/sgs_engine/production_replay.py": "ddafa7ddfb26cd097140d252ec3281cc5c4a04d77f5c271ac9827e78e5b45459",
     "tests/test_sgs_production_basic_cards.py": "8c50ada0e1650244f9775f0e87f3da9433e8b624d9ff503d33d3b8530014a285",
     "tests/test_sgs_production_single_target_tricks.py": "64a4eb2f8a9890581106a24bc4a1bbf95e07d04b79827bc03a8e21a99ff9358d",
-    "tests/test_sgs_production_zone_target_tricks.py": "bcde30fb85a684f2a490d68e25f098c0aa62125d5cf0621d143d6449e2364ce7"
+    "tests/test_sgs_production_zone_target_tricks.py": "bcde30fb85a684f2a490d68e25f098c0aa62125d5cf0621d143d6449e2364ce7",
+    "tests/test_sgs_production_hidden_handle_security.py": "ff372c1e5a3005a680e05eb8f34025f18962a0384caacc919574197e8dbb7f4f"
   }
 }

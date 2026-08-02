@@ -250,8 +250,18 @@ _ROOT_FIELDS = {
     "events",
     "event_hash_chain",
     "outcome",
+    "authoritative_private",
+    "player_visible",
     "record_sha256",
 }
+
+_PRIVATE_FIELDS = {
+    "schema",
+    "session_id",
+    "session_secret_hex",
+}
+
+AUTHORITATIVE_PRIVATE_SCHEMA = "sgs-authoritative-private-v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,6 +274,8 @@ class ProductionReexecutionReplay:
     events: tuple[Mapping[str, object], ...]
     event_hash_chain: tuple[str, ...]
     outcome: Mapping[str, object]
+    authoritative_private: Mapping[str, object] = field(default_factory=dict)
+    player_visible: bool = False
     record_sha256: str = field(default="")
 
     def __post_init__(self) -> None:
@@ -304,6 +316,33 @@ class ProductionReexecutionReplay:
         outcome = _plain(_require_mapping(self.outcome, "outcome"))
         _require_exact_fields(header, _HEADER_FIELDS, "header")
         _require_exact_fields(outcome, _OUTCOME_FIELDS, "outcome")
+        private = _plain(
+            _require_mapping(self.authoritative_private, "authoritative_private")
+        )
+        _require_exact_fields(private, _PRIVATE_FIELDS, "authoritative_private")
+        if private["schema"] != AUTHORITATIVE_PRIVATE_SCHEMA:
+            raise ProductionReplayFormatError(
+                "authoritative_private.schema 不是受支持的权威私有材料版本"
+            )
+        if not isinstance(private["session_id"], str) or not private["session_id"]:
+            raise ProductionReplayFormatError(
+                "authoritative_private.session_id 必须是非空字符串"
+            )
+        session_secret_hex = private["session_secret_hex"]
+        if not isinstance(session_secret_hex, str) or len(session_secret_hex) != 64:
+            raise ProductionReplayFormatError(
+                "authoritative_private.session_secret_hex 必须是64位十六进制（32字节）"
+            )
+        try:
+            bytes.fromhex(session_secret_hex)
+        except ValueError as exc:
+            raise ProductionReplayFormatError(
+                "authoritative_private.session_secret_hex 不是合法十六进制"
+            ) from exc
+        if self.player_visible is not False:
+            raise ProductionReplayFormatError(
+                "权威回放记录必须标记 player_visible=false"
+            )
         for index, decision in enumerate(decisions):
             _require_exact_fields(
                 decision, _DECISION_FIELDS, f"decisions[{index}]"
@@ -392,6 +431,8 @@ class ProductionReexecutionReplay:
             "events": _plain(self.events),
             "event_hash_chain": list(self.event_hash_chain),
             "outcome": _plain(self.outcome),
+            "authoritative_private": _plain(self.authoritative_private),
+            "player_visible": self.player_visible,
         }
 
     def verify_integrity(self) -> bool:
@@ -404,6 +445,20 @@ class ProductionReexecutionReplay:
     def to_dict(self) -> dict[str, object]:
         value = self._material_dict()
         value["record_sha256"] = self.record_sha256
+        return value
+
+    def player_visible_payload(self) -> dict[str, object]:
+        """返回不包含权威私有材料的玩家可见回放导出。
+
+        导出移除 ``authoritative_private``（会话秘密与句柄映射材料），标记
+        ``player_visible=true``，并附 ``player_visible_sha256`` 覆盖全部公开
+        材料；权威重执行拒绝此类导出（缺少私有材料直接失败关闭）。
+        """
+
+        value = self._material_dict()
+        del value["authoritative_private"]
+        value["player_visible"] = True
+        value["player_visible_sha256"] = sha256_value(value)
         return value
 
     @classmethod
@@ -436,6 +491,14 @@ class ProductionReexecutionReplay:
                 _require_sequence(mapping.get("event_hash_chain"), "event_hash_chain")
             ),
             outcome=_require_mapping(mapping.get("outcome"), "outcome"),
+            authoritative_private=_require_mapping(
+                mapping.get("authoritative_private"), "authoritative_private"
+            ),
+            player_visible=(
+                mapping["player_visible"]
+                if isinstance(mapping.get("player_visible"), bool)
+                else _require_mapping(None, "player_visible")
+            ),
             record_sha256=(
                 str(mapping["record_sha256"])
                 if mapping.get("record_sha256") is not None
@@ -498,6 +561,11 @@ def record_reference_production_batch(
         initial_hand_count=initial_hand_count,
         shuffle=shuffle,
     )
+    authoritative_private = {
+        "schema": AUTHORITATIVE_PRIVATE_SCHEMA,
+        "session_id": game.session_id,
+        "session_secret_hex": game.session_secret_hex,
+    }
     selected_controller = controller or BatchReferenceController()
     ruleset = _ruleset_value(game)
     deck_definition = _deck_definition(game.formal_registry.records)
@@ -592,6 +660,8 @@ def record_reference_production_batch(
         events=event_values,
         event_hash_chain=_build_event_hash_chain(event_values),
         outcome=outcome,
+        authoritative_private=authoritative_private,
+        player_visible=False,
     )
 
 
@@ -648,6 +718,15 @@ def reexecute_production_replay(
     config = _require_mapping(
         header["initial_configuration"], "initial_configuration"
     )
+    private = _require_mapping(
+        record.authoritative_private, "authoritative_private"
+    )
+    if private["schema"] != AUTHORITATIVE_PRIVATE_SCHEMA:
+        raise ProductionReplayFormatError(
+            "权威私有材料版本不受支持，无法执行规则重执行"
+        )
+    session_id = private["session_id"]
+    session_secret = bytes.fromhex(str(private["session_secret_hex"]))
     game = ProductionBasicCardBatch(
         seed=int(header["seed"]),
         deck_path=str(config["deck_path"]),
@@ -655,6 +734,8 @@ def reexecute_production_replay(
         player_max_hp=tuple(config["player_max_hp"]),  # type: ignore[arg-type]
         initial_hand_count=int(config["initial_hand_count"]),
         shuffle=config["shuffle"],  # type: ignore[arg-type]
+        session_id=session_id,
+        session_secret=session_secret,
     )
     live_ruleset = _ruleset_value(game)
     _expect_equal("engine", None, header["engine_version"], ENGINE_VERSION, "引擎版本不一致")

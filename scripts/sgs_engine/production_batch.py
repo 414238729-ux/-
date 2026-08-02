@@ -20,8 +20,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from enum import Enum
+import hashlib
+import hmac
 import json
 from pathlib import Path
+import secrets
 from types import MappingProxyType
 from typing import Iterable, Mapping, Sequence
 
@@ -181,6 +184,7 @@ class _BatchRuntime:
     response_window_source_sequence: int | None = None
     pending_zone_choice: _PendingZoneChoice | None = None
     zone_choice_handles: Mapping[str, str] = MappingProxyType({})
+    zone_choice_snapshot_digest: str | None = None
     winner_id: str | None = None
 
     def audit_value(self) -> dict[str, object]:
@@ -236,6 +240,7 @@ class _BatchRuntime:
             "response_window_source_sequence": self.response_window_source_sequence,
             "pending_zone_choice": pending_zone_choice,
             "zone_choice_handles": dict(self.zone_choice_handles),
+            "zone_choice_snapshot_digest": self.zone_choice_snapshot_digest,
             "winner_id": self.winner_id,
         }
 
@@ -290,47 +295,143 @@ def _zone_from_id(zone_id: object, owner_id: str) -> ZoneRef:
     raise InvalidActionError(f"无法识别的选牌区域标识：{zone_id!r}")
 
 
-def _hand_choice_handle(window_id: str, instance_id: str) -> str:
-    """生成绑定当前选择窗口的隐藏手牌选择句柄。
+HAND_CHOICE_HANDLE_PREFIX = "h_"
+HAND_CHOICE_HANDLE_HEX_CHARS = 32
 
-    句柄是窗口ID与实体牌ID的SHA-256摘要前缀；决策输入不携带实体牌ID、
-    牌名、花色或点数，无法从句柄反推出牌面。
+
+def _hand_choice_message(
+    session_id: str,
+    window_id: str,
+    target_id: str,
+    zone: str,
+    snapshot_digest: str,
+    instance_id: str,
+) -> str:
+    """构造隐藏手牌选择句柄的HMAC消息。
+
+    消息由会话标识、选择窗口ID、目标角色、区域、当前手牌快照摘要与实体牌ID
+    组成；其中除会话标识外全部可以在公开回放或对局中被观测，因此消息本身
+    不提供保密性，保密性完全来自会话级随机秘密。
     """
 
-    digest = sha256_value(
+    return canonical_json(
         {
+            "session_id": session_id,
             "zone_choice_window": window_id,
-            "zone": "hand",
+            "target_id": target_id,
+            "zone": zone,
+            "hand_snapshot_sha256": snapshot_digest,
             "instance_id": instance_id,
         }
     )
-    return "h_" + digest[:32]
+
+
+def _hand_choice_handle(
+    session_id: str,
+    session_secret: bytes,
+    window_id: str,
+    target_id: str,
+    zone: str,
+    snapshot_digest: str,
+    instance_id: str,
+) -> str:
+    """生成绑定当前会话与选择窗口的隐藏手牌选择句柄。
+
+    句柄是 HMAC-SHA256（会话级256位随机秘密，消息含会话标识＋窗口ID＋目标＋
+    区域＋当前手牌快照摘要＋实体牌ID）的前128位；会话秘密由
+    ``secrets.token_bytes(32)`` 创建，只保存在服务端会话与权威回放私有材料中，
+    公开窗口ID、正式牌堆160个实体ID、正式CSV牌面与公开seed均不足以重建句柄。
+    """
+
+    digest = hmac.new(
+        session_secret,
+        _hand_choice_message(
+            session_id, window_id, target_id, zone, snapshot_digest, instance_id
+        ).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return HAND_CHOICE_HANDLE_PREFIX + digest[:HAND_CHOICE_HANDLE_HEX_CHARS]
 
 
 def _resolve_hand_choice_handle(
-    state: GameState, window_id: str, target_id: str, handle: object
+    session_id: str,
+    session_secret: bytes,
+    state: GameState,
+    window_id: str,
+    target_id: str,
+    zone: str,
+    snapshot_digest: str | None,
+    snapshot_handles: Mapping[str, str],
+    handle: object,
 ) -> str | None:
-    """把隐藏句柄解析为目标当前手牌中的真实实体；无法解析时返回None。"""
+    """把隐藏手牌句柄解析为窗口快照中的真实实体；任何绑定不符都返回None。
 
-    if not isinstance(handle, str):
+    校验顺序：
+    1. 句柄必须存在于当前窗口打开时的服务端快照映射（跨窗口、跨会话、伪造
+       句柄在此失败关闭）；
+    2. 句柄必须与HMAC-SHA256重算值一致（防伪造与防密钥被替换）；
+    3. 实体必须仍在目标手牌中；
+    4. 当前手牌摘要必须仍等于窗口打开时的快照摘要（手牌变化后旧句柄失败关闭）。
+    """
+
+    if zone != "hand" or not isinstance(handle, str):
         return None
-    for instance_id in state.card_ids_in(ZoneRef.hand(target_id)):
-        if _hand_choice_handle(window_id, instance_id) == handle:
-            return instance_id
-    return None
+    if snapshot_digest is None:
+        return None
+    instance_id = snapshot_handles.get(handle)
+    if instance_id is None:
+        return None
+    expected = _hand_choice_handle(
+        session_id,
+        session_secret,
+        window_id,
+        target_id,
+        zone,
+        snapshot_digest,
+        instance_id,
+    )
+    if not hmac.compare_digest(expected, handle):
+        return None
+    if state.location_of(instance_id) != ZoneRef.hand(target_id):
+        return None
+    current_digest = sha256_value(
+        tuple(state.card_ids_in(ZoneRef.hand(target_id)))
+    )
+    if not hmac.compare_digest(current_digest, snapshot_digest):
+        return None
+    return instance_id
 
 
 def _zone_choice_handle_snapshot(
-    state: GameState, target_id: str, window_id: str
+    session_id: str,
+    session_secret: bytes,
+    state: GameState,
+    target_id: str,
+    window_id: str,
+    snapshot_digest: str,
 ) -> Mapping[str, str]:
-    """为当前选择窗口生成目标手牌的隐藏句柄快照（句柄到实体ID的映射）。"""
+    """为当前选择窗口生成目标手牌的隐藏句柄快照（服务端私有映射）。
+
+    该映射只保存在会话运行时与权威执行快照中，不进入玩家决策上下文、普通
+    合法动作负载或玩家可见回放导出。
+    """
 
     return MappingProxyType(
         {
-            _hand_choice_handle(window_id, instance_id): instance_id
+            _hand_choice_handle(
+                session_id,
+                session_secret,
+                window_id,
+                target_id,
+                "hand",
+                snapshot_digest,
+                instance_id,
+            ): instance_id
             for instance_id in state.card_ids_in(ZoneRef.hand(target_id))
         }
     )
+
+
 def _replace_player(
     state: GameState,
     player_id: str,
@@ -537,6 +638,8 @@ class ProductionBasicCardBatch:
         player_max_hp: tuple[int, int] = (4, 4),
         initial_hand_count: int = 4,
         shuffle: bool = True,
+        session_id: str | None = None,
+        session_secret: bytes | None = None,
     ) -> None:
         if isinstance(seed, bool) or not isinstance(seed, int):
             raise TypeError("随机种子必须是整数")
@@ -565,10 +668,23 @@ class ProductionBasicCardBatch:
         if not isinstance(shuffle, bool):
             raise TypeError("shuffle必须是布尔值")
 
+        if session_id is None:
+            session_id = secrets.token_hex(16)
+        if not isinstance(session_id, str) or not session_id:
+            raise ValueError("会话标识必须是非空字符串")
+        if session_secret is None:
+            session_secret = secrets.token_bytes(32)
+        if not isinstance(session_secret, bytes):
+            raise TypeError("会话秘密必须是bytes")
+        if len(session_secret) < 32:
+            raise ValueError("会话秘密至少需要256位（32字节）")
+
         deck_path = Path(deck_path)
         records, audit = load_deck_csv(deck_path, expected_total=160)
         AuthoritativeCoreSession._validate_formal_deck(records, audit)
         self._deck_path = deck_path
+        self._session_id = session_id
+        self._session_secret = session_secret
         self._rng = DeterministicRNG(seed)
         self._formal_registry = FormalCardRegistry(records, session=self)
         self._formal_registry.ensure_all_basic_cards_implemented()
@@ -662,6 +778,14 @@ class ProductionBasicCardBatch:
     @property
     def registry(self) -> RuleRegistry:
         return self._registry
+
+    @property
+    def session_id(self) -> str:
+        return self._session_id
+
+    @property
+    def session_secret_hex(self) -> str:
+        return self._session_secret.hex()
 
     @property
     def formal_registry(self) -> FormalCardRegistry:
@@ -1804,6 +1928,9 @@ class ProductionBasicCardBatch:
         window_id = (
             f"zone-choice:{runtime.turn_number}:{trick.trick_instance_id}"
         )
+        snapshot_digest = sha256_value(
+            tuple(state.card_ids_in(ZoneRef.hand(trick.target_id)))
+        )
         next_runtime = replace(
             runtime,
             phase=ProductionPhase.ZONE_CHOICE,
@@ -1817,8 +1944,14 @@ class ProductionBasicCardBatch:
                     _zone_id(zone) for zone in target_zone_refs(trick.target_id)
                 ),
             ),
+            zone_choice_snapshot_digest=snapshot_digest,
             zone_choice_handles=_zone_choice_handle_snapshot(
-                state, trick.target_id, window_id
+                self._session_id,
+                self._session_secret,
+                state,
+                trick.target_id,
+                window_id,
+                snapshot_digest,
             ),
             trick_consecutive_passes=0,
             trick_response_order=(),
@@ -1867,6 +2000,17 @@ class ProductionBasicCardBatch:
                 "state_hash": state_hash,
             }
             if zone.kind is ZoneKind.HAND:
+                snapshot_digest = runtime.zone_choice_snapshot_digest
+                if snapshot_digest is None:
+                    raise ProductionBatchError(
+                        "选牌窗口缺少手牌快照摘要，无法生成隐藏手牌句柄"
+                    )
+                if sha256_value(
+                    tuple(state.card_ids_in(zone))
+                ) != snapshot_digest:
+                    # 手牌相对窗口打开时的快照已变化：不再铸造任何句柄，
+                    # 旧句柄无法继续枚举或应用，失败关闭。
+                    continue
                 for instance_id in state.card_ids_in(zone):
                     actions.append(
                         LegalAction(
@@ -1876,7 +2020,13 @@ class ProductionBasicCardBatch:
                             payload={
                                 **base,
                                 "handle": _hand_choice_handle(
-                                    choice.window_id, instance_id
+                                    self._session_id,
+                                    self._session_secret,
+                                    choice.window_id,
+                                    choice.target_id,
+                                    zone_id,
+                                    snapshot_digest,
+                                    instance_id,
                                 ),
                             },
                         )
@@ -1959,7 +2109,15 @@ class ProductionBasicCardBatch:
                     "隐藏手牌选择不得携带实体牌ID，避免泄露牌面"
                 )
             instance_id = _resolve_hand_choice_handle(
-                state, choice.window_id, choice.target_id, payload.get("handle")
+                self._session_id,
+                self._session_secret,
+                state,
+                choice.window_id,
+                choice.target_id,
+                zone_id,
+                runtime.zone_choice_snapshot_digest,
+                runtime.zone_choice_handles,
+                payload.get("handle"),
             )
             if instance_id is None:
                 raise InvalidActionError(
