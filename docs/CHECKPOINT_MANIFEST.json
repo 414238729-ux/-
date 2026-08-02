@@ -3,7 +3,7 @@
   "generated_on": "2026-08-02",
   "git": {
     "available": true,
-    "implementation_branch": "grok-eval-basic-cards",
+    "implementation_branch": "deepseek-single-target-tricks",
     "implementation_branch_note": "检查点记录时的实现分支，不代表当前运行分支",
     "baseline_commit": "858d6ced315dfa3df78636528c720c0117fdf3de",
     "baseline_metadata_commit": "5eac686",
@@ -13,7 +13,10 @@
       "email": "codex-local@example.invalid"
     },
     "historical_note": "CP-01至CP-04的原始哈希检查点已收入Git基线；里程碑A另有独立代码提交",
-    "milestone_b1_commit": "bffe5516322452b90b7b150d7c4ae35c5b690a0b"
+    "milestone_b1_commit": "bffe5516322452b90b7b150d7c4ae35c5b690a0b",
+    "milestone_b2_trick_slice_worktree_commit": "0ff3f8a",
+    "milestone_b2_trick_slice_commit": null,
+    "milestone_b2_trick_slice_commit_note": "最小普通锦囊垂直切片（【无中生有】、【无懈可击】）已在 deepseek-single-target-tricks 工作树完成并通过完整验证；按任务约定不执行 git add/commit，等待用户在外部PowerShell提交"
   },
   "feature_status": {
     "authoritative_core_foundation": true,
@@ -22,7 +25,8 @@
     "authoritative_full_game_core": false,
     "formal_duel_no_skill_ready": false,
     "formal_run_ready": false,
-    "production_basic_cards_batch": true
+    "production_basic_cards_batch": true,
+    "production_single_target_trick_slice": true
   },
   "stage_status": {
     "1_source_and_callchain_audit": "passed",
@@ -70,6 +74,14 @@
       "unmet_gate": "正式单挑规则范围及边界未闭合；38种牌尚无生产适配器；AuthoritativeCoreSession.run_game仍失败关闭"
     },
     {
+      "id": "CP-04D-PRODUCTION-SINGLE-TARGET-TRICK-SLICE",
+      "status": "passed",
+      "commit": null,
+      "commit_note": "工作树已实现并通过完整验证；按任务约定不执行git add/commit，等待用户在外部PowerShell提交",
+      "evidence": "scripts/sgs_engine/production_cards.py、scripts/sgs_engine/production_batch.py、tests/test_sgs_production_single_target_tricks.py；正式160张牌堆最小普通锦囊垂直切片",
+      "scope": "formal；【无中生有】4张与【无懈可击】7张接入生产注册表与权威核心；普通锦囊无效响应窗口、连续【无懈可击】响应、放弃响应、被无效仍记已使用、牌区生命周期、牌守恒与严格规则重执行；不构成普通锦囊批次或完整正式整局"
+    },
+    {
       "id": "CP-04C-PRODUCTION-BASIC-CARD-BATCH",
       "status": "passed",
       "evidence": "scripts/sgs_engine/production_cards.py、scripts/sgs_engine/production_batch.py、scripts/sgs_engine/production_replay.py、tests/test_sgs_production_basic_cards.py；正式160张牌堆六种基本牌生产批次",
@@ -79,7 +91,7 @@
   "final_verification": {
     "pytest": {
       "command": ".\\venv\\Scripts\\python.exe -m pytest -q",
-      "passed": 1172,
+      "passed": 1197,
       "failed": 0,
       "skipped": 0
     },
@@ -89,9 +101,9 @@
     },
     "source_integrity": {
       "command": ".\\venv\\Scripts\\python.exe -m scripts.sgs_source_integrity_audit . --fail-on-defect --pretty",
-      "scanned_python_files": 109,
+      "scanned_python_files": 110,
       "defect_count": 0,
-      "audit_item_count": 53
+      "audit_item_count": 54
     },
     "test_only_duel_status": {
       "test_only": true,
@@ -127,9 +139,9 @@
     "milestone_b_blockers": [
       "Knowledge未闭合正式160张无技能单挑的适用范围、同将许可与首轮摸牌修正（基本牌批次已锁定双人、先手摸2约定）",
       "AuthoritativeCoreSession.run_game仍明确抛出UnsupportedRuleError",
-      "38种正式卡牌定义中六种基本牌已建立生产规则适配器；其余32种（普通／延时锦囊、武器、防具、坐骑）仍未建立",
+      "38种正式卡牌定义中六种基本牌与【无中生有】／【无懈可击】已建立生产规则适配器；其余30种（普通／延时锦囊、武器、防具、坐骑）仍未建立",
       "正式卡牌处理区与完整生命周期规则仅六种基本牌接入，其余卡牌与整局重洗调度未接入",
-      "五谷丰登部分牌去向、无懈可击事件映射等边界尚未闭合",
+      "五谷丰登部分牌去向、其余锦囊事件映射等边界尚未闭合（【无懈可击】响应事件已闭合：生成card_used、不生成普通card_played、计入使用或打出总数）",
       "观看、亮牌及判定彻底耗尽仍是分析约定，不能用于approximation_count=0的正式入口",
       "尚无正式160张单挑100-seed验收运行器"
     ],
@@ -162,18 +174,42 @@
       "reference_path_seed": 5,
       "formal_result": false,
       "milestone_b_complete": false
+    },
+    "production_single_target_trick_slice": {
+      "implemented": true,
+      "tested": true,
+      "card_types": 2,
+      "entity_counts_by_key": {
+        "sgs_trick_wuzhongshengyou": 4,
+        "sgs_trick_wuxiekeji": 7
+      },
+      "total_implemented_entities": 96,
+      "total_deck_entities": 160,
+      "remaining_unimplemented_card_keys": 30,
+      "remaining_unimplemented_normal_tricks": 10,
+      "test_only_adapters_in_production_registry": false,
+      "fallback_for_unimplemented": false,
+      "unsupported_rules": 1,
+      "approximation_count": 0,
+      "reexecution_replay_supported": true,
+      "reference_path_seed": 3,
+      "formal_result": false,
+      "milestone_b_complete": false,
+      "authoritative_full_game_core": false,
+      "formal_run_ready": false,
+      "formal_duel_no_skill_ready": false
     }
   },
   "sha256": {
     "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "57093ee848831938eadc821070931b59f4420e04f6babe8ac6f9285f78e8f4af",
     "docs/LEGACY_RESULTS_INVALID.md": "49b4d882e2fdd12f5074a9a9d1aae4377a8ac2c6d334e0a852d81081dfdbb294",
-    "docs/ENGINE_STATUS.md": "67e6434a332aa9378939faab07d700051fe3932224f4e0fce44d95a804a25a50",
-    "docs/IMPLEMENTATION_MATRIX.md": "24454bd9626f06134fa706843a5791078e16b082fc0550abaae6c9bc6a79428f",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "e7628844a0232a8df4eb02dd83713aece8758fb1ad60cbaea33cce0823414d59",
+    "docs/ENGINE_STATUS.md": "f8ae30f04b268cfe8d46a77856b3582f295626be1bd45ca7e2f1822dadc3dcf4",
+    "docs/IMPLEMENTATION_MATRIX.md": "1c28efeb20d3320392e8287e2fbfa24f227d3c7ed4ae7e99c393bc0db55aacb5",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "419c933382acfeaf10a111a7f72e0364b8b1a1a242f0fd99abce46e868e4e5d2",
     "scripts/sgs_engine_gate.py": "c2f1384f0607588907f4721ec7be5edde1142afc89ed3d1b473fa627a631bc04",
     "scripts/sgs_formal_runner.py": "d139ef9b172c8840245fd659cc570f462f3590febe622a48f7863446bb8a6e00",
-    "scripts/sgs_source_integrity_audit.py": "5ecd50bf903695724b19ef4f57f4072384b42f7fbf5a40a7cb2f4ea88f45bdfd",
-    "scripts/sgs_engine/__init__.py": "89ef833c12bca92aec1fff6c165c1d87217055c8bdaee8feb40c2078fb890c4a",
+    "scripts/sgs_source_integrity_audit.py": "927ace5500cd11d066b7cef65213d087cc3fb5a19b3d7b5e4e0a22371c59836c",
+    "scripts/sgs_engine/__init__.py": "87fb038ea7c1cb3c8e3810a8001ebc0607126c53fc90beec58a385da310574d9",
     "scripts/sgs_engine/model.py": "316d05db3d0cc053eae1f0cda569b631efb82d27a233b96eb81ddb548b8b7fbc",
     "scripts/sgs_engine/events.py": "93d36619258cc2c8ec8e06cc3c2e08debe3fdb13a5c943dc1f6cf0743aaf7e3a",
     "scripts/sgs_engine/actions.py": "c72a128e5786fb4028f96741152fd0b2cf4f05c901bb120b915244422245f030",
@@ -185,9 +221,10 @@
     "scripts/sgs_dev_runner.py": "bcedeeca6d74fcd5715d5b9797c32bb9d09b70ee0928b3aba94d0ff81415329c",
     "knowledge/三国杀牌堆数据.csv": "ad643e13ca7fad0905e0efaaf04bf4dff09fad1fd81e1503dab1a83dc67dd4fd",
     "hash_note": "本表为当前工作树文件原始字节的SHA-256（UTF-8无BOM）；仅作状态记录，不参与门禁校验",
-    "scripts/sgs_engine/production_batch.py": "2c2b788e3f66e51694ae75063f1b6335a73b182cb1f7aea46c9f2623bdda2cd5",
-    "scripts/sgs_engine/production_cards.py": "1cd467e9ee107c8b5602ad3319bd51c8903ca37a3078a78170650a73f6852bf6",
+    "scripts/sgs_engine/production_batch.py": "7a765b4469b54748a4e73697941913366d62a00f7387a71e98d506f87fa431b9",
+    "scripts/sgs_engine/production_cards.py": "ebfbd60c30b1fc9a88152b54c700263b5a94b6d7fe3ea6eb1da4c4e56472d89a",
     "scripts/sgs_engine/production_replay.py": "934e6546485e4d4fbdf306087ef3db7b3f15d11d01e80a740661313f8a2978e8",
-    "tests/test_sgs_production_basic_cards.py": "5a3e136e1322a456c237d4fe7243d47091a9704dce39b3b22b2b9b69300307db"
+    "tests/test_sgs_production_basic_cards.py": "3e0289b15772e2db4c448abe7d67cc9e4dd613768beb8fadd2463d9518bc068f",
+    "tests/test_sgs_production_single_target_tricks.py": "85391469ca39e902decc78028da7e96ff48e76e140980624e2e5f3c0f98894fa"
   }
 }

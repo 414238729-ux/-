@@ -36,6 +36,7 @@ from scripts.sgs_engine.production_batch import (
 )
 from scripts.sgs_engine.production_cards import (
     PRODUCTION_BASIC_CARD_KEYS,
+    PRODUCTION_TRICK_KEYS,
     BasicCardAdapter,
     FormalCardRegistry,
     attack_range_of,
@@ -98,7 +99,7 @@ def test_formal_160_deck_six_basic_keys_map_to_production_adapters() -> None:
 
     assert registry.card_count == 160
     assert len(registry.instance_ids) == len(set(registry.instance_ids)) == 160
-    assert set(registry.implemented_card_keys) == set(PRODUCTION_BASIC_CARD_KEYS)
+    assert set(registry.implemented_card_keys) == set(PRODUCTION_BASIC_CARD_KEYS) | set(PRODUCTION_TRICK_KEYS)
     for key in PRODUCTION_BASIC_CARD_KEYS:
         adapter = registry.adapter_for(key)
         assert isinstance(adapter, BasicCardAdapter)
@@ -749,7 +750,7 @@ def test_unimplemented_trick_cards_fail_closed_without_fallback() -> None:
     with pytest.raises(UnsupportedRuleError):
         registry.adapter_for("sgs_delayed_shandian")
     with pytest.raises(UnsupportedRuleError):
-        registry.rule_spec_for("sgs_trick_wuxiekeji")
+        registry.rule_spec_for("sgs_trick_shunshouqianyang")
     with pytest.raises(UnsupportedRuleError):
         registry.assert_no_unimplemented_fallback()
 
@@ -758,7 +759,7 @@ def test_unimplemented_trick_cards_fail_closed_without_fallback() -> None:
         if action.card_instance_id is None:
             continue
         card_key = game.state.cards_by_id[action.card_instance_id].card_key
-        assert card_key in PRODUCTION_BASIC_CARD_KEYS
+        assert card_key in set(PRODUCTION_BASIC_CARD_KEYS) | set(PRODUCTION_TRICK_KEYS)
 
     # 伪造未实现锦囊动作不能通过验证
     trick_id = next(
@@ -830,7 +831,7 @@ def test_unimplemented_equipment_fails_closed_including_range() -> None:
 def test_test_only_adapters_never_enter_production_registry() -> None:
     game = ProductionBasicCardBatch(seed=1)
     registry = game.formal_registry
-    assert set(registry.adapters) == set(PRODUCTION_BASIC_CARD_KEYS)
+    assert set(registry.adapters) == set(PRODUCTION_BASIC_CARD_KEYS) | set(PRODUCTION_TRICK_KEYS)
     for key, adapter in registry.adapters.items():
         assert isinstance(adapter, BasicCardAdapter)
         assert not str(type(adapter).__module__).endswith(".duel")

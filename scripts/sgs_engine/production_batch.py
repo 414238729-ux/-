@@ -2,10 +2,11 @@
 """正式160张牌堆中六种基本牌的生产批处理会话。
 
 本模块在权威核心（GameState、EventQueue、ResponseWindow、DamageEvent、
-LegalAction、单一 DeterministicRNG 与状态哈希）之上，为六种基本牌提供
-一条真实的生产结算路径。它明确不是完整整局引擎：只包含六种基本牌完成
-使用、响应、伤害、濒死、救援、死亡与胜负所需的阶段与窗口；遇到未实现
-卡牌时在注册表层失败关闭。
+LegalAction、单一 DeterministicRNG 与状态哈希）之上，为六种基本牌和
+最小普通锦囊垂直切片（【无中生有】、【无懈可击】）提供真实的生产结算
+路径。它明确不是完整整局引擎：只包含本批次卡牌完成使用、响应、无效、
+伤害、濒死、救援、死亡与胜负所需的阶段与窗口；遇到未实现卡牌时在
+注册表层失败关闭。
 
 所有动作都经过：
 
@@ -62,6 +63,8 @@ from .model import (
 from .production_cards import (
     FormalCardRegistry,
     SlashAdapter,
+    WuxiekejiAdapter,
+    WuzhongshengyouAdapter,
     is_valid_slash_target,
 )
 from .replay import canonical_json, sha256_value
@@ -74,6 +77,7 @@ PRODUCTION_BASIC_CARDS_MODE = "production_basic_cards_batch"
 class ProductionPhase(str, Enum):
     PLAY = "play"
     SLASH_RESPONSE = "slash_response"
+    TRICK_RESPONSE = "trick_response"
     DYING_RESCUE = "dying_rescue"
     END = "end"
     FINISHED = "finished"
@@ -82,6 +86,7 @@ class ProductionPhase(str, Enum):
 BATCH_PHASES: tuple[ProductionPhase, ...] = (
     ProductionPhase.PLAY,
     ProductionPhase.SLASH_RESPONSE,
+    ProductionPhase.TRICK_RESPONSE,
     ProductionPhase.DYING_RESCUE,
     ProductionPhase.END,
 )
@@ -119,6 +124,14 @@ class _PendingSlash:
 
 
 @dataclass(frozen=True, slots=True)
+class _PendingTrick:
+    user_id: str
+    target_id: str
+    trick_instance_id: str
+    trick_key: str
+
+
+@dataclass(frozen=True, slots=True)
 class _BatchRuntime:
     current_player_id: str
     turn_number: int = 1
@@ -127,6 +140,12 @@ class _BatchRuntime:
     wine_buff_owner_id: str | None = None
     wine_buff_used_this_play_phase: bool = False
     pending_slash: _PendingSlash | None = None
+    pending_trick: _PendingTrick | None = None
+    trick_effect_active: bool = False
+    trick_consecutive_passes: int = 0
+    trick_response_order: tuple[str, ...] = ()
+    trick_response_index: int = 0
+    trick_decision_count: int = 0
     pending_dying_id: str | None = None
     rescue_order: tuple[str, ...] = ()
     rescue_index: int = 0
@@ -145,6 +164,14 @@ class _BatchRuntime:
                 "slash_instance_id": self.pending_slash.slash_instance_id,
                 "boosted": self.pending_slash.boosted,
             }
+        pending_trick = None
+        if self.pending_trick is not None:
+            pending_trick = {
+                "user_id": self.pending_trick.user_id,
+                "target_id": self.pending_trick.target_id,
+                "trick_instance_id": self.pending_trick.trick_instance_id,
+                "trick_key": self.pending_trick.trick_key,
+            }
         return {
             "current_player_id": self.current_player_id,
             "turn_number": self.turn_number,
@@ -153,6 +180,12 @@ class _BatchRuntime:
             "wine_buff_owner_id": self.wine_buff_owner_id,
             "wine_buff_used_this_play_phase": self.wine_buff_used_this_play_phase,
             "pending_slash": pending,
+            "pending_trick": pending_trick,
+            "trick_effect_active": self.trick_effect_active,
+            "trick_consecutive_passes": self.trick_consecutive_passes,
+            "trick_response_order": list(self.trick_response_order),
+            "trick_response_index": self.trick_response_index,
+            "trick_decision_count": self.trick_decision_count,
             "pending_dying_id": self.pending_dying_id,
             "rescue_order": list(self.rescue_order),
             "rescue_index": self.rescue_index,
@@ -244,6 +277,8 @@ class BatchReferenceController:
             operation = str(action.payload.get("operation", ""))
             if context.phase == ProductionPhase.SLASH_RESPONSE.value:
                 rank = 0 if operation == "play_dodge" else 9
+            elif context.phase == ProductionPhase.TRICK_RESPONSE.value:
+                rank = 0 if operation == "use_wuxie" else 1
             elif context.phase == ProductionPhase.DYING_RESCUE.value:
                 if operation == "rescue_with_peach" and action.target_ids == (
                     action.actor_id,
@@ -550,6 +585,14 @@ class ProductionBasicCardBatch:
             if runtime.pending_slash is None:
                 raise ProductionBatchError("响应阶段缺少待响应的【杀】")
             return runtime.pending_slash.target_id
+        if runtime.phase is ProductionPhase.TRICK_RESPONSE:
+            if runtime.pending_trick is None:
+                raise ProductionBatchError("锦囊响应阶段缺少待响应的锦囊")
+            if not runtime.trick_response_order:
+                raise ProductionBatchError("锦囊响应顺序为空")
+            if runtime.trick_response_index >= len(runtime.trick_response_order):
+                raise ProductionBatchError("锦囊响应顺序已经耗尽")
+            return runtime.trick_response_order[runtime.trick_response_index]
         if runtime.phase is ProductionPhase.DYING_RESCUE:
             if not runtime.rescue_order:
                 raise ProductionBatchError("濒死阶段缺少救援顺序")
@@ -590,6 +633,23 @@ class ProductionBasicCardBatch:
                 "wine_buff_used_this_play_phase": (
                     runtime.wine_buff_used_this_play_phase
                 ),
+                "pending_trick": (
+                    None
+                    if runtime.pending_trick is None
+                    else {
+                        "user_id": runtime.pending_trick.user_id,
+                        "target_id": runtime.pending_trick.target_id,
+                        "trick_instance_id": (
+                            runtime.pending_trick.trick_instance_id
+                        ),
+                        "trick_key": runtime.pending_trick.trick_key,
+                    }
+                ),
+                "trick_effect_active": runtime.trick_effect_active,
+                "trick_consecutive_passes": (
+                    runtime.trick_consecutive_passes
+                ),
+                "trick_response_index": runtime.trick_response_index,
                 "pending_dying_id": runtime.pending_dying_id,
                 "rescue_index": runtime.rescue_index,
             },
@@ -738,6 +798,16 @@ class ProductionBasicCardBatch:
                     payload={"operation": "pass_slash_response"},
                 )
             )
+        elif self.phase is ProductionPhase.TRICK_RESPONSE:
+            for adapter in self._formal_registry.adapters.values():
+                actions.extend(adapter.enumerate_legal_actions(state, context))
+            actions.append(
+                LegalAction(
+                    action_type=ActionType.PASS,
+                    actor_id=actor,
+                    payload={"operation": "pass_trick_response"},
+                )
+            )
         elif self.phase is ProductionPhase.DYING_RESCUE:
             for adapter in self._formal_registry.adapters.values():
                 actions.extend(adapter.enumerate_legal_actions(state, context))
@@ -778,6 +848,10 @@ class ProductionBasicCardBatch:
                 return self._formal_registry.adapter_for(
                     "sgs_basic_jiu"
                 ).apply_action(state, context, action)
+            if operation == "use_wuzhong":
+                return self._formal_registry.adapter_for(
+                    "sgs_trick_wuzhongshengyou"
+                ).apply_action(state, context, action)
             if action.action_type is ActionType.PASS and operation == (
                 "end_play_phase"
             ):
@@ -801,6 +875,17 @@ class ProductionBasicCardBatch:
             ):
                 return self.apply_slash_damage(state, context, action)
             raise InvalidActionError("【杀】响应阶段不支持当前动作")
+
+        if self.phase is ProductionPhase.TRICK_RESPONSE:
+            if operation == "use_wuxie":
+                return self._formal_registry.adapter_for(
+                    "sgs_trick_wuxiekeji"
+                ).apply_action(state, context, action)
+            if action.action_type is ActionType.PASS and operation == (
+                "pass_trick_response"
+            ):
+                return self.apply_pass_trick_response(state, context, action)
+            raise InvalidActionError("锦囊响应阶段不支持当前动作")
 
         if self.phase is ProductionPhase.DYING_RESCUE:
             if operation == "rescue_with_peach":
@@ -886,6 +971,12 @@ class ProductionBasicCardBatch:
             runtime,
             phase=ProductionPhase.PLAY,
             pending_slash=None,
+            pending_trick=None,
+            trick_effect_active=False,
+            trick_consecutive_passes=0,
+            trick_response_order=(),
+            trick_response_index=0,
+            trick_decision_count=0,
             pending_dying_id=None,
             rescue_order=(),
             rescue_index=0,
@@ -1099,6 +1190,237 @@ class ProductionBasicCardBatch:
             )
             self._events.extend((damage_event, finish_event))
             next_runtime = self._return_to_play(runtime)
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    # ------------------------------------------------------------------
+    # 普通锦囊结算（【无中生有】与【无懈可击】）
+    # ------------------------------------------------------------------
+
+    def _trick_window_id(
+        self, runtime: _BatchRuntime, decision_index: int
+    ) -> str:
+        if runtime.pending_trick is None:
+            raise ProductionBatchError("锦囊响应窗口缺少待响应的锦囊")
+        return (
+            f"trick:{runtime.turn_number}:"
+            f"{runtime.pending_trick.trick_instance_id}:dec{decision_index}"
+        )
+
+    def apply_wuzhong_use(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: WuzhongshengyouAdapter,
+    ) -> GameState:
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.PLAY:
+            raise InvalidActionError("【无中生有】只能在出牌阶段使用")
+        if context.actor_id != runtime.current_player_id:
+            raise InvalidActionError("只有当前回合角色可以使用【无中生有】")
+        if action.card_instance_id is None:
+            raise InvalidActionError("使用【无中生有】必须指定实体牌")
+        card = state.cards_by_id[action.card_instance_id]
+        if card.card_key != adapter.card_key:
+            raise InvalidActionError(
+                "【无中生有】动作的实体牌与适配器卡牌键不一致"
+            )
+        if action.target_ids != (context.actor_id,):
+            raise InvalidActionError("【无中生有】只能以自己为目标")
+        if state.location_of(action.card_instance_id) != ZoneRef.hand(
+            context.actor_id
+        ):
+            raise InvalidActionError("只能使用行动角色真实手牌中的实体牌")
+
+        next_state, move_event = self._move_to_processing(
+            state, action.card_instance_id, context.actor_id, "wuzhong_use"
+        )
+        used_event = GameEvent(
+            event_type=EventType.CARD_USED,
+            card_instance_id=action.card_instance_id,
+            card_key=adapter.card_key,
+            card_user=context.actor_id,
+            target_ids=(context.actor_id,),
+            payload={"purpose": "draw_2", "card_name": adapter.card_name},
+        )
+        queued = self._events.extend((used_event, move_event))
+        used_sequence = queued[0].sequence
+        assert used_sequence is not None
+        order = (
+            runtime.current_player_id,
+            self.opponent_of(runtime.current_player_id),
+        )
+        next_runtime = replace(
+            runtime,
+            phase=ProductionPhase.TRICK_RESPONSE,
+            pending_trick=_PendingTrick(
+                context.actor_id,
+                context.actor_id,
+                action.card_instance_id,
+                adapter.card_key,
+            ),
+            trick_effect_active=True,
+            trick_consecutive_passes=0,
+            trick_response_order=order,
+            trick_response_index=0,
+            trick_decision_count=0,
+            response_window_id=(
+                f"trick:{runtime.turn_number}:"
+                f"{action.card_instance_id}:dec0"
+            ),
+            response_window_order=(order[0],),
+            response_window_source_sequence=used_sequence,
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def apply_wuxie(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: WuxiekejiAdapter,
+    ) -> GameState:
+        del adapter
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.TRICK_RESPONSE:
+            raise InvalidActionError("【无懈可击】只能在合法锦囊响应窗口使用")
+        trick = runtime.pending_trick
+        if trick is None:
+            raise InvalidActionError("当前没有待响应的锦囊")
+        if not runtime.trick_response_order:
+            raise InvalidActionError("锦囊响应顺序为空")
+        if runtime.trick_response_index >= len(runtime.trick_response_order):
+            raise InvalidActionError("锦囊响应顺序已经耗尽")
+        if (
+            context.actor_id
+            != runtime.trick_response_order[runtime.trick_response_index]
+        ):
+            raise InvalidActionError("当前不是该角色的锦囊响应时机")
+        if action.card_instance_id is None:
+            raise InvalidActionError("响应锦囊必须使用真实实体【无懈可击】")
+        card = state.cards_by_id[action.card_instance_id]
+        if card.card_key != "sgs_trick_wuxiekeji":
+            raise InvalidActionError("响应锦囊的实体牌必须是【无懈可击】")
+        if action.target_ids != (trick.target_id,):
+            raise InvalidActionError(
+                "【无懈可击】只能以当前锦囊效果对应的角色为目标"
+            )
+        if state.location_of(action.card_instance_id) != ZoneRef.hand(
+            context.actor_id
+        ):
+            raise InvalidActionError("只能使用行动角色真实手牌中的实体牌")
+
+        window = self._build_window(runtime)
+        wuxie_event = GameEvent(
+            event_type=EventType.CARD_USED,
+            card_instance_id=action.card_instance_id,
+            card_key="sgs_trick_wuxiekeji",
+            card_user=context.actor_id,
+            target_ids=(trick.target_id,),
+            payload={
+                "response_to": trick.trick_instance_id,
+                "response_action": "use",
+                "purpose": "nullify_trick_effect",
+                "creates_card_used_event": True,
+                "creates_card_played_event": False,
+                "counts_for_use_or_play_total": True,
+                "physical_or_virtual": "physical",
+                "response_provider": context.actor_id,
+            },
+        )
+        record = window.respond(context.actor_id, wuxie_event)
+        assert record.response_event is not None
+        next_state, move_events = self._consume_immediately(
+            state, action.card_instance_id, context.actor_id, "wuxie_response"
+        )
+        self._events.extend((record.response_event, *move_events))
+        next_index = (runtime.trick_response_index + 1) % len(
+            runtime.trick_response_order
+        )
+        next_runtime = replace(
+            runtime,
+            trick_effect_active=not runtime.trick_effect_active,
+            trick_consecutive_passes=0,
+            trick_response_index=next_index,
+            trick_decision_count=runtime.trick_decision_count + 1,
+            response_window_id=self._trick_window_id(
+                runtime, runtime.trick_decision_count + 1
+            ),
+            response_window_order=(runtime.trick_response_order[next_index],),
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def apply_pass_trick_response(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+    ) -> GameState:
+        del action
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.TRICK_RESPONSE:
+            raise InvalidActionError("放弃响应只能在锦囊响应窗口进行")
+        trick = runtime.pending_trick
+        if trick is None or not runtime.trick_response_order:
+            raise InvalidActionError("当前没有进行中的锦囊响应")
+        if runtime.trick_response_index >= len(runtime.trick_response_order):
+            raise InvalidActionError("锦囊响应顺序已经耗尽")
+        if (
+            context.actor_id
+            != runtime.trick_response_order[runtime.trick_response_index]
+        ):
+            raise InvalidActionError("当前不是该角色的锦囊响应时机")
+        window = self._build_window(runtime)
+        window.pass_response(context.actor_id)
+
+        next_passes = runtime.trick_consecutive_passes + 1
+        if next_passes >= len(runtime.trick_response_order):
+            # 连续一整轮无人响应：窗口关闭，按最终生效状态结算。
+            if runtime.trick_effect_active:
+                next_state, draw_events = self._draw_cards(
+                    state, trick.target_id, 2
+                )
+                self._events.extend(draw_events)
+                next_state, finish_event = self._finish_processing(
+                    next_state,
+                    trick.trick_instance_id,
+                    "wuzhong_effect_resolved",
+                )
+                self._events.extend((finish_event,))
+            else:
+                cancelled_event = GameEvent(
+                    event_type=EventType.CARD_EFFECT_CANCELLED,
+                    card_instance_id=trick.trick_instance_id,
+                    card_key=trick.trick_key,
+                    card_user=trick.user_id,
+                    target_ids=(trick.target_id,),
+                    payload={"reason": "nullified_by_wuxie"},
+                )
+                next_state, finish_event = self._finish_processing(
+                    state,
+                    trick.trick_instance_id,
+                    "wuzhong_nullified",
+                )
+                self._events.extend((cancelled_event, finish_event))
+            next_runtime = self._return_to_play(runtime)
+        else:
+            next_state = state
+            next_index = (runtime.trick_response_index + 1) % len(
+                runtime.trick_response_order
+            )
+            next_runtime = replace(
+                runtime,
+                trick_consecutive_passes=next_passes,
+                trick_response_index=next_index,
+                trick_decision_count=runtime.trick_decision_count + 1,
+                response_window_id=self._trick_window_id(
+                    runtime, runtime.trick_decision_count + 1
+                ),
+                response_window_order=(runtime.trick_response_order[next_index],),
+            )
         self._commit_runtime(runtime, next_runtime)
         return next_state
 
@@ -1493,6 +1815,12 @@ class ProductionBasicCardBatch:
             wine_buff_owner_id=None,
             wine_buff_used_this_play_phase=False,
             pending_slash=None,
+            pending_trick=None,
+            trick_effect_active=False,
+            trick_consecutive_passes=0,
+            trick_response_order=(),
+            trick_response_index=0,
+            trick_decision_count=0,
             pending_dying_id=None,
             rescue_order=(),
             rescue_index=0,

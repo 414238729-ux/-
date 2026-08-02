@@ -11,6 +11,9 @@ Knowledge（《三国杀卡牌效果》《三国杀卡牌使用方式》《三�
 :class:`FormalCardRegistry` 中明确标记，任何结算入口遇到它们都会失败
 关闭。本批次不是完整整局引擎：它只提供六种基本牌的生产规则，正式整局
 仍需在全部38种卡牌接完后另行验收，本批次不得被解释为里程碑B完成。
+
+本文件同时包含最小普通锦囊垂直切片：【无中生有】与【无懈可击】的
+生产适配器，以及两者所需的普通锦囊无效响应通用基础设施。
 """
 
 from __future__ import annotations
@@ -60,6 +63,11 @@ SLASH_CARD_KEYS: tuple[str, ...] = (
 )
 
 DEFAULT_ATTACK_RANGE = 1
+
+PRODUCTION_TRICK_KEYS: tuple[str, ...] = (
+    "sgs_trick_wuzhongshengyou",
+    "sgs_trick_wuxiekeji",
+)
 
 
 def attack_range_of(state: GameState, player_id: str) -> int:
@@ -525,7 +533,178 @@ class WineAdapter(BasicCardAdapter):
         raise InvalidActionError("【酒】生产适配器不能处理当前阶段的动作")
 
 
-def _default_adapters() -> dict[str, BasicCardAdapter]:
+class TrickCardAdapter(BasicCardAdapter):
+    """普通锦囊生产适配器的公共基类。
+
+    本轮仅接入【无中生有】与【无懈可击】两个普通锦囊：前者在出牌
+    阶段使用并建立【无懈可击】响应窗口，后者只在合法锦囊响应窗口
+    使用。其余普通锦囊、延时锦囊与装备继续由注册表标记为未实现并
+    失败关闭。
+    """
+
+
+class WuzhongshengyouAdapter(TrickCardAdapter):
+    """【无中生有】的生产适配器。
+
+    效果为摸2张牌，目标为自己；使用后建立【无懈可击】响应窗口，
+    未被无效时执行摸牌，被无效时不摸牌但仍记录为已经使用。
+    """
+
+    def __init__(self, session: "ProductionBasicCardBatch | None" = None) -> None:
+        super().__init__(session)
+        self.card_key = "sgs_trick_wuzhongshengyou"
+        self.card_name = "无中生有"
+
+    def rule_spec(self) -> dict[str, object]:
+        return {
+            "card_key": self.card_key,
+            "card_name": self.card_name,
+            "use_timing": "own_play_phase",
+            "use_limit": "unlimited_base;requires_entity_card",
+            "target_count": 1,
+            "target_filter": "self",
+            "distance_rule": "not_applicable",
+            "response_requirements": [
+                {
+                    "response_card_key": "sgs_trick_wuxiekeji",
+                    "action": "use",
+                    "event_type": "card_used",
+                }
+            ],
+            "nullification_eligible": True,
+            "movement_lifecycle": "hand->processing->discard",
+            "effect_resolution": "nullification_window;draw_2_when_active",
+            "damage_nature": "不适用",
+            "completion_event": (
+                "card_used + nullification_window + draw_2 or effect_cancelled"
+            ),
+            "adapter_version": self.adapter_version,
+            "implemented": self.implemented,
+            "tested": self.tested,
+            "production_adapter": self.production_adapter,
+        }
+
+    def enumerate_legal_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        session = self._require_session()
+        if session.phase.value != "play":
+            return ()
+        if context.actor_id != session.current_player_id:
+            return ()
+        actions: list[LegalAction] = []
+        for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
+            card = state.cards_by_id[instance_id]
+            if card.card_key != self.card_key:
+                continue
+            actions.append(
+                LegalAction(
+                    action_type=ActionType.USE_CARD,
+                    actor_id=context.actor_id,
+                    card_instance_id=instance_id,
+                    target_ids=(context.actor_id,),
+                    payload={
+                        "operation": "use_wuzhong",
+                        "card_key": self.card_key,
+                        "card_name": self.card_name,
+                    },
+                )
+            )
+        return tuple(actions)
+
+    def apply_action(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        session = self._require_session()
+        if session.phase.value == "play":
+            return session.apply_wuzhong_use(state, context, action, self)
+        raise InvalidActionError("【无中生有】生产适配器只能在出牌阶段使用")
+
+
+class WuxiekejiAdapter(TrickCardAdapter):
+    """【无懈可击】的生产适配器。
+
+    只在合法普通锦囊响应窗口使用；响应动作生成 ``card_used`` 且不
+    生成普通 ``card_played``。对【无懈可击】继续使用【无懈可击】时
+    依项目确认的连续响应规则处理：响应顺序从当前回合角色开始按座次
+    递增循环询问，连续一整轮无人响应后窗口关闭并按最终生效状态结算。
+    """
+
+    def __init__(self, session: "ProductionBasicCardBatch | None" = None) -> None:
+        super().__init__(session)
+        self.card_key = "sgs_trick_wuxiekeji"
+        self.card_name = "无懈可击"
+
+    def rule_spec(self) -> dict[str, object]:
+        return {
+            "card_key": self.card_key,
+            "card_name": self.card_name,
+            "use_timing": "trick_response_window",
+            "use_limit": "unlimited_base;requires_legal_window_and_entity",
+            "target_count": 1,
+            "target_filter": "the_trick_effect_on_one_character",
+            "distance_rule": "not_applicable",
+            "response_requirements": [
+                {
+                    "response_to": "normal_trick_effect",
+                    "action": "use",
+                    "event_type": "card_used",
+                }
+            ],
+            "nullification_eligible": True,
+            "movement_lifecycle": "hand->processing->discard",
+            "effect_resolution": (
+                "cancel_one_trick_effect_on_one_character;"
+                "itself_nullifiable_by_another_wuxiekeji"
+            ),
+            "damage_nature": "不适用",
+            "completion_event": "card_used(response) + effect_cancelled(source trick)",
+            "adapter_version": self.adapter_version,
+            "implemented": self.implemented,
+            "tested": self.tested,
+            "production_adapter": self.production_adapter,
+        }
+
+    def enumerate_legal_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        session = self._require_session()
+        if session.phase.value != "trick_response":
+            return ()
+        trick = session.runtime.pending_trick
+        if trick is None:
+            return ()
+        actions: list[LegalAction] = []
+        for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
+            card = state.cards_by_id[instance_id]
+            if card.card_key != self.card_key:
+                continue
+            actions.append(
+                LegalAction(
+                    action_type=ActionType.USE_CARD,
+                    actor_id=context.actor_id,
+                    card_instance_id=instance_id,
+                    target_ids=(trick.target_id,),
+                    payload={
+                        "operation": "use_wuxie",
+                        "card_key": self.card_key,
+                        "card_name": self.card_name,
+                        "response_to": trick.trick_instance_id,
+                    },
+                )
+            )
+        return tuple(actions)
+
+    def apply_action(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        session = self._require_session()
+        if session.phase.value == "trick_response":
+            return session.apply_wuxie(state, context, action, self)
+        raise InvalidActionError("【无懈可击】只能在合法锦囊响应窗口使用")
+
+
+def _default_adapters() -> dict[str, RuleAdapter]:
     return {
         "sgs_basic_sha": SlashAdapter("sgs_basic_sha", "无属性"),
         "sgs_basic_huosha": SlashAdapter("sgs_basic_huosha", "火属性"),
@@ -533,6 +712,8 @@ def _default_adapters() -> dict[str, BasicCardAdapter]:
         "sgs_basic_shan": DodgeAdapter(),
         "sgs_basic_tao": PeachAdapter(),
         "sgs_basic_jiu": WineAdapter(),
+        "sgs_trick_wuzhongshengyou": WuzhongshengyouAdapter(),
+        "sgs_trick_wuxiekeji": WuxiekejiAdapter(),
     }
 
 
@@ -548,7 +729,7 @@ class FormalCardRegistry:
         self,
         records: Sequence[DeckRecord],
         *,
-        adapters: Mapping[str, BasicCardAdapter] | None = None,
+        adapters: Mapping[str, RuleAdapter] | None = None,
         session: "ProductionBasicCardBatch | None" = None,
     ) -> None:
         prepared = tuple(records)
@@ -572,8 +753,8 @@ class FormalCardRegistry:
         }
         selected = dict(adapters) if adapters is not None else _default_adapters()
         for key, adapter in selected.items():
-            if not isinstance(adapter, BasicCardAdapter):
-                raise TypeError(f"卡牌{key}的生产适配器必须是BasicCardAdapter")
+            if not isinstance(adapter, RuleAdapter):
+                raise TypeError(f"卡牌{key}的生产适配器必须是RuleAdapter")
             if adapter.card_key != key:
                 raise UnsupportedRuleError(
                     f"适配器声明键{adapter.card_key}与注册键{key}不一致"
@@ -595,7 +776,7 @@ class FormalCardRegistry:
         deck_path: str | Path = DEFAULT_DECK_PATH,
         *,
         session: "ProductionBasicCardBatch | None" = None,
-        adapters: Mapping[str, BasicCardAdapter] | None = None,
+        adapters: Mapping[str, RuleAdapter] | None = None,
     ) -> "FormalCardRegistry":
         records, audit = load_deck_csv(Path(deck_path), expected_total=160)
         AuthoritativeCoreSession._validate_formal_deck(records, audit)
@@ -622,7 +803,7 @@ class FormalCardRegistry:
         return self._unimplemented_keys
 
     @property
-    def adapters(self) -> Mapping[str, BasicCardAdapter]:
+    def adapters(self) -> Mapping[str, RuleAdapter]:
         return MappingProxyType(dict(self._adapters))
 
     def instances_of(self, card_key: str) -> tuple[DeckRecord, ...]:
@@ -667,7 +848,11 @@ __all__ = [
     "CARD_NAMES_BY_KEY",
     "DEFAULT_ATTACK_RANGE",
     "PRODUCTION_BASIC_CARD_KEYS",
+    "PRODUCTION_TRICK_KEYS",
     "SLASH_CARD_KEYS",
+    "TrickCardAdapter",
+    "WuxiekejiAdapter",
+    "WuzhongshengyouAdapter",
     "BasicCardAdapter",
     "DodgeAdapter",
     "FormalCardRegistry",

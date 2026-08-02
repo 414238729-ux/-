@@ -1,7 +1,7 @@
 # 三国杀正式引擎状态
 
 > 更新日期：2026-08-02
-> 状态：已有权威核心 foundation、测试专用最小单挑纵向切片，以及正式160张牌堆上六种基本牌的生产适配器批次；但正式整局引擎仍未完成，正式入口继续失败关闭。
+> 状态：已有权威核心 foundation、测试专用最小单挑纵向切片、正式160张牌堆上六种基本牌的生产适配器批次，以及最小普通锦囊垂直切片（【无中生有】、【无懈可击】）；但正式整局引擎仍未完成，正式入口继续失败关闭。
 > 本文是运行能力状态页，不得用测试总数或文档完整度替换完整引擎验收。
 
 ## 0. 机器可读状态摘要
@@ -11,12 +11,13 @@ authoritative_core_foundation=true
 minimal_duel_vertical_slice=true
 reexecution_replay_supported=true
 production_basic_cards_batch=true
+production_single_target_trick_slice=true
 authoritative_full_game_core=false
 formal_duel_no_skill_ready=false
 formal_run_ready=false
 ```
 
-`production_basic_cards_batch=true` 只描述正式160张牌堆中六种基本牌（普通【杀】、火【杀】、雷【杀】、【闪】、【桃】、【酒】）已接入生产适配器批次，不表示正式160张牌无技能单挑完成；其余32种正式卡牌仍未实现，正式整局入口继续失败关闭。当前计数口径必须分开：
+`production_basic_cards_batch=true` 只描述正式160张牌堆中六种基本牌（普通【杀】、火【杀】、雷【杀】、【闪】、【桃】、【酒】）已接入生产适配器批次；`production_single_target_trick_slice=true` 只描述【无中生有】（4张）与【无懈可击】（7张）的最小普通锦囊垂直切片，不表示普通锦囊批次完成，也不表示正式160张牌无技能单挑完成；其余30种正式卡牌（含10种未实现普通锦囊）仍未实现，正式整局入口继续失败关闭。当前计数口径必须分开：
 
 ```text
 [test_only_duel_vertical_slice]
@@ -24,7 +25,7 @@ unsupported_rules=0
 approximation_count=0
 
 [formal]
-unsupported_rules=1  # 至少存在一个完整正式整局能力阻塞的哨兵，不是精确缺项数（38种正式卡牌中仍有32种未接生产适配器）
+unsupported_rules=1  # 至少存在一个完整正式整局能力阻塞的哨兵，不是精确缺项数（38种正式卡牌中仍有30种未接生产适配器）
 approximation_count=0  # 正式入口拒绝执行，所以没有运行近似
 
 [production_basic_cards_batch]
@@ -32,6 +33,13 @@ implemented=true
 tested=true
 card_types=6
 unsupported_rules=1  # 批次范围外（锦囊、装备等32种正式卡牌）仍失败关闭
+approximation_count=0
+
+[production_single_target_trick_slice]
+implemented=true
+tested=true
+card_types=2  # 【无中生有】4张、【无懈可击】7张，共11张实体牌
+unsupported_rules=1  # 切片范围外（其余10种普通锦囊、延时锦囊、装备等30种正式卡牌）仍失败关闭
 approximation_count=0
 ```
 
@@ -48,7 +56,7 @@ approximation_count=0
 | 当前是否存在正式多进程胜率入口 | 否 |
 | 外部 `sgs_sim_engine_worker.py` 是否是正式引擎 | 否；它位于 Downloads，未被仓库导入，是独立近似器 |
 | 外部 `sgs_ai_audit_20260729.py` 是否调用真实 AI | 否；它使用本文件内微场景与自证式 `chosen = expected` |
-| 当前组件测试是否通过 | 是；本轮最终完整测试为 `1172 passed`，失败0 |
+| 当前组件测试是否通过 | 是；本轮最终完整测试为 `1197 passed`，失败0、跳过0 |
 
 ## 2. 当前正式资产
 
@@ -234,11 +242,11 @@ AI合法动作枚举完整
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
-# 1172 passed；失败0
+# 1197 passed；失败0、跳过0
 .\.venv\Scripts\python.exe -m compileall -q scripts tests
 # 通过
 .\.venv\Scripts\python.exe -m scripts.sgs_source_integrity_audit . --fail-on-defect --pretty
-# 扫描109个Python文件，defect_count=0；53项均为显式门禁字段或测试证据等audit_item
+# 扫描110个Python文件，defect_count=0；54项均为显式门禁字段或测试证据等audit_item
 ```
 
 当前开发依赖仅声明 pytest 与 pandas；未发现 mypy、ruff、前端 `package.json` 或 CI 配置。因此类型检查、lint、前端测试和 CI 是“未配置”，不是“已通过”。
@@ -259,9 +267,9 @@ AI合法动作枚举完整
 
 1. 正式 Knowledge 尚未把当前160张牌堆纳入单挑适用范围；同名武将、先手首轮摸牌修正等单挑配置仍须由资料或显式配置确定（六种基本牌批次已锁定双人、先手摸2的确定性开局约定）；
 2. `AuthoritativeCoreSession.run_game` 仍是失败关闭占位，尚未接入正式对局循环；
-3. 38 个正式 `card_key` 中已有六种基本牌接入生产适配器批次，其余32种（普通／延时锦囊、武器、防具、坐骑）仍未接入权威 `GameState` 的生产适配器；
+3. 38 个正式 `card_key` 中已有六种基本牌和【无中生有】／【无懈可击】接入生产适配器批次，其余30种（普通／延时锦囊、武器、防具、坐骑）仍未接入权威 `GameState` 的生产适配器；
 4. 普通使用牌、响应牌、判定牌和死亡后牌区清理等完整牌生命周期仍有资料或统一实现缺口；
-5. 【五谷丰登】未被选取亮出牌的最终去向、【无懈可击】的精确 `card_used/card_played` 事件语义，以及非摸牌操作彻底耗尽后的处理仍存在歧义或分析约定；
+5. 【五谷丰登】未被选取亮出牌的最终去向、其余普通锦囊／延时锦囊的精确事件语义，以及非摸牌操作彻底耗尽后的处理仍存在歧义或分析约定（【无懈可击】响应事件已按本项目约定闭合：生成 `card_used`、不生成普通 `card_played`、计入使用或打出总数）；
 6. 里程碑 B 要求的正式100-seed 门槛尚未执行；测试切片的50-seed 结果不能替代它。
 
 只有解决上述阻塞、正式范围内 `unsupported_rules=0`、`approximation_count=0`，并完成100-seed、严格回放、牌守恒和完整 pytest 验收后，才可将 `formal_duel_no_skill_ready` 改为 `true`。其他模式和武将仍需分别验收。
