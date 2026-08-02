@@ -16,7 +16,9 @@
     "milestone_b1_commit": "bffe5516322452b90b7b150d7c4ae35c5b690a0b",
     "milestone_b2_trick_slice_worktree_commit": "0ff3f8a",
     "milestone_b2_trick_slice_commit": "18fb9916796a34a60b62fd490529d80bd9eb75ef",
-    "milestone_b2_trick_slice_commit_note": "最小普通锦囊垂直切片（【无中生有】、【无懈可击】）已由用户在外部PowerShell提交，实现提交哈希 18fb9916796a34a60b62fd490529d80bd9eb75ef（feat: implement production single-target trick slice）；milestone_b2_trick_slice_worktree_commit=0ff3f8a 保留原含义，指工作树实现验证所基于的基线提交，不代表实现提交"
+    "milestone_b2_trick_slice_commit_note": "最小普通锦囊垂直切片（【无中生有】、【无懈可击】）已由用户在外部PowerShell提交，实现提交哈希 18fb9916796a34a60b62fd490529d80bd9eb75ef（feat: implement production single-target trick slice）；milestone_b2_trick_slice_worktree_commit=0ff3f8a 保留原含义，指工作树实现验证所基于的基线提交，不代表实现提交",
+    "milestone_b2_zone_target_trick_batch_commit": "2a73e5c3b3d17dab87bb13168db6e0e4e05a5130",
+    "milestone_b2_zone_target_trick_batch_commit_note": "目标区域选牌批次（【过河拆桥】、【顺手牵羊】）已由用户在外部PowerShell提交，实现提交哈希 2a73e5c3b3d17dab87bb13168db6e0e4e05a5130（feat: implement production zone-target trick slice）"
   },
   "feature_status": {
     "authoritative_core_foundation": true,
@@ -91,9 +93,10 @@
     {
       "id": "CP-04E-PRODUCTION-ZONE-TARGET-TRICK-BATCH",
       "status": "passed",
-      "commit_note": "本批次实现处于工作树（分支 deepseek-zone-target-tricks，基线里程碑标签 milestone-b2-wuzhong-wuxie-audited），尚未由用户提交",
+      "commit_note": "已由用户在外部PowerShell提交真实Git提交（2a73e5c3b3d17dab87bb13168db6e0e4e05a5130，feat: implement production zone-target trick slice）",
       "evidence": "scripts/sgs_engine/production_cards.py、scripts/sgs_engine/production_batch.py、tests/test_sgs_production_zone_target_tricks.py；正式160张牌堆目标区域选牌批次",
-      "scope": "formal；【过河拆桥】6张与【顺手牵羊】5张接入生产注册表与权威核心；目标区域选牌动作、公开区域实体候选、隐藏手牌不透明句柄选择、直接弃置／直接获得实体牌、连续【无懈可击】响应、无合法区域牌结算、牌区生命周期、牌守恒与严格规则重执行；不构成普通锦囊批次或完整正式整局"
+      "scope": "formal；【过河拆桥】6张与【顺手牵羊】5张接入生产注册表与权威核心；目标区域选牌动作、公开区域实体候选、隐藏手牌不透明句柄选择、直接弃置／直接获得实体牌、连续【无懈可击】响应、无合法区域牌结算、牌区生命周期、牌守恒与严格规则重执行；不构成普通锦囊批次或完整正式整局",
+      "commit": "2a73e5c3b3d17dab87bb13168db6e0e4e05a5130"
     }
   ],
   "final_verification": {
@@ -237,7 +240,7 @@
     "docs/LEGACY_RESULTS_INVALID.md": "49b4d882e2fdd12f5074a9a9d1aae4377a8ac2c6d334e0a852d81081dfdbb294",
     "docs/ENGINE_STATUS.md": "9a1f8f85dc874b65bbcb4be2b36e7922b24c7e182318898c6a1d87561f339d51",
     "docs/IMPLEMENTATION_MATRIX.md": "5eed8f1e6bad924e09afb2136a42dc3e2147d208b14dbd071270fd2e14d0da2f",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "2eea87fd5d092543ca7936bf1928cb80719c105d576b0d30fb998d18cecb20cd",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "f947eccbc7a405b0aa3418109aa4955fc4c1abaf49bcf3f3d5f6a2b7100cf598",
     "scripts/sgs_engine_gate.py": "c2f1384f0607588907f4721ec7be5edde1142afc89ed3d1b473fa627a631bc04",
     "scripts/sgs_formal_runner.py": "d139ef9b172c8840245fd659cc570f462f3590febe622a48f7863446bb8a6e00",
     "scripts/sgs_source_integrity_audit.py": "927ace5500cd11d066b7cef65213d087cc3fb5a19b3d7b5e4e0a22371c59836c",
