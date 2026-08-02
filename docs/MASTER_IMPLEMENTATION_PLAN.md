@@ -29,7 +29,7 @@
 | `CP-04-CORE-FOUNDATION` | 不可变实体／状态、事件、响应窗口、动作路由、确定性随机、回放完整性与失败关闭基础会话 | `scripts/sgs_engine/`、对应测试；基线时 `1094 passed`，compileall 通过，源码防伪扫描 `defect_count=0` | 基线 `858d6ced315dfa3df78636528c720c0117fdf3de`；元数据 `5eac686` |
 | `MILESTONE-A-DUEL-VERTICAL-SLICE` | `test_only_duel_vertical_slice` 无技能单挑最小闭环及严格规则重执行 | 50 个 seed 全部自然结束；最大 187 动作；完整测试 `1135 passed` | `455685d6eaa1c297e9ec48a0cfaeb803b81f3406` |
 | `MILESTONE-B1-PRODUCTION-BASIC-CARDS` | 正式160张牌堆中六种基本牌（普通【杀】、火【杀】、雷【杀】、【闪】、【桃】、【酒】）的生产适配器批次 | 六种基本牌共85张实体牌接入生产注册表；37项批次验收测试、严格规则重执行与篡改失败关闭；完整测试 `1172 passed` | 本批次提交（feat: implement production basic-card adapter batch） |
-| `MILESTONE-B2-SINGLE-TARGET-TRICK-SLICE` | 正式160张牌堆最小普通锦囊垂直切片：【无中生有】（4张）与【无懈可击】（7张）接入生产适配器及普通锦囊无效响应基础设施 | 两种锦囊共11张实体牌接入生产注册表；无效响应窗口、连续【无懈可击】响应、放弃响应、被无效仍记已使用、牌区生命周期与严格规则重执行、篡改失败关闭均有验收测试；完整测试 `1197 passed` | 工作树已实现并验证，等待用户在外部PowerShell提交（本轮不执行git add/commit） |
+| `MILESTONE-B2-SINGLE-TARGET-TRICK-SLICE` | 正式160张牌堆最小普通锦囊垂直切片：【无中生有】（4张）与【无懈可击】（7张）接入生产适配器及普通锦囊无效响应基础设施 | 两种锦囊共11张实体牌接入生产注册表；无效响应窗口、连续【无懈可击】响应、放弃响应、被无效仍记已使用、牌区生命周期与严格规则重执行、篡改失败关闭均有验收测试；完整测试 `1197 passed` | 提交 `18fb9916796a34a60b62fd490529d80bd9eb75ef`（feat: implement production single-target trick slice） |
 
 ## 2. 阶段总览
 

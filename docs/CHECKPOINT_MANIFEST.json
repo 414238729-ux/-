@@ -15,8 +15,8 @@
     "historical_note": "CP-01至CP-04的原始哈希检查点已收入Git基线；里程碑A另有独立代码提交",
     "milestone_b1_commit": "bffe5516322452b90b7b150d7c4ae35c5b690a0b",
     "milestone_b2_trick_slice_worktree_commit": "0ff3f8a",
-    "milestone_b2_trick_slice_commit": null,
-    "milestone_b2_trick_slice_commit_note": "最小普通锦囊垂直切片（【无中生有】、【无懈可击】）已在 deepseek-single-target-tricks 工作树完成并通过完整验证；按任务约定不执行 git add/commit，等待用户在外部PowerShell提交"
+    "milestone_b2_trick_slice_commit": "18fb9916796a34a60b62fd490529d80bd9eb75ef",
+    "milestone_b2_trick_slice_commit_note": "最小普通锦囊垂直切片（【无中生有】、【无懈可击】）已由用户在外部PowerShell提交，实现提交哈希 18fb9916796a34a60b62fd490529d80bd9eb75ef（feat: implement production single-target trick slice）；milestone_b2_trick_slice_worktree_commit=0ff3f8a 保留原含义，指工作树实现验证所基于的基线提交，不代表实现提交"
   },
   "feature_status": {
     "authoritative_core_foundation": true,
@@ -76,8 +76,8 @@
     {
       "id": "CP-04D-PRODUCTION-SINGLE-TARGET-TRICK-SLICE",
       "status": "passed",
-      "commit": null,
-      "commit_note": "工作树已实现并通过完整验证；按任务约定不执行git add/commit，等待用户在外部PowerShell提交",
+      "commit": "18fb9916796a34a60b62fd490529d80bd9eb75ef",
+      "commit_note": "已由用户在外部PowerShell提交真实Git提交（18fb9916796a34a60b62fd490529d80bd9eb75ef，feat: implement production single-target trick slice）",
       "evidence": "scripts/sgs_engine/production_cards.py、scripts/sgs_engine/production_batch.py、tests/test_sgs_production_single_target_tricks.py；正式160张牌堆最小普通锦囊垂直切片",
       "scope": "formal；【无中生有】4张与【无懈可击】7张接入生产注册表与权威核心；普通锦囊无效响应窗口、连续【无懈可击】响应、放弃响应、被无效仍记已使用、牌区生命周期、牌守恒与严格规则重执行；不构成普通锦囊批次或完整正式整局"
     },
@@ -205,7 +205,7 @@
     "docs/LEGACY_RESULTS_INVALID.md": "49b4d882e2fdd12f5074a9a9d1aae4377a8ac2c6d334e0a852d81081dfdbb294",
     "docs/ENGINE_STATUS.md": "f8ae30f04b268cfe8d46a77856b3582f295626be1bd45ca7e2f1822dadc3dcf4",
     "docs/IMPLEMENTATION_MATRIX.md": "1c28efeb20d3320392e8287e2fbfa24f227d3c7ed4ae7e99c393bc0db55aacb5",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "419c933382acfeaf10a111a7f72e0364b8b1a1a242f0fd99abce46e868e4e5d2",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "21f2319d2a34a88c0949753a211945e1c0d16e82d106e5b538960c3a416a4645",
     "scripts/sgs_engine_gate.py": "c2f1384f0607588907f4721ec7be5edde1142afc89ed3d1b473fa627a631bc04",
     "scripts/sgs_formal_runner.py": "d139ef9b172c8840245fd659cc570f462f3590febe622a48f7863446bb8a6e00",
     "scripts/sgs_source_integrity_audit.py": "927ace5500cd11d066b7cef65213d087cc3fb5a19b3d7b5e4e0a22371c59836c",
