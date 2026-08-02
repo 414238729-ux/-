@@ -93,7 +93,7 @@ def _find_seed(predicate, max_seed: int = 150) -> int:
 # 1-2 正式牌堆注册表
 # ---------------------------------------------------------------------
 
-def test_formal_160_deck_six_basic_keys_map_to_production_adapters() -> None:
+def test_formal_160_deck_production_card_keys_map_to_production_adapters() -> None:
     game = ProductionBasicCardBatch(seed=1)
     registry = game.formal_registry
 

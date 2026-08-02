@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 
 import pytest
 
@@ -19,12 +20,19 @@ from scripts.sgs_engine.actions import (
     InvalidActionError,
     LegalAction,
     UnsupportedRuleError,
+    apply_action,
     validate_action,
 )
 from scripts.sgs_engine.events import EventType
-from scripts.sgs_engine.model import DISCARD_PILE, PROCESSING_ZONE, ZoneRef
+from scripts.sgs_engine.model import (
+    DISCARD_PILE,
+    DRAW_PILE,
+    PROCESSING_ZONE,
+    ZoneRef,
+)
 from scripts.sgs_engine.production_batch import (
     BatchActionIdController,
+    BatchReferenceController,
     ProductionBasicCardBatch,
     ProductionBatchFinishedError,
     ProductionPhase,
@@ -313,6 +321,100 @@ def test_wuxie_card_completes_zone_lifecycle() -> None:
 # ---------------------------------------------------------------------
 
 
+def test_three_consecutive_wuxie_chain_targets_and_nullification() -> None:
+    game = ProductionBasicCardBatch(seed=292)
+    controller = ScriptedBatchController(
+        [
+            {"operation": "use_slash"},
+            {"operation": "pass_slash_response"},
+            {"operation": "end_play_phase"},
+            {"operation": "end_turn"},
+            {"operation": "use_wuzhong"},
+            {"operation": "pass_trick_response"},
+            {"operation": "use_wuxie"},
+            {"operation": "pass_trick_response"},
+            {"operation": "use_wuxie"},
+            {"operation": "pass_trick_response"},
+            {"operation": "use_wuxie"},
+        ]
+    )
+    for _ in range(11):
+        game.step(controller)
+    trick_id = next(
+        event.card_instance_id
+        for event in game.events
+        if event.event_type is EventType.CARD_USED
+        and event.card_key == WUZHONG
+    )
+    used_wuxie = [
+        event
+        for event in game.events
+        if event.event_type is EventType.CARD_USED and event.card_key == WUXIE
+    ]
+    assert len(used_wuxie) == 3
+    assert used_wuxie[0].payload.get("response_to") == trick_id
+    assert used_wuxie[1].payload.get("response_to") == used_wuxie[0].card_instance_id
+    assert used_wuxie[2].payload.get("response_to") == used_wuxie[1].card_instance_id
+    for event in used_wuxie:
+        assert event.payload.get("root_trick_instance_id") == trick_id
+        assert event.payload.get("creates_card_played_event") is False
+        assert event.payload.get("counts_for_use_or_play_total") is True
+    assert game.runtime.trick_effect_active is False
+    _close_window_with_passes(game)
+    assert game.phase is ProductionPhase.PLAY
+    assert [
+        event
+        for event in game.events
+        if event.event_type is EventType.CARD_EFFECT_CANCELLED
+        and event.card_instance_id == trick_id
+    ]
+    assert game.state.location_of(trick_id) == DISCARD_PILE
+    for event in used_wuxie:
+        assert game.state.location_of(event.card_instance_id) == DISCARD_PILE
+
+
+def test_two_consecutive_wuxie_keep_effect_with_correct_chain() -> None:
+    game = ProductionBasicCardBatch(seed=396)
+    trick_id = _use_wuzhong(game)
+    _step(game, _action(game, "pass_trick_response"))
+    first = _action(game, "use_wuxie")
+    assert first is not None and first.actor_id == "p2"
+    first_id = first.card_instance_id
+    assert first_id is not None
+    _step(game, first)
+    second = _action(game, "use_wuxie")
+    assert second is not None and second.actor_id == "p1"
+    _step(game, second)
+    assert game.runtime.trick_effect_active is True
+    used = [
+        event
+        for event in game.events
+        if event.event_type is EventType.CARD_USED and event.card_key == WUXIE
+    ]
+    assert len(used) == 2
+    assert used[0].payload.get("response_to") == trick_id
+    assert used[1].payload.get("response_to") == first_id
+    assert used[1].card_instance_id != first_id
+    for event in used:
+        assert event.payload.get("root_trick_instance_id") == trick_id
+    before = len(game.events)
+    _close_window_with_passes(game)
+    assert game.phase is ProductionPhase.PLAY
+    gained = [
+        event
+        for event in game.events[before:]
+        if event.event_type is EventType.CARD_GAINED
+        and event.payload.get("reason") == "draw_phase"
+    ]
+    assert len(gained) == 2
+    assert not [
+        event
+        for event in game.events
+        if event.event_type is EventType.CARD_EFFECT_CANCELLED
+        and event.card_instance_id == trick_id
+    ]
+
+
 def test_wuxie_can_respond_to_wuxie_chain() -> None:
     game = ProductionBasicCardBatch(seed=396)
     assert WUXIE in _hand_keys(game, "p1")
@@ -321,9 +423,15 @@ def test_wuxie_can_respond_to_wuxie_chain() -> None:
     _step(game, _action(game, "pass_trick_response"))
     first = _action(game, "use_wuxie")
     assert first is not None and first.actor_id == "p2"
+    first_id = first.card_instance_id
+    assert first_id is not None
+    assert first.payload.get("response_to") == trick_id
+    assert first.payload.get("root_trick_instance_id") == trick_id
     _step(game, first)
     second = _action(game, "use_wuxie")
     assert second is not None and second.actor_id == "p1"
+    assert second.payload.get("response_to") == first_id
+    assert second.payload.get("root_trick_instance_id") == trick_id
     _step(game, second)
     used_wuxie = [
         event
@@ -334,7 +442,10 @@ def test_wuxie_can_respond_to_wuxie_chain() -> None:
     for event in used_wuxie:
         assert event.payload.get("creates_card_played_event") is False
         assert event.payload.get("counts_for_use_or_play_total") is True
-        assert event.payload.get("response_to") == trick_id
+        assert event.payload.get("root_trick_instance_id") == trick_id
+    assert used_wuxie[0].payload.get("response_to") == trick_id
+    assert used_wuxie[1].payload.get("response_to") == first_id
+    assert used_wuxie[1].card_instance_id != first_id
     _close_window_with_passes(game)
     assert game.phase is ProductionPhase.PLAY
     assert game.state.location_of(trick_id) == DISCARD_PILE
@@ -454,6 +565,56 @@ def test_illegal_responder_card_and_stale_actions_rejected() -> None:
         validate_action(game.state, game._context(), stale, game.registry)
 
 
+def test_forged_wuxie_response_targets_fail_closed() -> None:
+    game = ProductionBasicCardBatch(seed=396)
+    trick_id = _use_wuzhong(game)
+    _step(game, _action(game, "pass_trick_response"))
+    assert game.current_actor_id == "p2"
+    first_context = game._context()
+    legal_wuxie = _action(game, "use_wuxie")
+    assert legal_wuxie is not None
+    assert legal_wuxie.payload.get("response_to") == trick_id
+    # 错误 target_ids：验证层拒绝
+    forged_target = replace(legal_wuxie, target_ids=("p2",))
+    with pytest.raises(InvalidActionError):
+        validate_action(game.state, first_context, forged_target, game.registry)
+    # 错误 response_to：验证层拒绝
+    forged_response_to = replace(
+        legal_wuxie,
+        payload={**legal_wuxie.payload, "response_to": "sgs-forged-object"},
+    )
+    with pytest.raises(InvalidActionError):
+        validate_action(
+            game.state, first_context, forged_response_to, game.registry
+        )
+    # 正确响应对象可以真实执行
+    _step(game, legal_wuxie)
+    assert game.current_actor_id == "p1"
+    second_context = game._context()
+    second = _action(game, "use_wuxie")
+    assert second is not None
+    assert second.payload.get("response_to") == legal_wuxie.card_instance_id
+    # 已执行动作过期：直接响应对象已经推进
+    with pytest.raises(InvalidActionError):
+        validate_action(game.state, first_context, legal_wuxie, game.registry)
+    # 伪造 response_to 指回已过期的原锦囊：验证层拒绝
+    stale = replace(
+        second, payload={**second.payload, "response_to": trick_id}
+    )
+    with pytest.raises(InvalidActionError):
+        validate_action(game.state, second_context, stale, game.registry)
+    # 绕过验证层直接把篡改动作交给生产适配器应用时，运行时校验失败关闭
+    canonical = validate_action(
+        game.state, second_context, second, game.registry
+    )
+    tampered = replace(
+        canonical, payload={**canonical.payload, "response_to": trick_id}
+    )
+    wuxie_adapter = game.formal_registry.adapter_for(WUXIE)
+    with pytest.raises(InvalidActionError):
+        wuxie_adapter.apply_action(game.state, second_context, tampered)
+
+
 def test_responder_without_wuxie_has_no_wuxie_action() -> None:
     game = ProductionBasicCardBatch(seed=3)
     assert WUXIE not in _hand_keys(game, "p1")
@@ -466,6 +627,46 @@ def test_responder_without_wuxie_has_no_wuxie_action() -> None:
         action.payload.get("operation") == "pass_trick_response"
         for action in actions
     )
+
+
+def test_both_players_without_wuxie_only_pass_in_trick_window() -> None:
+    game = ProductionBasicCardBatch(seed=18)
+    assert WUXIE not in _hand_keys(game, "p1")
+    assert WUXIE not in _hand_keys(game, "p2")
+    _use_wuzhong(game)
+    for expected_actor in ("p1", "p2"):
+        assert game.current_actor_id == expected_actor
+        operations = {
+            action.payload.get("operation")
+            for action in game.legal_actions()
+        }
+        assert operations == {"pass_trick_response"}
+        _step(game, _action(game, "pass_trick_response"))
+    assert game.phase is ProductionPhase.PLAY
+    gained = [
+        event
+        for event in game.events
+        if event.event_type is EventType.CARD_GAINED
+        and event.payload.get("reason") == "draw_phase"
+        and event.sequence > trick_sequence(game)
+    ]
+    assert len(gained) == 2
+    assert not [
+        event
+        for event in game.events
+        if event.event_type is EventType.CARD_EFFECT_CANCELLED
+    ]
+
+
+def trick_sequence(game: ProductionBasicCardBatch) -> int:
+    used = [
+        event
+        for event in game.events
+        if event.event_type is EventType.CARD_USED
+        and event.card_key == WUZHONG
+    ]
+    assert used
+    return used[0].sequence or 0
 
 
 def test_pass_is_real_legal_action_in_trick_window() -> None:
@@ -523,6 +724,7 @@ def test_hidden_hands_not_exposed_to_unauthorized_decision_input() -> None:
         "target_id",
         "trick_instance_id",
         "trick_key",
+        "root_trick_instance_id",
     }
 
 
@@ -554,6 +756,78 @@ def test_card_conservation_holds_through_trick_paths() -> None:
             assert instance_id not in seen
             seen.add(instance_id)
     assert seen == set(game.state.cards_by_id)
+    game.state.assert_card_conservation()
+
+
+def test_wuzhong_draw_reshuffles_when_draw_pile_exhausted() -> None:
+    game = ProductionBasicCardBatch(seed=102)
+    reached = False
+    while not game.is_finished and game.step_count < 400:
+        context = game._context()
+        legal = game.legal_actions()
+        if context.phase == ProductionPhase.PLAY.value:
+            wuzhong_actions = [
+                action
+                for action in legal
+                if action.payload.get("operation") == "use_wuzhong"
+            ]
+            if wuzhong_actions and len(game.state.card_ids_in(DRAW_PILE)) <= 2:
+                chosen = min(
+                    wuzhong_actions, key=lambda action: action.action_id or ""
+                )
+            else:
+                chosen = BatchReferenceController().choose(legal, context)
+        elif context.phase == ProductionPhase.TRICK_RESPONSE.value:
+            chosen = next(
+                action
+                for action in legal
+                if action.payload.get("operation") == "pass_trick_response"
+            )
+        else:
+            chosen = BatchReferenceController().choose(legal, context)
+        pile_before = len(game.state.card_ids_in(DRAW_PILE))
+        before = len(game.events)
+        game.step(BatchActionIdController(chosen.action_id))
+        new_events = game.events[before:]
+        reasons = [event.payload.get("reason") for event in new_events]
+        if "reshuffle" in reasons and "wuzhong_effect_resolved" in reasons:
+            reached = True
+            assert pile_before == 0
+            reshuffle_moves = [
+                event
+                for event in new_events
+                if event.payload.get("reason") == "reshuffle"
+            ]
+            assert reshuffle_moves
+            assert all(
+                event.payload["source"]["kind"] == "discard_pile"
+                for event in reshuffle_moves
+            )
+            assert all(
+                event.payload["destination"]["kind"] == "draw_pile"
+                for event in reshuffle_moves
+            )
+            draws = [
+                event
+                for event in new_events
+                if event.event_type is EventType.CARD_GAINED
+                and event.payload.get("reason") == "draw_phase"
+            ]
+            assert len(draws) == 2
+            assert all(event.target_ids == ("p1",) for event in draws)
+            assert max(
+                event.sequence or 0 for event in reshuffle_moves
+            ) < min(event.sequence or 0 for event in draws)
+            assert any(
+                event.payload.get("reason") == "wuzhong_effect_resolved"
+                for event in new_events
+            )
+            break
+    assert reached, "【无中生有】摸两张必须真实触发重洗并完成摸牌"
+    assert len(game.state.cards) == 160
+    assert sum(
+        len(game.state.card_ids_in(zone)) for zone in game.state.zone_order
+    ) == 160
     game.state.assert_card_conservation()
 
 

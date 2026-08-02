@@ -56,7 +56,7 @@ approximation_count=0
 | 当前是否存在正式多进程胜率入口 | 否 |
 | 外部 `sgs_sim_engine_worker.py` 是否是正式引擎 | 否；它位于 Downloads，未被仓库导入，是独立近似器 |
 | 外部 `sgs_ai_audit_20260729.py` 是否调用真实 AI | 否；它使用本文件内微场景与自证式 `chosen = expected` |
-| 当前组件测试是否通过 | 是；本轮最终完整测试为 `1197 passed`，失败0、跳过0 |
+| 当前组件测试是否通过 | 是；本轮最终完整测试为 `1202 passed`，失败0、跳过0 |
 
 ## 2. 当前正式资产
 
@@ -242,7 +242,7 @@ AI合法动作枚举完整
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
-# 1197 passed；失败0、跳过0
+# 1202 passed；失败0、跳过0
 .\.venv\Scripts\python.exe -m compileall -q scripts tests
 # 通过
 .\.venv\Scripts\python.exe -m scripts.sgs_source_integrity_audit . --fail-on-defect --pretty

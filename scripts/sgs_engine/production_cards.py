@@ -628,6 +628,10 @@ class WuxiekejiAdapter(TrickCardAdapter):
     生成普通 ``card_played``。对【无懈可击】继续使用【无懈可击】时
     依项目确认的连续响应规则处理：响应顺序从当前回合角色开始按座次
     递增循环询问，连续一整轮无人响应后窗口关闭并按最终生效状态结算。
+    每张响应事件的 ``response_to`` 指向当前直接响应对象（第一张指向
+    原锦囊，之后逐张指向前一张【无懈可击】），``root_trick_instance_id``
+    始终指向原锦囊实体。当前生产批次只实现双人座次响应链，不代表军八、
+    2v2或斗地主多人响应链已经完成。
     """
 
     def __init__(self, session: "ProductionBasicCardBatch | None" = None) -> None:
@@ -646,7 +650,11 @@ class WuxiekejiAdapter(TrickCardAdapter):
             "distance_rule": "not_applicable",
             "response_requirements": [
                 {
-                    "response_to": "normal_trick_effect",
+                    "response_to": (
+                        "current_direct_response_object"
+                        "(previous_wuxiekeji_or_original_trick)"
+                    ),
+                    "root_trick_instance_id": "original_trick_instance",
                     "action": "use",
                     "event_type": "card_used",
                 }
@@ -679,6 +687,9 @@ class WuxiekejiAdapter(TrickCardAdapter):
             card = state.cards_by_id[instance_id]
             if card.card_key != self.card_key:
                 continue
+            direct_response_to = session.runtime.trick_direct_response_to
+            if direct_response_to is None:
+                direct_response_to = trick.trick_instance_id
             actions.append(
                 LegalAction(
                     action_type=ActionType.USE_CARD,
@@ -689,7 +700,8 @@ class WuxiekejiAdapter(TrickCardAdapter):
                         "operation": "use_wuxie",
                         "card_key": self.card_key,
                         "card_name": self.card_name,
-                        "response_to": trick.trick_instance_id,
+                        "response_to": direct_response_to,
+                        "root_trick_instance_id": trick.trick_instance_id,
                     },
                 )
             )

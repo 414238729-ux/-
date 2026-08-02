@@ -146,6 +146,7 @@ class _BatchRuntime:
     trick_response_order: tuple[str, ...] = ()
     trick_response_index: int = 0
     trick_decision_count: int = 0
+    trick_direct_response_to: str | None = None
     pending_dying_id: str | None = None
     rescue_order: tuple[str, ...] = ()
     rescue_index: int = 0
@@ -186,6 +187,7 @@ class _BatchRuntime:
             "trick_response_order": list(self.trick_response_order),
             "trick_response_index": self.trick_response_index,
             "trick_decision_count": self.trick_decision_count,
+            "trick_direct_response_to": self.trick_direct_response_to,
             "pending_dying_id": self.pending_dying_id,
             "rescue_order": list(self.rescue_order),
             "rescue_index": self.rescue_index,
@@ -643,6 +645,9 @@ class ProductionBasicCardBatch:
                             runtime.pending_trick.trick_instance_id
                         ),
                         "trick_key": runtime.pending_trick.trick_key,
+                        "root_trick_instance_id": (
+                            runtime.pending_trick.trick_instance_id
+                        ),
                     }
                 ),
                 "trick_effect_active": runtime.trick_effect_active,
@@ -650,6 +655,9 @@ class ProductionBasicCardBatch:
                     runtime.trick_consecutive_passes
                 ),
                 "trick_response_index": runtime.trick_response_index,
+                "trick_direct_response_to": (
+                    runtime.trick_direct_response_to
+                ),
                 "pending_dying_id": runtime.pending_dying_id,
                 "rescue_index": runtime.rescue_index,
             },
@@ -977,6 +985,7 @@ class ProductionBasicCardBatch:
             trick_response_order=(),
             trick_response_index=0,
             trick_decision_count=0,
+            trick_direct_response_to=None,
             pending_dying_id=None,
             rescue_order=(),
             rescue_index=0,
@@ -1265,6 +1274,7 @@ class ProductionBasicCardBatch:
             trick_response_order=order,
             trick_response_index=0,
             trick_decision_count=0,
+            trick_direct_response_to=action.card_instance_id,
             response_window_id=(
                 f"trick:{runtime.turn_number}:"
                 f"{action.card_instance_id}:dec0"
@@ -1307,6 +1317,14 @@ class ProductionBasicCardBatch:
             raise InvalidActionError(
                 "【无懈可击】只能以当前锦囊效果对应的角色为目标"
             )
+        if action.payload.get("response_to") != runtime.trick_direct_response_to:
+            raise InvalidActionError(
+                "【无懈可击】的响应对象与当前直接响应对象不一致，拒绝伪造或过期响应"
+            )
+        if action.payload.get("root_trick_instance_id") != trick.trick_instance_id:
+            raise InvalidActionError(
+                "【无懈可击】的根锦囊标识与当前结算锦囊不一致"
+            )
         if state.location_of(action.card_instance_id) != ZoneRef.hand(
             context.actor_id
         ):
@@ -1320,7 +1338,8 @@ class ProductionBasicCardBatch:
             card_user=context.actor_id,
             target_ids=(trick.target_id,),
             payload={
-                "response_to": trick.trick_instance_id,
+                "response_to": runtime.trick_direct_response_to,
+                "root_trick_instance_id": trick.trick_instance_id,
                 "response_action": "use",
                 "purpose": "nullify_trick_effect",
                 "creates_card_used_event": True,
@@ -1343,6 +1362,7 @@ class ProductionBasicCardBatch:
             runtime,
             trick_effect_active=not runtime.trick_effect_active,
             trick_consecutive_passes=0,
+            trick_direct_response_to=action.card_instance_id,
             trick_response_index=next_index,
             trick_decision_count=runtime.trick_decision_count + 1,
             response_window_id=self._trick_window_id(
@@ -1821,6 +1841,7 @@ class ProductionBasicCardBatch:
             trick_response_order=(),
             trick_response_index=0,
             trick_decision_count=0,
+            trick_direct_response_to=None,
             pending_dying_id=None,
             rescue_order=(),
             rescue_index=0,

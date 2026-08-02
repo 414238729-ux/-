@@ -91,7 +91,7 @@
   "final_verification": {
     "pytest": {
       "command": ".\\venv\\Scripts\\python.exe -m pytest -q",
-      "passed": 1197,
+      "passed": 1202,
       "failed": 0,
       "skipped": 0
     },
@@ -203,8 +203,8 @@
   "sha256": {
     "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "57093ee848831938eadc821070931b59f4420e04f6babe8ac6f9285f78e8f4af",
     "docs/LEGACY_RESULTS_INVALID.md": "49b4d882e2fdd12f5074a9a9d1aae4377a8ac2c6d334e0a852d81081dfdbb294",
-    "docs/ENGINE_STATUS.md": "f8ae30f04b268cfe8d46a77856b3582f295626be1bd45ca7e2f1822dadc3dcf4",
-    "docs/IMPLEMENTATION_MATRIX.md": "1c28efeb20d3320392e8287e2fbfa24f227d3c7ed4ae7e99c393bc0db55aacb5",
+    "docs/ENGINE_STATUS.md": "49a68b00418959c865e2ec9b22ae0c712fcd96dca1181cb2ee2a19646325c620",
+    "docs/IMPLEMENTATION_MATRIX.md": "a572c77db4f646dbb68941cd145fe94a7771889e05e56fa38e55e7e75aa375c7",
     "docs/MASTER_IMPLEMENTATION_PLAN.md": "21f2319d2a34a88c0949753a211945e1c0d16e82d106e5b538960c3a416a4645",
     "scripts/sgs_engine_gate.py": "c2f1384f0607588907f4721ec7be5edde1142afc89ed3d1b473fa627a631bc04",
     "scripts/sgs_formal_runner.py": "d139ef9b172c8840245fd659cc570f462f3590febe622a48f7863446bb8a6e00",
@@ -221,10 +221,10 @@
     "scripts/sgs_dev_runner.py": "bcedeeca6d74fcd5715d5b9797c32bb9d09b70ee0928b3aba94d0ff81415329c",
     "knowledge/三国杀牌堆数据.csv": "ad643e13ca7fad0905e0efaaf04bf4dff09fad1fd81e1503dab1a83dc67dd4fd",
     "hash_note": "本表为当前工作树文件原始字节的SHA-256（UTF-8无BOM）；仅作状态记录，不参与门禁校验",
-    "scripts/sgs_engine/production_batch.py": "7a765b4469b54748a4e73697941913366d62a00f7387a71e98d506f87fa431b9",
-    "scripts/sgs_engine/production_cards.py": "ebfbd60c30b1fc9a88152b54c700263b5a94b6d7fe3ea6eb1da4c4e56472d89a",
+    "scripts/sgs_engine/production_batch.py": "a084f38ec36f52afdadace840fd20cb793ae435794dec888a44deed68aa5f6a5",
+    "scripts/sgs_engine/production_cards.py": "cc19e985d73a680102340a072c93a419777c138d14bfbb2f17c186775501ae67",
     "scripts/sgs_engine/production_replay.py": "934e6546485e4d4fbdf306087ef3db7b3f15d11d01e80a740661313f8a2978e8",
-    "tests/test_sgs_production_basic_cards.py": "3e0289b15772e2db4c448abe7d67cc9e4dd613768beb8fadd2463d9518bc068f",
-    "tests/test_sgs_production_single_target_tricks.py": "85391469ca39e902decc78028da7e96ff48e76e140980624e2e5f3c0f98894fa"
+    "tests/test_sgs_production_basic_cards.py": "683f6ef0f49bc924f31e848f66007604bb4b833c98915b1d0c517feafcfa48d0",
+    "tests/test_sgs_production_single_target_tricks.py": "44e5985a7f5bd1e5cc547e9a17721af0c695c06afe4b6771f5460c666b22be82"
   }
 }
