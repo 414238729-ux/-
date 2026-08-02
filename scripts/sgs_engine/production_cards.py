@@ -32,7 +32,7 @@ from .actions import (
     UnsupportedRuleError,
 )
 from .engine import DEFAULT_DECK_PATH, AuthoritativeCoreSession
-from .model import GameState, ZoneRef
+from .model import EQUIPMENT_SLOTS, GameState, ZoneRef
 
 if TYPE_CHECKING:
     from .production_batch import ProductionBasicCardBatch
@@ -67,6 +67,8 @@ DEFAULT_ATTACK_RANGE = 1
 PRODUCTION_TRICK_KEYS: tuple[str, ...] = (
     "sgs_trick_wuzhongshengyou",
     "sgs_trick_wuxiekeji",
+    "sgs_trick_guohechaiqiao",
+    "sgs_trick_shunshouqianyang",
 )
 
 
@@ -113,6 +115,49 @@ def is_valid_slash_target(state: GameState, attacker_id: str, target_id: str) ->
     return actual_distance(state, attacker_id, target_id) <= attack_range_of(
         state, attacker_id
     )
+
+
+def target_zone_refs(player_id: str) -> tuple[ZoneRef, ...]:
+    """“区域内的牌”对应的三个玩家区域：手牌区、装备区、判定区。
+
+    这是【过河拆桥】与【顺手牵羊】共用的目标区域基础设施；装备区按
+    正式装备栏顺序展开，不把五个装备栏静默合并成一个区域。
+    """
+
+    zones: list[ZoneRef] = [ZoneRef.hand(player_id)]
+    zones.extend(
+        ZoneRef.equipment(player_id, slot) for slot in sorted(EQUIPMENT_SLOTS)
+    )
+    zones.append(ZoneRef.judgment(player_id))
+    return tuple(zones)
+
+
+def has_target_zone_cards(state: GameState, player_id: str) -> bool:
+    """目标角色的手牌区、装备区与判定区合计至少存在一张实体牌。"""
+
+    return any(state.card_ids_in(zone) for zone in target_zone_refs(player_id))
+
+
+def is_valid_shunshou_target(
+    state: GameState, source_id: str, target_id: str
+) -> bool:
+    """【顺手牵羊】的真实目标合法性：其他角色且实际距离为 1。
+
+    距离条件调用正式 ``actual_distance`` 接口，不使用座位编号差或
+    攻击范围代替。坐骑距离修正尚未实现：当参与该距离的坐骑栏被占用时
+    失败关闭，绝不返回近似距离。
+    """
+
+    if source_id == target_id:
+        return False
+    if state.card_ids_in(ZoneRef.equipment(source_id, "attack_horse")) or (
+        state.card_ids_in(ZoneRef.equipment(target_id, "defense_horse"))
+    ):
+        raise UnsupportedRuleError(
+            "坐骑距离修正尚未实现，不能判定【顺手牵羊】的实际距离条件；"
+            "本批次失败关闭"
+        )
+    return actual_distance(state, source_id, target_id) == 1
 
 
 class BasicCardAdapter(RuleAdapter):
@@ -716,6 +761,222 @@ class WuxiekejiAdapter(TrickCardAdapter):
         raise InvalidActionError("【无懈可击】只能在合法锦囊响应窗口使用")
 
 
+class GuoheChaiqiaoAdapter(TrickCardAdapter):
+    """【过河拆桥】的生产适配器。
+
+    出牌阶段以一名其他角色为目标使用；目标的手牌区、装备区与判定区
+    合计必须至少存在一张合法实体牌。使用后建立与【无中生有】相同的
+    【无懈可击】响应窗口；最终生效时进入目标区域选牌动作，把目标区域
+    内的一张实体牌直接置入弃牌堆。本适配器不检查距离条件，也不把
+    【顺手牵羊】的距离限制错误继承到本牌。
+    """
+
+    def __init__(self, session: "ProductionBasicCardBatch | None" = None) -> None:
+        super().__init__(session)
+        self.card_key = "sgs_trick_guohechaiqiao"
+        self.card_name = "过河拆桥"
+
+    def rule_spec(self) -> dict[str, object]:
+        return {
+            "card_key": self.card_key,
+            "card_name": self.card_name,
+            "use_timing": "own_play_phase",
+            "use_limit": "unlimited_base;requires_entity_card",
+            "target_count": 1,
+            "target_filter": (
+                "one_other_character_with_zone_card(hand|equipment|judgment)"
+            ),
+            "distance_rule": "not_applicable",
+            "response_requirements": [
+                {
+                    "response_card_key": "sgs_trick_wuxiekeji",
+                    "action": "use",
+                    "event_type": "card_used",
+                }
+            ],
+            "nullification_eligible": True,
+            "movement_lifecycle": (
+                "trick:hand->processing->discard;"
+                "target_zone_card->discard(no_gain_then_discard)"
+            ),
+            "effect_resolution": (
+                "nullification_window;discard_one_target_zone_card"
+            ),
+            "damage_nature": "不适用",
+            "completion_event": (
+                "card_used + nullification_window + "
+                "card_moved(target->discard)+card_discarded or effect_cancelled"
+            ),
+            "adapter_version": self.adapter_version,
+            "implemented": self.implemented,
+            "tested": self.tested,
+            "production_adapter": self.production_adapter,
+        }
+
+    def enumerate_legal_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        session = self._require_session()
+        if session.phase.value == "play":
+            if context.actor_id != session.current_player_id:
+                return ()
+            actions: list[LegalAction] = []
+            for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
+                card = state.cards_by_id[instance_id]
+                if card.card_key != self.card_key:
+                    continue
+                for target_id in state.players_by_id:
+                    if target_id == context.actor_id:
+                        continue
+                    if not has_target_zone_cards(state, target_id):
+                        continue
+                    actions.append(
+                        LegalAction(
+                            action_type=ActionType.USE_CARD,
+                            actor_id=context.actor_id,
+                            card_instance_id=instance_id,
+                            target_ids=(target_id,),
+                            payload={
+                                "operation": "use_guohe",
+                                "card_key": self.card_key,
+                                "card_name": self.card_name,
+                            },
+                        )
+                    )
+            return tuple(actions)
+        if session.phase.value == "zone_choice":
+            choice = session.runtime.pending_zone_choice
+            if choice is None or choice.trick_key != self.card_key:
+                return ()
+            return session.enumerate_zone_choice_actions(state, context)
+        return ()
+
+    def apply_action(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        session = self._require_session()
+        if session.phase.value == "play":
+            return session.apply_guohe_use(state, context, action, self)
+        if session.phase.value == "zone_choice":
+            return session.apply_zone_card_choice(state, context, action, self)
+        raise InvalidActionError("【过河拆桥】生产适配器不能处理当前阶段的动作")
+
+
+class ShunshouQianyangAdapter(TrickCardAdapter):
+    """【顺手牵羊】的生产适配器。
+
+    出牌阶段以与使用者实际距离为 1 的一名其他角色为目标使用；目标合法
+    性调用正式 ``actual_distance`` 接口，武器攻击范围不影响该条件。
+    坐骑距离修正尚未实现：坐骑栏占用导致距离无法判定时，本适配器不
+    提供该目标的使用动作（失败关闭），应用层再次检查仍失败关闭。
+    最终生效时进入目标区域选牌动作，把目标区域内的一张实体牌直接移入
+    使用者手牌，不先公开目标手牌再选择。
+    """
+
+    def __init__(self, session: "ProductionBasicCardBatch | None" = None) -> None:
+        super().__init__(session)
+        self.card_key = "sgs_trick_shunshouqianyang"
+        self.card_name = "顺手牵羊"
+
+    def rule_spec(self) -> dict[str, object]:
+        return {
+            "card_key": self.card_key,
+            "card_name": self.card_name,
+            "use_timing": "own_play_phase",
+            "use_limit": "unlimited_base;requires_entity_card",
+            "target_count": 1,
+            "target_filter": (
+                "one_other_character_at_actual_distance_1_with_zone_card"
+            ),
+            "distance_rule": (
+                "actual_distance(user,target)==1;"
+                "weapon_attack_range_ignored;mount_modifiers_fail_closed"
+            ),
+            "response_requirements": [
+                {
+                    "response_card_key": "sgs_trick_wuxiekeji",
+                    "action": "use",
+                    "event_type": "card_used",
+                }
+            ],
+            "nullification_eligible": True,
+            "movement_lifecycle": (
+                "trick:hand->processing->discard;"
+                "target_zone_card->user_hand(direct_move)"
+            ),
+            "effect_resolution": (
+                "nullification_window;gain_one_target_zone_card_into_user_hand"
+            ),
+            "damage_nature": "不适用",
+            "completion_event": (
+                "card_used + nullification_window + "
+                "card_moved(target->user_hand)+card_lost+card_gained "
+                "or effect_cancelled"
+            ),
+            "adapter_version": self.adapter_version,
+            "implemented": self.implemented,
+            "tested": self.tested,
+            "production_adapter": self.production_adapter,
+        }
+
+    def enumerate_legal_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        session = self._require_session()
+        if session.phase.value == "play":
+            if context.actor_id != session.current_player_id:
+                return ()
+            actions: list[LegalAction] = []
+            for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
+                card = state.cards_by_id[instance_id]
+                if card.card_key != self.card_key:
+                    continue
+                for target_id in state.players_by_id:
+                    if target_id == context.actor_id:
+                        continue
+                    if not has_target_zone_cards(state, target_id):
+                        continue
+                    try:
+                        if not is_valid_shunshou_target(
+                            state, context.actor_id, target_id
+                        ):
+                            continue
+                    except UnsupportedRuleError:
+                        # 坐骑修正未实现导致距离不可判定：不提供该动作，
+                        # 不把“所有对手都可指定”硬编码进合法集合。
+                        continue
+                    actions.append(
+                        LegalAction(
+                            action_type=ActionType.USE_CARD,
+                            actor_id=context.actor_id,
+                            card_instance_id=instance_id,
+                            target_ids=(target_id,),
+                            payload={
+                                "operation": "use_shunshou",
+                                "card_key": self.card_key,
+                                "card_name": self.card_name,
+                            },
+                        )
+                    )
+            return tuple(actions)
+        if session.phase.value == "zone_choice":
+            choice = session.runtime.pending_zone_choice
+            if choice is None or choice.trick_key != self.card_key:
+                return ()
+            return session.enumerate_zone_choice_actions(state, context)
+        return ()
+
+    def apply_action(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        session = self._require_session()
+        if session.phase.value == "play":
+            return session.apply_shunshou_use(state, context, action, self)
+        if session.phase.value == "zone_choice":
+            return session.apply_zone_card_choice(state, context, action, self)
+        raise InvalidActionError("【顺手牵羊】生产适配器不能处理当前阶段的动作")
+
+
 def _default_adapters() -> dict[str, RuleAdapter]:
     return {
         "sgs_basic_sha": SlashAdapter("sgs_basic_sha", "无属性"),
@@ -726,6 +987,8 @@ def _default_adapters() -> dict[str, RuleAdapter]:
         "sgs_basic_jiu": WineAdapter(),
         "sgs_trick_wuzhongshengyou": WuzhongshengyouAdapter(),
         "sgs_trick_wuxiekeji": WuxiekejiAdapter(),
+        "sgs_trick_guohechaiqiao": GuoheChaiqiaoAdapter(),
+        "sgs_trick_shunshouqianyang": ShunshouQianyangAdapter(),
     }
 
 
@@ -862,6 +1125,8 @@ __all__ = [
     "PRODUCTION_BASIC_CARD_KEYS",
     "PRODUCTION_TRICK_KEYS",
     "SLASH_CARD_KEYS",
+    "GuoheChaiqiaoAdapter",
+    "ShunshouQianyangAdapter",
     "TrickCardAdapter",
     "WuxiekejiAdapter",
     "WuzhongshengyouAdapter",
@@ -873,5 +1138,8 @@ __all__ = [
     "WineAdapter",
     "actual_distance",
     "attack_range_of",
+    "has_target_zone_cards",
+    "is_valid_shunshou_target",
     "is_valid_slash_target",
+    "target_zone_refs",
 ]

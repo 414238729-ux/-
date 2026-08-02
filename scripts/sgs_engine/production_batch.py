@@ -58,16 +58,22 @@ from .model import (
     CardInstance,
     GameState,
     PlayerState,
+    ZoneKind,
     ZoneRef,
 )
 from .production_cards import (
     FormalCardRegistry,
+    GuoheChaiqiaoAdapter,
+    ShunshouQianyangAdapter,
     SlashAdapter,
     WuxiekejiAdapter,
     WuzhongshengyouAdapter,
+    has_target_zone_cards,
+    is_valid_shunshou_target,
     is_valid_slash_target,
+    target_zone_refs,
 )
-from .replay import canonical_json, sha256_value
+from .replay import canonical_json, sha256_value, state_sha256
 from .rng import DeterministicRNG, RNGCall
 
 
@@ -78,6 +84,7 @@ class ProductionPhase(str, Enum):
     PLAY = "play"
     SLASH_RESPONSE = "slash_response"
     TRICK_RESPONSE = "trick_response"
+    ZONE_CHOICE = "zone_choice"
     DYING_RESCUE = "dying_rescue"
     END = "end"
     FINISHED = "finished"
@@ -87,6 +94,7 @@ BATCH_PHASES: tuple[ProductionPhase, ...] = (
     ProductionPhase.PLAY,
     ProductionPhase.SLASH_RESPONSE,
     ProductionPhase.TRICK_RESPONSE,
+    ProductionPhase.ZONE_CHOICE,
     ProductionPhase.DYING_RESCUE,
     ProductionPhase.END,
 )
@@ -132,6 +140,23 @@ class _PendingTrick:
 
 
 @dataclass(frozen=True, slots=True)
+class _PendingZoneChoice:
+    """普通锦囊生效后打开的目标区域选牌窗口。
+
+    该窗口绑定原锦囊实例、使用者、目标角色与选择窗口标识；隐藏手牌
+    候选只通过不透明句柄暴露，真实实体映射保存在运行时的
+    ``zone_choice_handles`` 中，由权威引擎解析。
+    """
+
+    user_id: str
+    target_id: str
+    trick_instance_id: str
+    trick_key: str
+    window_id: str
+    zones: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class _BatchRuntime:
     current_player_id: str
     turn_number: int = 1
@@ -154,6 +179,8 @@ class _BatchRuntime:
     response_window_id: str | None = None
     response_window_order: tuple[str, ...] = ()
     response_window_source_sequence: int | None = None
+    pending_zone_choice: _PendingZoneChoice | None = None
+    zone_choice_handles: Mapping[str, str] = MappingProxyType({})
     winner_id: str | None = None
 
     def audit_value(self) -> dict[str, object]:
@@ -172,6 +199,18 @@ class _BatchRuntime:
                 "target_id": self.pending_trick.target_id,
                 "trick_instance_id": self.pending_trick.trick_instance_id,
                 "trick_key": self.pending_trick.trick_key,
+            }
+        pending_zone_choice = None
+        if self.pending_zone_choice is not None:
+            pending_zone_choice = {
+                "user_id": self.pending_zone_choice.user_id,
+                "target_id": self.pending_zone_choice.target_id,
+                "trick_instance_id": (
+                    self.pending_zone_choice.trick_instance_id
+                ),
+                "trick_key": self.pending_zone_choice.trick_key,
+                "window_id": self.pending_zone_choice.window_id,
+                "zones": list(self.pending_zone_choice.zones),
             }
         return {
             "current_player_id": self.current_player_id,
@@ -195,6 +234,8 @@ class _BatchRuntime:
             "response_window_id": self.response_window_id,
             "response_window_order": list(self.response_window_order),
             "response_window_source_sequence": self.response_window_source_sequence,
+            "pending_zone_choice": pending_zone_choice,
+            "zone_choice_handles": dict(self.zone_choice_handles),
             "winner_id": self.winner_id,
         }
 
@@ -212,6 +253,84 @@ def _card_key(state: GameState, instance_id: str) -> str:
     return state.cards_by_id[instance_id].card_key
 
 
+ZONE_CHOICE_TRICK_KEYS: tuple[str, ...] = (
+    "sgs_trick_guohechaiqiao",
+    "sgs_trick_shunshouqianyang",
+)
+
+
+def _zone_id(zone: ZoneRef) -> str:
+    """选牌区域标识：hand / judgment / equipment:<槽位>。"""
+
+    if zone.kind is ZoneKind.HAND:
+        return "hand"
+    if zone.kind is ZoneKind.JUDGMENT:
+        return "judgment"
+    if zone.kind is ZoneKind.EQUIPMENT:
+        if zone.equipment_slot is None:
+            raise ProductionBatchError("装备区缺少槽位标识，无法生成区域标识")
+        return f"equipment:{zone.equipment_slot}"
+    raise ProductionBatchError(
+        f"不支持的选牌目标区域：{zone.kind.value!r}"
+    )
+
+
+def _zone_from_id(zone_id: object, owner_id: str) -> ZoneRef:
+    """把选牌区域标识解析回权威牌区引用。"""
+
+    if not isinstance(zone_id, str):
+        raise InvalidActionError("选牌区域标识必须是字符串")
+    if zone_id == "hand":
+        return ZoneRef.hand(owner_id)
+    if zone_id == "judgment":
+        return ZoneRef.judgment(owner_id)
+    if zone_id.startswith("equipment:"):
+        slot = zone_id.split(":", 1)[1]
+        return ZoneRef.equipment(owner_id, slot)
+    raise InvalidActionError(f"无法识别的选牌区域标识：{zone_id!r}")
+
+
+def _hand_choice_handle(window_id: str, instance_id: str) -> str:
+    """生成绑定当前选择窗口的隐藏手牌选择句柄。
+
+    句柄是窗口ID与实体牌ID的SHA-256摘要前缀；决策输入不携带实体牌ID、
+    牌名、花色或点数，无法从句柄反推出牌面。
+    """
+
+    digest = sha256_value(
+        {
+            "zone_choice_window": window_id,
+            "zone": "hand",
+            "instance_id": instance_id,
+        }
+    )
+    return "h_" + digest[:32]
+
+
+def _resolve_hand_choice_handle(
+    state: GameState, window_id: str, target_id: str, handle: object
+) -> str | None:
+    """把隐藏句柄解析为目标当前手牌中的真实实体；无法解析时返回None。"""
+
+    if not isinstance(handle, str):
+        return None
+    for instance_id in state.card_ids_in(ZoneRef.hand(target_id)):
+        if _hand_choice_handle(window_id, instance_id) == handle:
+            return instance_id
+    return None
+
+
+def _zone_choice_handle_snapshot(
+    state: GameState, target_id: str, window_id: str
+) -> Mapping[str, str]:
+    """为当前选择窗口生成目标手牌的隐藏句柄快照（句柄到实体ID的映射）。"""
+
+    return MappingProxyType(
+        {
+            _hand_choice_handle(window_id, instance_id): instance_id
+            for instance_id in state.card_ids_in(ZoneRef.hand(target_id))
+        }
+    )
 def _replace_player(
     state: GameState,
     player_id: str,
@@ -281,6 +400,8 @@ class BatchReferenceController:
                 rank = 0 if operation == "play_dodge" else 9
             elif context.phase == ProductionPhase.TRICK_RESPONSE.value:
                 rank = 0 if operation == "use_wuxie" else 1
+            elif context.phase == ProductionPhase.ZONE_CHOICE.value:
+                rank = 0 if operation == "choose_target_zone_card" else 9
             elif context.phase == ProductionPhase.DYING_RESCUE.value:
                 if operation == "rescue_with_peach" and action.target_ids == (
                     action.actor_id,
@@ -347,6 +468,12 @@ class ScriptedBatchController:
                     return False
             elif key == "card_instance_id":
                 if action.card_instance_id != value:
+                    return False
+            elif key == "zone":
+                if action.payload.get("zone") != value:
+                    return False
+            elif key == "handle":
+                if action.payload.get("handle") != value:
                     return False
             else:
                 return False
@@ -595,6 +722,10 @@ class ProductionBasicCardBatch:
             if runtime.trick_response_index >= len(runtime.trick_response_order):
                 raise ProductionBatchError("锦囊响应顺序已经耗尽")
             return runtime.trick_response_order[runtime.trick_response_index]
+        if runtime.phase is ProductionPhase.ZONE_CHOICE:
+            if runtime.pending_zone_choice is None:
+                raise ProductionBatchError("目标区域选牌阶段缺少选牌窗口")
+            return runtime.pending_zone_choice.user_id
         if runtime.phase is ProductionPhase.DYING_RESCUE:
             if not runtime.rescue_order:
                 raise ProductionBatchError("濒死阶段缺少救援顺序")
@@ -657,6 +788,20 @@ class ProductionBasicCardBatch:
                 "trick_response_index": runtime.trick_response_index,
                 "trick_direct_response_to": (
                     runtime.trick_direct_response_to
+                ),
+                "pending_zone_choice": (
+                    None
+                    if runtime.pending_zone_choice is None
+                    else {
+                        "user_id": runtime.pending_zone_choice.user_id,
+                        "target_id": runtime.pending_zone_choice.target_id,
+                        "trick_instance_id": (
+                            runtime.pending_zone_choice.trick_instance_id
+                        ),
+                        "trick_key": runtime.pending_zone_choice.trick_key,
+                        "window_id": runtime.pending_zone_choice.window_id,
+                        "zones": list(runtime.pending_zone_choice.zones),
+                    }
                 ),
                 "pending_dying_id": runtime.pending_dying_id,
                 "rescue_index": runtime.rescue_index,
@@ -816,6 +961,9 @@ class ProductionBasicCardBatch:
                     payload={"operation": "pass_trick_response"},
                 )
             )
+        elif self.phase is ProductionPhase.ZONE_CHOICE:
+            for adapter in self._formal_registry.adapters.values():
+                actions.extend(adapter.enumerate_legal_actions(state, context))
         elif self.phase is ProductionPhase.DYING_RESCUE:
             for adapter in self._formal_registry.adapters.values():
                 actions.extend(adapter.enumerate_legal_actions(state, context))
@@ -859,6 +1007,14 @@ class ProductionBasicCardBatch:
             if operation == "use_wuzhong":
                 return self._formal_registry.adapter_for(
                     "sgs_trick_wuzhongshengyou"
+                ).apply_action(state, context, action)
+            if operation == "use_guohe":
+                return self._formal_registry.adapter_for(
+                    "sgs_trick_guohechaiqiao"
+                ).apply_action(state, context, action)
+            if operation == "use_shunshou":
+                return self._formal_registry.adapter_for(
+                    "sgs_trick_shunshouqianyang"
                 ).apply_action(state, context, action)
             if action.action_type is ActionType.PASS and operation == (
                 "end_play_phase"
@@ -909,6 +1065,16 @@ class ProductionBasicCardBatch:
             ):
                 return self.apply_pass_rescue(state, context, action)
             raise InvalidActionError("濒死救援阶段不支持当前动作")
+
+        if self.phase is ProductionPhase.ZONE_CHOICE:
+            if operation == "choose_target_zone_card":
+                choice = self._runtime.pending_zone_choice
+                if choice is None:
+                    raise InvalidActionError("当前没有打开的目标区域选牌窗口")
+                return self._formal_registry.adapter_for(
+                    choice.trick_key
+                ).apply_action(state, context, action)
+            raise InvalidActionError("目标区域选牌阶段不支持当前动作")
 
         raise ProductionBatchError(
             f"阶段{self.phase.value!r}不能应用动作"
@@ -993,6 +1159,8 @@ class ProductionBasicCardBatch:
             response_window_id=None,
             response_window_order=(),
             response_window_source_sequence=None,
+            pending_zone_choice=None,
+            zone_choice_handles=MappingProxyType({}),
         )
 
     # ------------------------------------------------------------------
@@ -1400,16 +1568,26 @@ class ProductionBasicCardBatch:
         if next_passes >= len(runtime.trick_response_order):
             # 连续一整轮无人响应：窗口关闭，按最终生效状态结算。
             if runtime.trick_effect_active:
-                next_state, draw_events = self._draw_cards(
-                    state, trick.target_id, 2
-                )
-                self._events.extend(draw_events)
-                next_state, finish_event = self._finish_processing(
-                    next_state,
-                    trick.trick_instance_id,
-                    "wuzhong_effect_resolved",
-                )
-                self._events.extend((finish_event,))
+                if trick.trick_key == "sgs_trick_wuzhongshengyou":
+                    next_state, draw_events = self._draw_cards(
+                        state, trick.target_id, 2
+                    )
+                    self._events.extend(draw_events)
+                    next_state, finish_event = self._finish_processing(
+                        next_state,
+                        trick.trick_instance_id,
+                        "wuzhong_effect_resolved",
+                    )
+                    self._events.extend((finish_event,))
+                    next_runtime = self._return_to_play(runtime)
+                elif trick.trick_key in ZONE_CHOICE_TRICK_KEYS:
+                    next_state, next_runtime = self._open_zone_choice(
+                        state, runtime, trick
+                    )
+                else:
+                    raise ProductionBatchError(
+                        f"卡牌{trick.trick_key!r}尚未实现锦囊生效结算；失败关闭"
+                    )
             else:
                 cancelled_event = GameEvent(
                     event_type=EventType.CARD_EFFECT_CANCELLED,
@@ -1419,13 +1597,18 @@ class ProductionBasicCardBatch:
                     target_ids=(trick.target_id,),
                     payload={"reason": "nullified_by_wuxie"},
                 )
+                nullified_reason = (
+                    "wuzhong_nullified"
+                    if trick.trick_key == "sgs_trick_wuzhongshengyou"
+                    else f"{trick.trick_key}_nullified"
+                )
                 next_state, finish_event = self._finish_processing(
                     state,
                     trick.trick_instance_id,
-                    "wuzhong_nullified",
+                    nullified_reason,
                 )
                 self._events.extend((cancelled_event, finish_event))
-            next_runtime = self._return_to_play(runtime)
+                next_runtime = self._return_to_play(runtime)
         else:
             next_state = state
             next_index = (runtime.trick_response_index + 1) % len(
@@ -1443,6 +1626,509 @@ class ProductionBasicCardBatch:
             )
         self._commit_runtime(runtime, next_runtime)
         return next_state
+
+    # ------------------------------------------------------------------
+    # 【过河拆桥】【顺手牵羊】与目标区域选牌（普通锦囊第二批）
+    # ------------------------------------------------------------------
+
+    def apply_guohe_use(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: GuoheChaiqiaoAdapter,
+    ) -> GameState:
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.PLAY:
+            raise InvalidActionError("【过河拆桥】只能在出牌阶段使用")
+        if context.actor_id != runtime.current_player_id:
+            raise InvalidActionError("只有当前回合角色可以使用【过河拆桥】")
+        if action.card_instance_id is None or len(action.target_ids) != 1:
+            raise InvalidActionError(
+                "使用【过河拆桥】必须指定一张实体牌和恰好一名目标"
+            )
+        card = state.cards_by_id[action.card_instance_id]
+        if card.card_key != adapter.card_key:
+            raise InvalidActionError("【过河拆桥】动作的实体牌与适配器卡牌键不一致")
+        if str(action.payload.get("card_key", "")) != adapter.card_key:
+            raise InvalidActionError("【过河拆桥】动作负载与适配器卡牌键不一致")
+        target = action.target_ids[0]
+        if target == context.actor_id:
+            raise InvalidActionError("【过河拆桥】不能以自己为目标")
+        if not has_target_zone_cards(state, target):
+            raise InvalidActionError(
+                "【过河拆桥】目标的手牌区、装备区与判定区必须至少存在一张牌"
+            )
+        if state.location_of(action.card_instance_id) != ZoneRef.hand(
+            context.actor_id
+        ):
+            raise InvalidActionError("只能使用行动角色真实手牌中的实体牌")
+        return self._open_trick_use_window(
+            state,
+            runtime,
+            context,
+            action,
+            adapter,
+            target,
+            move_reason="guohechaiqiao_use",
+            purpose="discard_one_target_zone_card",
+        )
+
+    def apply_shunshou_use(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: ShunshouQianyangAdapter,
+    ) -> GameState:
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.PLAY:
+            raise InvalidActionError("【顺手牵羊】只能在出牌阶段使用")
+        if context.actor_id != runtime.current_player_id:
+            raise InvalidActionError("只有当前回合角色可以使用【顺手牵羊】")
+        if action.card_instance_id is None or len(action.target_ids) != 1:
+            raise InvalidActionError(
+                "使用【顺手牵羊】必须指定一张实体牌和恰好一名目标"
+            )
+        card = state.cards_by_id[action.card_instance_id]
+        if card.card_key != adapter.card_key:
+            raise InvalidActionError("【顺手牵羊】动作的实体牌与适配器卡牌键不一致")
+        if str(action.payload.get("card_key", "")) != adapter.card_key:
+            raise InvalidActionError("【顺手牵羊】动作负载与适配器卡牌键不一致")
+        target = action.target_ids[0]
+        if target == context.actor_id:
+            raise InvalidActionError("【顺手牵羊】不能以自己为目标")
+        if not is_valid_shunshou_target(state, context.actor_id, target):
+            raise InvalidActionError(
+                "【顺手牵羊】目标与使用者的实际距离必须为 1"
+            )
+        if not has_target_zone_cards(state, target):
+            raise InvalidActionError(
+                "【顺手牵羊】目标的手牌区、装备区与判定区必须至少存在一张牌"
+            )
+        if state.location_of(action.card_instance_id) != ZoneRef.hand(
+            context.actor_id
+        ):
+            raise InvalidActionError("只能使用行动角色真实手牌中的实体牌")
+        return self._open_trick_use_window(
+            state,
+            runtime,
+            context,
+            action,
+            adapter,
+            target,
+            move_reason="shunshouqianyang_use",
+            purpose="gain_one_target_zone_card",
+        )
+
+    def _open_trick_use_window(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: WuzhongshengyouAdapter,
+        target_id: str,
+        *,
+        move_reason: str,
+        purpose: str,
+    ) -> GameState:
+        """普通锦囊使用的公共开窗步骤：实体牌进入处理区并建立响应链。"""
+
+        if action.card_instance_id is None:
+            raise InvalidActionError("使用普通锦囊必须指定实体牌")
+        next_state, move_event = self._move_to_processing(
+            state, action.card_instance_id, context.actor_id, move_reason
+        )
+        used_event = GameEvent(
+            event_type=EventType.CARD_USED,
+            card_instance_id=action.card_instance_id,
+            card_key=adapter.card_key,
+            card_user=context.actor_id,
+            target_ids=(target_id,),
+            payload={"purpose": purpose, "card_name": adapter.card_name},
+        )
+        queued = self._events.extend((used_event, move_event))
+        used_sequence = queued[0].sequence
+        assert used_sequence is not None
+        order = (
+            runtime.current_player_id,
+            self.opponent_of(runtime.current_player_id),
+        )
+        next_runtime = replace(
+            runtime,
+            phase=ProductionPhase.TRICK_RESPONSE,
+            pending_trick=_PendingTrick(
+                context.actor_id,
+                target_id,
+                action.card_instance_id,
+                adapter.card_key,
+            ),
+            trick_effect_active=True,
+            trick_consecutive_passes=0,
+            trick_response_order=order,
+            trick_response_index=0,
+            trick_decision_count=0,
+            trick_direct_response_to=action.card_instance_id,
+            response_window_id=(
+                f"trick:{runtime.turn_number}:"
+                f"{action.card_instance_id}:dec0"
+            ),
+            response_window_order=(order[0],),
+            response_window_source_sequence=used_sequence,
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def _open_zone_choice(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        trick: _PendingTrick,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """目标区域选牌锦囊生效后按结算时目标状态打开选牌窗口。
+
+        无懈链结束时若目标三个区域合计已经没有任何合法牌：不把原使用
+        追溯为非法，不凭空选牌、不移动不存在的牌，原锦囊仍按已经使用
+        处理并进入弃牌堆，结算移动事件记录“结算时无合法区域牌”原因。
+        """
+        if not has_target_zone_cards(state, trick.target_id):
+            next_state, finish_event = self._finish_processing(
+                state,
+                trick.trick_instance_id,
+                f"{trick.trick_key}_effect_resolved_no_legal_zone_card",
+                extra={"no_legal_zone_card": True},
+            )
+            self._events.extend((finish_event,))
+            return next_state, self._return_to_play(runtime)
+        window_id = (
+            f"zone-choice:{runtime.turn_number}:{trick.trick_instance_id}"
+        )
+        next_runtime = replace(
+            runtime,
+            phase=ProductionPhase.ZONE_CHOICE,
+            pending_zone_choice=_PendingZoneChoice(
+                user_id=trick.user_id,
+                target_id=trick.target_id,
+                trick_instance_id=trick.trick_instance_id,
+                trick_key=trick.trick_key,
+                window_id=window_id,
+                zones=tuple(
+                    _zone_id(zone) for zone in target_zone_refs(trick.target_id)
+                ),
+            ),
+            zone_choice_handles=_zone_choice_handle_snapshot(
+                state, trick.target_id, window_id
+            ),
+            trick_consecutive_passes=0,
+            trick_response_order=(),
+            trick_response_index=0,
+            trick_decision_count=0,
+            trick_direct_response_to=None,
+            response_window_id=None,
+            response_window_order=(),
+            response_window_source_sequence=None,
+        )
+        return state, next_runtime
+
+    def enumerate_zone_choice_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        """枚举目标区域选牌动作。
+
+        公开区域（装备区、判定区）以明确实体候选展示；隐藏手牌区只暴露
+        绑定当前状态、目标与选择窗口的不透明句柄，不泄露牌名、花色、
+        点数或可识别实体ID。
+        """
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.ZONE_CHOICE:
+            raise ProductionBatchError("目标区域选牌动作只能在选牌阶段枚举")
+        choice = runtime.pending_zone_choice
+        if choice is None:
+            raise ProductionBatchError("目标区域选牌阶段缺少选牌窗口")
+        if context.actor_id != choice.user_id:
+            return ()
+        if state.location_of(choice.trick_instance_id) != PROCESSING_ZONE:
+            raise ProductionBatchError(
+                "原锦囊已不在处理区，选牌窗口不能继续枚举动作"
+            )
+        state_hash = state_sha256(canonical_state_snapshot(state))
+        actions: list[LegalAction] = []
+        for zone_id in choice.zones:
+            zone = _zone_from_id(zone_id, choice.target_id)
+            base = {
+                "operation": "choose_target_zone_card",
+                "trick_instance_id": choice.trick_instance_id,
+                "root_trick_instance_id": choice.trick_instance_id,
+                "user_id": choice.user_id,
+                "target_id": choice.target_id,
+                "zone": zone_id,
+                "window_id": choice.window_id,
+                "state_hash": state_hash,
+            }
+            if zone.kind is ZoneKind.HAND:
+                for instance_id in state.card_ids_in(zone):
+                    actions.append(
+                        LegalAction(
+                            action_type=ActionType.MOVE_CARD,
+                            actor_id=context.actor_id,
+                            target_ids=(choice.target_id,),
+                            payload={
+                                **base,
+                                "handle": _hand_choice_handle(
+                                    choice.window_id, instance_id
+                                ),
+                            },
+                        )
+                    )
+            else:
+                for instance_id in state.card_ids_in(zone):
+                    actions.append(
+                        LegalAction(
+                            action_type=ActionType.MOVE_CARD,
+                            actor_id=context.actor_id,
+                            card_instance_id=instance_id,
+                            target_ids=(choice.target_id,),
+                            payload={
+                                **base,
+                                "card_key": _card_key(state, instance_id),
+                            },
+                        )
+                    )
+        return tuple(actions)
+
+    def apply_zone_card_choice(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: GuoheChaiqiaoAdapter | ShunshouQianyangAdapter,
+    ) -> GameState:
+        """权威解析目标区域选牌动作并完成实体牌移动。
+
+        隐藏句柄由权威引擎解析为真实实体；过期或伪造句柄、区域或实体
+        篡改一律失败关闭。过河拆桥直接把牌置入弃牌堆（不经过先获得再
+        弃置），顺手牵羊把牌直接从原区域移入使用者手牌。
+        """
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.ZONE_CHOICE:
+            raise InvalidActionError("目标区域选牌动作只能在选牌阶段执行")
+        choice = runtime.pending_zone_choice
+        if choice is None:
+            raise InvalidActionError("当前没有打开的目标区域选牌窗口")
+        if context.actor_id != choice.user_id:
+            raise InvalidActionError("只有锦囊使用者可以选择目标区域牌")
+        if adapter.card_key != choice.trick_key:
+            raise InvalidActionError("选牌动作的适配器与当前选牌窗口不一致")
+        if not runtime.trick_effect_active:
+            raise InvalidActionError(
+                "锦囊效果已被【无懈可击】无效，不能再选择目标区域牌"
+            )
+        if action.action_type is not ActionType.MOVE_CARD:
+            raise InvalidActionError("目标区域选牌动作必须是move_card类型")
+        payload = action.payload
+        if str(payload.get("operation", "")) != "choose_target_zone_card":
+            raise InvalidActionError("目标区域选牌动作负载无效")
+        if payload.get("trick_instance_id") != choice.trick_instance_id:
+            raise InvalidActionError("选牌动作绑定的锦囊实例与当前窗口不一致")
+        if payload.get("root_trick_instance_id") != choice.trick_instance_id:
+            raise InvalidActionError("选牌动作绑定的根锦囊与当前窗口不一致")
+        if payload.get("user_id") != choice.user_id:
+            raise InvalidActionError("选牌动作绑定的使用者与当前窗口不一致")
+        if payload.get("target_id") != choice.target_id:
+            raise InvalidActionError("选牌动作绑定的目标角色与当前窗口不一致")
+        if payload.get("window_id") != choice.window_id:
+            raise InvalidActionError("选牌动作绑定的选择窗口已过期")
+        if payload.get("state_hash") != state_sha256(
+            canonical_state_snapshot(state)
+        ):
+            raise InvalidActionError("选牌动作绑定的状态哈希与当前状态不一致")
+        zone_id = payload.get("zone")
+        if not isinstance(zone_id, str) or zone_id not in choice.zones:
+            raise InvalidActionError("选牌动作绑定的目标区域不在当前窗口内")
+        zone = _zone_from_id(zone_id, choice.target_id)
+        if state.location_of(choice.trick_instance_id) != PROCESSING_ZONE:
+            raise InvalidActionError(
+                "原锦囊已不在处理区，选牌窗口已过期"
+            )
+
+        from_hidden = zone.kind is ZoneKind.HAND
+        if from_hidden:
+            if action.card_instance_id is not None:
+                raise InvalidActionError(
+                    "隐藏手牌选择不得携带实体牌ID，避免泄露牌面"
+                )
+            instance_id = _resolve_hand_choice_handle(
+                state, choice.window_id, choice.target_id, payload.get("handle")
+            )
+            if instance_id is None:
+                raise InvalidActionError(
+                    "隐藏选择句柄无法解析为当前手牌中的真实实体，"
+                    "句柄已过期或系伪造"
+                )
+        else:
+            if payload.get("handle") is not None:
+                raise InvalidActionError(
+                    "公开区域选择不得携带隐藏选择句柄"
+                )
+            instance_id = action.card_instance_id
+            if instance_id is None or state.location_of(instance_id) != zone:
+                raise InvalidActionError(
+                    "所选实体牌已不在目标区域，选择已过期"
+                )
+            if payload.get("card_key") != _card_key(state, instance_id):
+                raise InvalidActionError(
+                    "所选实体牌的卡牌键与选牌动作不一致"
+                )
+
+        if choice.trick_key == "sgs_trick_guohechaiqiao":
+            next_state, effect_events = self._discard_target_zone_card(
+                state,
+                instance_id,
+                zone,
+                choice,
+                context.actor_id,
+                from_hidden,
+            )
+            self._events.extend(effect_events)
+            next_state, finish_event = self._finish_processing(
+                next_state,
+                choice.trick_instance_id,
+                "guohechaiqiao_effect_resolved",
+            )
+            self._events.extend((finish_event,))
+        elif choice.trick_key == "sgs_trick_shunshouqianyang":
+            next_state, effect_events = self._gain_target_zone_card_into_user_hand(
+                state,
+                instance_id,
+                zone,
+                choice,
+                context.actor_id,
+                from_hidden,
+            )
+            self._events.extend(effect_events)
+            next_state, finish_event = self._finish_processing(
+                next_state,
+                choice.trick_instance_id,
+                "shunshouqianyang_effect_resolved",
+            )
+            self._events.extend((finish_event,))
+        else:
+            raise InvalidActionError(
+                f"卡牌{choice.trick_key!r}尚未实现目标区域选牌结算"
+            )
+        self._commit_runtime(runtime, self._return_to_play(runtime))
+        return next_state
+
+    def _discard_target_zone_card(
+        self,
+        state: GameState,
+        instance_id: str,
+        zone: ZoneRef,
+        choice: _PendingZoneChoice,
+        user_id: str,
+        from_hidden: bool,
+    ) -> tuple[GameState, tuple[GameEvent, GameEvent, GameEvent]]:
+        """【过河拆桥】把目标区域牌直接置入弃牌堆，不经过先获得再弃置。"""
+
+        next_state = state.move_card(instance_id, DISCARD_PILE)
+        card_key = _card_key(state, instance_id)
+        move_event = GameEvent(
+            event_type=EventType.CARD_MOVED,
+            card_instance_id=instance_id,
+            card_key=card_key,
+            card_user=user_id,
+            target_ids=(choice.target_id,),
+            payload={
+                "source": _zone_payload(zone),
+                "destination": _zone_payload(DISCARD_PILE),
+                "reason": "guohechaiqiao_effect",
+                "trick_instance_id": choice.trick_instance_id,
+                "from_hidden_zone": from_hidden,
+                "movement": "discard_direct",
+            },
+        )
+        lost_event = GameEvent(
+            event_type=EventType.CARD_LOST,
+            card_instance_id=instance_id,
+            card_key=card_key,
+            target_ids=(choice.target_id,),
+            payload={
+                "reason": "guohechaiqiao_discard",
+                "source_zone": _zone_id(zone),
+                "trick_instance_id": choice.trick_instance_id,
+                "from_hidden_zone": from_hidden,
+            },
+        )
+        discarded_event = GameEvent(
+            event_type=EventType.CARD_DISCARDED,
+            card_instance_id=instance_id,
+            card_key=card_key,
+            card_user=user_id,
+            target_ids=(choice.target_id,),
+            payload={
+                "reason": "guohechaiqiao_effect",
+                "source_zone": _zone_id(zone),
+                "trick_instance_id": choice.trick_instance_id,
+                "from_hidden_zone": from_hidden,
+            },
+        )
+        return next_state, (move_event, lost_event, discarded_event)
+
+    def _gain_target_zone_card_into_user_hand(
+        self,
+        state: GameState,
+        instance_id: str,
+        zone: ZoneRef,
+        choice: _PendingZoneChoice,
+        user_id: str,
+        from_hidden: bool,
+    ) -> tuple[GameState, tuple[GameEvent, GameEvent, GameEvent]]:
+        """【顺手牵羊】把目标区域牌直接从原区域移入使用者手牌。"""
+
+        destination = ZoneRef.hand(user_id)
+        next_state = state.move_card(instance_id, destination)
+        card_key = _card_key(state, instance_id)
+        move_event = GameEvent(
+            event_type=EventType.CARD_MOVED,
+            card_instance_id=instance_id,
+            card_key=card_key,
+            card_user=user_id,
+            target_ids=(choice.target_id,),
+            payload={
+                "source": _zone_payload(zone),
+                "destination": _zone_payload(destination),
+                "reason": "shunshouqianyang_effect",
+                "trick_instance_id": choice.trick_instance_id,
+                "from_hidden_zone": from_hidden,
+                "movement": "gain_direct",
+            },
+        )
+        lost_event = GameEvent(
+            event_type=EventType.CARD_LOST,
+            card_instance_id=instance_id,
+            card_key=card_key,
+            target_ids=(choice.target_id,),
+            payload={
+                "reason": "shunshouqianyang_gain",
+                "source_zone": _zone_id(zone),
+                "trick_instance_id": choice.trick_instance_id,
+                "from_hidden_zone": from_hidden,
+            },
+        )
+        gained_event = GameEvent(
+            event_type=EventType.CARD_GAINED,
+            card_instance_id=instance_id,
+            card_key=card_key,
+            target_ids=(user_id,),
+            payload={
+                "reason": "shunshouqianyang_effect",
+                "source_zone": _zone_id(zone),
+                "trick_instance_id": choice.trick_instance_id,
+                "from_hidden_zone": from_hidden,
+            },
+        )
+        return next_state, (move_event, lost_event, gained_event)
 
     def apply_peach_self_heal(
         self,
@@ -1887,20 +2573,25 @@ class ProductionBasicCardBatch:
         state: GameState,
         instance_id: str,
         reason: str,
+        *,
+        extra: Mapping[str, object] | None = None,
     ) -> tuple[GameState, GameEvent]:
         source = state.location_of(instance_id)
         if source != PROCESSING_ZONE:
             raise ProductionBatchError("只有处理区中的实体牌可以完成结算")
         next_state = state.move_card(instance_id, DISCARD_PILE)
+        payload: dict[str, object] = {
+            "source": _zone_payload(source),
+            "destination": _zone_payload(DISCARD_PILE),
+            "reason": reason,
+        }
+        if extra is not None:
+            payload.update(extra)
         return next_state, GameEvent(
             event_type=EventType.CARD_MOVED,
             card_instance_id=instance_id,
             card_key=_card_key(state, instance_id),
-            payload={
-                "source": _zone_payload(source),
-                "destination": _zone_payload(DISCARD_PILE),
-                "reason": reason,
-            },
+            payload=payload,
         )
 
     def _consume_immediately(

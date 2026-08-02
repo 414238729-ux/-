@@ -750,7 +750,7 @@ def test_unimplemented_trick_cards_fail_closed_without_fallback() -> None:
     with pytest.raises(UnsupportedRuleError):
         registry.adapter_for("sgs_delayed_shandian")
     with pytest.raises(UnsupportedRuleError):
-        registry.rule_spec_for("sgs_trick_shunshouqianyang")
+        registry.rule_spec_for("sgs_trick_juedou")
     with pytest.raises(UnsupportedRuleError):
         registry.assert_no_unimplemented_fallback()
 
@@ -1012,6 +1012,9 @@ def test_draw_reshuffle_continues_current_draw_with_auditable_events() -> None:
     )
     reshuffled_ids = {event.card_instance_id for event in reshuffles}
     assert len(reshuffled_ids) == 2
+    reshuffle_sequence = max(
+        event.sequence or 0 for event in reshuffles
+    )
 
     draws_after_reshuffle = [
         event
@@ -1019,6 +1022,7 @@ def test_draw_reshuffle_continues_current_draw_with_auditable_events() -> None:
         if event.event_type is EventType.CARD_MOVED
         and event.payload.get("reason") == "draw_phase"
         and event.card_instance_id in reshuffled_ids
+        and (event.sequence or 0) > reshuffle_sequence
     ]
     assert len(draws_after_reshuffle) == 2
     assert all(
