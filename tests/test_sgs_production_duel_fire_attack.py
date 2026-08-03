@@ -752,6 +752,65 @@ def test_duel_dead_responder_ends_immediately_without_damage() -> None:
     assert finish[0].payload.get("dead_responder") == "p2"
 
 
+def test_duel_continues_after_source_death() -> None:
+    """来源死亡后已开始的【决斗】不自动取消（知识20.8，当前确认）。
+
+    两个子场景均只构造来源死亡状态，随后全部走真实动作管线：
+    1. 目标仍可响应并选择不打出【杀】：伤害来源为另一名参与者（原
+       使用者），受伤者为目标，1点无属性伤害，关联原【决斗】实体，
+       原【决斗】进入弃牌堆；
+    2. 目标打出【杀】后轮到已死亡来源响应：该来源无法响应，结算在该
+       节点按【决斗】规则立即结束，不凭空补一次伤害。
+    """
+
+    # 子场景1：目标放弃响应，伤害正常结算
+    game = ProductionBasicCardBatch(seed=10)
+    trick_id = _use_trick(game, "use_duel", DUEL, "p2")
+    _close_trick_window(game)
+    assert game.phase is ProductionPhase.DUEL_RESPONSE
+    assert game.runtime.pending_duel.responder_id == "p2"
+    _kill_player(game, "p1")  # 权威状态助手构造来源死亡，不取消已开始决斗
+    assert game.phase is ProductionPhase.DUEL_RESPONSE
+    assert game.runtime.pending_duel is not None
+    assert game.runtime.pending_duel.responder_id == "p2"
+    pass_action = _action(game, "pass_duel_slash", actor="p2")
+    assert pass_action is not None, "来源死亡后目标仍能提交当前合法响应"
+    _step(game, pass_action)
+    damage = [
+        event for event in game.events if event.event_type is EventType.DAMAGE
+    ]
+    assert len(damage) == 1
+    assert damage[0].target_id == "p2"  # 停止响应的一方受伤
+    assert damage[0].damage_source == "p1"  # 伤害来源为另一名参与者
+    assert damage[0].damage_type == "无属性"
+    assert damage[0].card_instance_id == trick_id  # 关联原【决斗】实体
+    assert game.state.location_of(trick_id) == DISCARD_PILE  # 原【决斗】进弃牌堆
+    assert game.phase is ProductionPhase.PLAY
+
+    # 子场景2：目标出【杀】后轮到已死亡来源，立即结束且不补伤害
+    game = ProductionBasicCardBatch(seed=10)
+    _use_trick(game, "use_duel", DUEL, "p2")
+    _close_trick_window(game)
+    _kill_player(game, "p1")
+    slash = _action(game, "play_slash_for_duel", card_key="sgs_basic_sha", actor="p2")
+    assert slash is not None, "来源死亡后目标仍能打出当前手牌中的【杀】"
+    _step(game, slash)
+    assert game.phase is ProductionPhase.PLAY, "轮到已死亡来源响应时决斗立即结束"
+    assert game.runtime.pending_duel is None
+    assert not [
+        event for event in game.events if event.event_type is EventType.DAMAGE
+    ], "死亡来源不能继续响应，且不得凭空补一次伤害"
+    finish = [
+        event
+        for event in game.events
+        if event.event_type is EventType.CARD_MOVED
+        and event.payload.get("reason") == "duel_resolved_responder_dead"
+    ]
+    assert len(finish) == 1
+    assert finish[0].payload.get("dead_responder") == "p1"
+
+
+
 def test_duel_damage_enters_peach_rescue() -> None:
     game = ProductionBasicCardBatch(seed=137)
     _set_player_stats(game, "p2", hp=1, max_hp=1)
@@ -952,6 +1011,58 @@ def test_fire_attack_unrevealed_hand_never_leaks_to_decision_input() -> None:
             assert card.card_key not in blob
             assert card.card_name not in blob
         assert "state_hash" in action.payload and "window_id" in action.payload
+
+
+def test_fire_attack_single_hand_target_legal_reveal() -> None:
+    """【火攻】目标只有一张手牌时仍走合法动作与展示事件（审计补测）。"""
+
+    game = ProductionBasicCardBatch(seed=283)
+    target_hand = game.state.card_ids_in(ZoneRef.hand("p2"))
+    assert len(target_hand) >= 2
+    # 用权威 move_cards 接口把目标手牌收缩到恰好一张
+    game._state = game.state.move_cards(
+        {instance_id: DISCARD_PILE for instance_id in target_hand[1:]}
+    )
+    sole_hand = game.state.card_ids_in(ZoneRef.hand("p2"))
+    assert len(sole_hand) == 1
+    sole_id = sole_hand[0]
+    _use_trick(game, "use_fire_attack", HUO, "p2")
+    _close_trick_window(game)
+    assert game.phase is ProductionPhase.FIRE_ATTACK_REVEAL
+    reveals = [
+        action
+        for action in game.legal_actions()
+        if action.payload.get("operation") == "reveal_card_for_fire_attack"
+    ]
+    assert len(reveals) == 1, "单张手牌的目标只能枚举出恰好一个展示动作"
+    reveal = reveals[0]
+    assert reveal.actor_id == "p2"
+    assert reveal.card_instance_id is None
+    assert set(reveal.payload.keys()) == _REVEAL_PAYLOAD_KEYS
+    _step(game, reveal)
+    revealed_events = [
+        event for event in game.events if event.event_type is EventType.CARD_REVEALED
+    ]
+    assert len(revealed_events) == 1
+    event = revealed_events[0]
+    card = game.state.cards_by_id[sole_id]
+    assert event.card_instance_id == sole_id
+    assert event.card_key == card.card_key
+    assert event.payload["card_name"] == card.card_name
+    assert event.payload["suit"] == card.suit
+    assert event.payload["rank"] == card.rank
+    assert event.payload["revealed_by"] == "p2"
+    assert game.state.location_of(sole_id) == ZoneRef.hand("p2"), (
+        "展示牌必须仍位于目标手牌"
+    )
+    assert game.phase is ProductionPhase.FIRE_ATTACK_DISCARD
+    # 收尾：不弃置则无效果完成，原【火攻】进入弃牌堆
+    _step(game, _action(game, "pass_fire_attack_discard"))
+    assert game.phase is ProductionPhase.PLAY
+    assert not [
+        event for event in game.events if event.event_type is EventType.DAMAGE
+    ]
+
 
 
 def test_fire_attack_user_only_discards_same_suit_real_hand_cards() -> None:
