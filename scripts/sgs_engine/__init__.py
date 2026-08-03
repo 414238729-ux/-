@@ -2,8 +2,10 @@
 
 当前包只公开不可变状态、事件、合法动作路由、确定性随机、回放完整性与
 失败关闭会话。正式160张牌堆的六种基本牌（普通【杀】、火【杀】、雷【杀】、
-【闪】、【桃】、【酒】）生产批次已接入生产注册表与权威核心调用路径；
-其余正式卡牌、模式、武将、AI 和正式整局仍未完成；调用
+【闪】、【桃】、【酒】）、普通锦囊垂直切片（【无中生有】、【无懈可击】）、
+目标区域选牌批次（【过河拆桥】、【顺手牵羊】）与伤害型普通锦囊批次
+（【决斗】、【火攻】）已接入生产注册表与权威核心调用路径；其余正式卡牌、
+模式、武将、AI 和正式整局仍未完成；调用
 ``AuthoritativeCoreSession.run_game`` 会明确抛出 ``UnsupportedRuleError``。
 """
 
@@ -113,6 +115,8 @@ from .production_cards import (
     BasicCardAdapter,
     DodgeAdapter,
     FormalCardRegistry,
+    HuogongAdapter,
+    JuedouAdapter,
     PeachAdapter,
     SlashAdapter,
     TrickCardAdapter,
@@ -179,6 +183,8 @@ __all__ = [
     "DEFAULT_ATTACK_RANGE",
     "DodgeAdapter",
     "FormalCardRegistry",
+    "HuogongAdapter",
+    "JuedouAdapter",
     "PeachAdapter",
     "PRODUCTION_BASIC_CARD_KEYS",
     "PRODUCTION_BASIC_CARDS_MODE",

@@ -26,6 +26,7 @@ class EventType(str, Enum):
     CARD_LOST = "card_lost"
     CARD_DISCARDED = "card_discarded"
     CARD_MOVED = "card_moved"
+    CARD_REVEALED = "card_revealed"
     DAMAGE = "damage"
     LOSE_HP = "lose_hp"
     DYING = "dying"
@@ -218,6 +219,11 @@ def validate_event_contract(event: GameEvent) -> GameEvent:
     if event.event_type in (EventType.CARD_EFFECT_CANCELLED, EventType.CARD_INVALIDATED):
         if event.card_instance_id is None and event.card_key is None:
             raise ValueError("抵消或无效事件必须提供实体牌ID或card_key")
+    if event.event_type is EventType.CARD_REVEALED:
+        if event.card_instance_id is None or event.card_key is None:
+            raise ValueError("展示牌事件必须提供实体牌ID与card_key")
+        if not event.target_ids:
+            raise ValueError("展示牌事件必须至少指定一名相关角色")
     if event.event_type is EventType.LOSE_HP:
         if len(event.target_ids) != 1:
             raise ValueError("失去体力事件必须且只能指定一名目标角色")

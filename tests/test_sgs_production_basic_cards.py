@@ -744,13 +744,13 @@ def test_actions_must_pass_enumerate_validate_apply_pipeline() -> None:
 def test_unimplemented_trick_cards_fail_closed_without_fallback() -> None:
     game = ProductionBasicCardBatch(seed=49)
     registry = game.formal_registry
-    assert "sgs_trick_huogong" in registry.unimplemented_card_keys
+    assert "sgs_trick_nanmanruqin" in registry.unimplemented_card_keys
     with pytest.raises(UnsupportedRuleError):
-        registry.adapter_for("sgs_trick_huogong")
+        registry.adapter_for("sgs_trick_nanmanruqin")
     with pytest.raises(UnsupportedRuleError):
         registry.adapter_for("sgs_delayed_shandian")
     with pytest.raises(UnsupportedRuleError):
-        registry.rule_spec_for("sgs_trick_juedou")
+        registry.rule_spec_for("sgs_trick_nanmanruqin")
     with pytest.raises(UnsupportedRuleError):
         registry.assert_no_unimplemented_fallback()
 
@@ -762,20 +762,20 @@ def test_unimplemented_trick_cards_fail_closed_without_fallback() -> None:
         assert card_key in set(PRODUCTION_BASIC_CARD_KEYS) | set(PRODUCTION_TRICK_KEYS)
 
     # 伪造未实现锦囊动作不能通过验证
-    trick_id = next(
-        instance_id
-        for instance_id in game.state.card_ids_in(ZoneRef.hand("p1"))
-        if game.state.cards_by_id[instance_id].card_key == "sgs_trick_huogong"
+    trick_record = next(
+        record
+        for record in registry.records
+        if record.card_key in registry.unimplemented_card_keys
     )
     forged = LegalAction(
         action_type=ActionType.USE_CARD,
         actor_id="p1",
-        card_instance_id=trick_id,
+        card_instance_id=trick_record.instance_id,
         target_ids=("p2",),
         payload={
             "operation": "use_slash",
-            "card_key": "sgs_trick_huogong",
-            "card_name": "火攻",
+            "card_key": trick_record.card_key,
+            "card_name": trick_record.card_name,
         },
         action_id="act_trick_forged",
     )
@@ -841,7 +841,8 @@ def test_test_only_adapters_never_enter_production_registry() -> None:
     registered = set(game.registry.registered_keys)
     for key in registered:
         assert key[0] == PRODUCTION_BASIC_CARDS_MODE
-    assert not any("duel" in phase for _, phase in registered)
+    # 生产注册表允许正式【决斗】响应阶段；只拒绝测试专用切片阶段。
+    assert not any("test_only_duel" in phase for _, phase in registered)
     assert ("test_only_duel_vertical_slice", "play") not in registered
 
 

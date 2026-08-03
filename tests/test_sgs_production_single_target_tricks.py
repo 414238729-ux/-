@@ -835,10 +835,9 @@ def test_other_normal_tricks_stay_fail_closed() -> None:
     game = ProductionBasicCardBatch(seed=3)
     registry = game.formal_registry
     for key in (
-        "sgs_trick_juedou",
-        "sgs_trick_huogong",
         "sgs_trick_nanmanruqin",
         "sgs_trick_wanjianqifa",
+        "sgs_trick_jiedaosharen",
     ):
         assert key in registry.unimplemented_card_keys
         with pytest.raises(UnsupportedRuleError):
@@ -848,7 +847,7 @@ def test_other_normal_tricks_stay_fail_closed() -> None:
     assert "sgs_trick_guohechaiqiao" not in registry.unimplemented_card_keys
     assert "sgs_trick_shunshouqianyang" not in registry.unimplemented_card_keys
     with pytest.raises(UnsupportedRuleError):
-        registry.rule_spec_for("sgs_trick_juedou")
+        registry.rule_spec_for("sgs_trick_nanmanruqin")
     with pytest.raises(UnsupportedRuleError):
         registry.assert_no_unimplemented_fallback()
     implemented = set(PRODUCTION_BASIC_CARD_KEYS) | set(PRODUCTION_TRICK_KEYS)

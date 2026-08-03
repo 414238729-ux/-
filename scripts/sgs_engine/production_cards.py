@@ -54,6 +54,8 @@ CARD_NAMES_BY_KEY: Mapping[str, str] = {
     "sgs_basic_shan": "闪",
     "sgs_basic_tao": "桃",
     "sgs_basic_jiu": "酒",
+    "sgs_trick_juedou": "决斗",
+    "sgs_trick_huogong": "火攻",
 }
 
 SLASH_CARD_KEYS: tuple[str, ...] = (
@@ -69,6 +71,8 @@ PRODUCTION_TRICK_KEYS: tuple[str, ...] = (
     "sgs_trick_wuxiekeji",
     "sgs_trick_guohechaiqiao",
     "sgs_trick_shunshouqianyang",
+    "sgs_trick_juedou",
+    "sgs_trick_huogong",
 )
 
 
@@ -977,6 +981,231 @@ class ShunshouQianyangAdapter(TrickCardAdapter):
         raise InvalidActionError("【顺手牵羊】生产适配器不能处理当前阶段的动作")
 
 
+class JuedouAdapter(TrickCardAdapter):
+    """【决斗】的生产适配器。
+
+    出牌阶段以一名其他角色为目标使用，无距离限制、无基础每回合次数
+    限制。使用后建立与【无中生有】相同的【无懈可击】响应窗口；生效后
+    从目标开始，使用者和目标轮流打出【杀】，先停止或无法继续的一方
+    受到另1名仍参与角色造成的1点无属性伤害。响应【决斗】的【杀】记录
+    为打出（``card_played``）而非使用；已生成并开始结算的【决斗】不因
+    来源死亡自动取消，但死亡角色不能继续打出【杀】，轮到死亡角色继续
+    响应时【决斗】按项目已确认规则立即结束。
+    """
+
+    def __init__(self, session: "ProductionBasicCardBatch | None" = None) -> None:
+        super().__init__(session)
+        self.card_key = "sgs_trick_juedou"
+        self.card_name = "决斗"
+
+    def rule_spec(self) -> dict[str, object]:
+        return {
+            "card_key": self.card_key,
+            "card_name": self.card_name,
+            "use_timing": "own_play_phase",
+            "use_limit": "unlimited_base;requires_entity_card",
+            "target_count": 1,
+            "target_filter": "one_other_character",
+            "distance_rule": "not_applicable",
+            "response_requirements": [
+                {
+                    "response_card_key": "sgs_trick_wuxiekeji",
+                    "action": "use",
+                    "event_type": "card_used",
+                },
+                {
+                    "response_card_key": "any_slash(sgs_basic_sha|huosha|leisha)",
+                    "action": "play",
+                    "event_type": "card_played",
+                    "note": (
+                        "当前卡名为【杀】的正式实体【杀】才能响应；"
+                        "只在使用时临时视为【杀】的材料牌不自动计入"
+                    ),
+                },
+            ],
+            "nullification_eligible": True,
+            "movement_lifecycle": (
+                "trick:hand->processing->discard;"
+                "duel_slash:hand->processing->discard(played)"
+            ),
+            "effect_resolution": (
+                "nullification_window;alternating_play_slash;"
+                "stop_or_unable_side_takes_1_neutral_damage_from_other_side"
+            ),
+            "damage_nature": "无属性",
+            "completion_event": (
+                "card_used + nullification_window + card_played(duel slashes) + "
+                "damage(+dying_rescue) or effect_cancelled"
+            ),
+            "adapter_version": self.adapter_version,
+            "implemented": self.implemented,
+            "tested": self.tested,
+            "production_adapter": self.production_adapter,
+        }
+
+    def enumerate_legal_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        session = self._require_session()
+        if session.phase.value == "play":
+            if context.actor_id != session.current_player_id:
+                return ()
+            actions: list[LegalAction] = []
+            for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
+                card = state.cards_by_id[instance_id]
+                if card.card_key != self.card_key:
+                    continue
+                for target_id in state.players_by_id:
+                    if target_id == context.actor_id:
+                        continue
+                    if not state.players_by_id[target_id].alive:
+                        continue
+                    actions.append(
+                        LegalAction(
+                            action_type=ActionType.USE_CARD,
+                            actor_id=context.actor_id,
+                            card_instance_id=instance_id,
+                            target_ids=(target_id,),
+                            payload={
+                                "operation": "use_duel",
+                                "card_key": self.card_key,
+                                "card_name": self.card_name,
+                            },
+                        )
+                    )
+            return tuple(actions)
+        if session.phase.value == "duel_response":
+            return session.enumerate_duel_response_actions(state, context)
+        return ()
+
+    def apply_action(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        session = self._require_session()
+        if session.phase.value == "play":
+            return session.apply_duel_use(state, context, action, self)
+        if session.phase.value == "duel_response":
+            return session.apply_duel_slash_play(state, context, action, self)
+        raise InvalidActionError("【决斗】生产适配器不能处理当前阶段的动作")
+
+
+class HuogongAdapter(TrickCardAdapter):
+    """【火攻】的生产适配器。
+
+    出牌阶段以一名至少有一张手牌的角色为目标使用，可包括自己，无距离
+    限制、无基础每回合次数限制。使用后建立【无懈可击】响应窗口；生效后
+    由目标选择一张手牌展示（展示牌不移动区域并公开牌面），再由使用者
+    选择弃置一张与展示牌花色相同的手牌或不弃置；成功弃置则对目标造成
+    1点火焰伤害。结算到展示步骤时若目标已无手牌，本次【火攻】无效果
+    完成。目标选择展示牌时使用仅绑定选择窗口的不透明句柄，未展示手牌
+    不进入其他角色决策视图。
+    """
+
+    def __init__(self, session: "ProductionBasicCardBatch | None" = None) -> None:
+        super().__init__(session)
+        self.card_key = "sgs_trick_huogong"
+        self.card_name = "火攻"
+
+    def rule_spec(self) -> dict[str, object]:
+        return {
+            "card_key": self.card_key,
+            "card_name": self.card_name,
+            "use_timing": "own_play_phase",
+            "use_limit": "unlimited_base;requires_entity_card",
+            "target_count": 1,
+            "target_filter": (
+                "one_character_with_at_least_one_hand_card_including_self"
+            ),
+            "distance_rule": "not_applicable",
+            "response_requirements": [
+                {
+                    "response_card_key": "sgs_trick_wuxiekeji",
+                    "action": "use",
+                    "event_type": "card_used",
+                },
+                {
+                    "response_action": "target_reveals_one_hand_card",
+                    "event_type": "card_revealed",
+                },
+                {
+                    "response_action": (
+                        "user_discards_one_same_suit_hand_card_or_pass"
+                    ),
+                    "event_type": "card_discarded|no_discard",
+                },
+            ],
+            "nullification_eligible": True,
+            "movement_lifecycle": (
+                "trick:hand->processing->discard;"
+                "discarded_same_suit_card:hand->discard(direct)"
+            ),
+            "effect_resolution": (
+                "nullification_window;target_reveal_one_hand_card;"
+                "user_discard_same_suit_or_pass;if_discard_fire_damage_1"
+            ),
+            "damage_nature": "火属性",
+            "completion_event": (
+                "card_used + nullification_window + card_revealed + "
+                "card_moved/lost/discarded(same_suit) + "
+                "damage(+dying_rescue) or no_discard or effect_cancelled"
+            ),
+            "adapter_version": self.adapter_version,
+            "implemented": self.implemented,
+            "tested": self.tested,
+            "production_adapter": self.production_adapter,
+        }
+
+    def enumerate_legal_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        session = self._require_session()
+        if session.phase.value == "play":
+            if context.actor_id != session.current_player_id:
+                return ()
+            actions: list[LegalAction] = []
+            for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
+                card = state.cards_by_id[instance_id]
+                if card.card_key != self.card_key:
+                    continue
+                for target_id in state.players_by_id:
+                    if not state.players_by_id[target_id].alive:
+                        continue
+                    if not state.card_ids_in(ZoneRef.hand(target_id)):
+                        continue
+                    actions.append(
+                        LegalAction(
+                            action_type=ActionType.USE_CARD,
+                            actor_id=context.actor_id,
+                            card_instance_id=instance_id,
+                            target_ids=(target_id,),
+                            payload={
+                                "operation": "use_fire_attack",
+                                "card_key": self.card_key,
+                                "card_name": self.card_name,
+                            },
+                        )
+                    )
+            return tuple(actions)
+        if session.phase.value in (
+            "fire_attack_reveal",
+            "fire_attack_discard",
+        ):
+            return session.enumerate_fire_attack_actions(state, context)
+        return ()
+
+    def apply_action(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        session = self._require_session()
+        if session.phase.value == "play":
+            return session.apply_fire_attack_use(state, context, action, self)
+        if session.phase.value == "fire_attack_reveal":
+            return session.apply_fire_attack_reveal(state, context, action, self)
+        if session.phase.value == "fire_attack_discard":
+            return session.apply_fire_attack_discard(state, context, action, self)
+        raise InvalidActionError("【火攻】生产适配器不能处理当前阶段的动作")
+
+
 def _default_adapters() -> dict[str, RuleAdapter]:
     return {
         "sgs_basic_sha": SlashAdapter("sgs_basic_sha", "无属性"),
@@ -989,6 +1218,8 @@ def _default_adapters() -> dict[str, RuleAdapter]:
         "sgs_trick_wuxiekeji": WuxiekejiAdapter(),
         "sgs_trick_guohechaiqiao": GuoheChaiqiaoAdapter(),
         "sgs_trick_shunshouqianyang": ShunshouQianyangAdapter(),
+        "sgs_trick_juedou": JuedouAdapter(),
+        "sgs_trick_huogong": HuogongAdapter(),
     }
 
 
@@ -1126,6 +1357,8 @@ __all__ = [
     "PRODUCTION_TRICK_KEYS",
     "SLASH_CARD_KEYS",
     "GuoheChaiqiaoAdapter",
+    "HuogongAdapter",
+    "JuedouAdapter",
     "ShunshouQianyangAdapter",
     "TrickCardAdapter",
     "WuxiekejiAdapter",

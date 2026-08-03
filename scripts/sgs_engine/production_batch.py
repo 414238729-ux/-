@@ -67,10 +67,13 @@ from .model import (
 from .production_cards import (
     FormalCardRegistry,
     GuoheChaiqiaoAdapter,
+    HuogongAdapter,
+    JuedouAdapter,
     ShunshouQianyangAdapter,
     SlashAdapter,
     WuxiekejiAdapter,
     WuzhongshengyouAdapter,
+    SLASH_CARD_KEYS,
     has_target_zone_cards,
     is_valid_shunshou_target,
     is_valid_slash_target,
@@ -88,6 +91,9 @@ class ProductionPhase(str, Enum):
     SLASH_RESPONSE = "slash_response"
     TRICK_RESPONSE = "trick_response"
     ZONE_CHOICE = "zone_choice"
+    DUEL_RESPONSE = "duel_response"
+    FIRE_ATTACK_REVEAL = "fire_attack_reveal"
+    FIRE_ATTACK_DISCARD = "fire_attack_discard"
     DYING_RESCUE = "dying_rescue"
     END = "end"
     FINISHED = "finished"
@@ -98,6 +104,9 @@ BATCH_PHASES: tuple[ProductionPhase, ...] = (
     ProductionPhase.SLASH_RESPONSE,
     ProductionPhase.TRICK_RESPONSE,
     ProductionPhase.ZONE_CHOICE,
+    ProductionPhase.DUEL_RESPONSE,
+    ProductionPhase.FIRE_ATTACK_REVEAL,
+    ProductionPhase.FIRE_ATTACK_DISCARD,
     ProductionPhase.DYING_RESCUE,
     ProductionPhase.END,
 )
@@ -160,6 +169,36 @@ class _PendingZoneChoice:
 
 
 @dataclass(frozen=True, slots=True)
+class _PendingDuel:
+    """【决斗】生效后的交替打出【杀】结算状态。
+
+    保存根【决斗】实体、使用者、目标、当前响应者、对方参与者、当前
+    第几次响应与已打出【杀】的次序，供事件审计与失败关闭校验。
+    """
+
+    user_id: str
+    target_id: str
+    trick_instance_id: str
+    responder_id: str
+    opponent_id: str
+    round_index: int = 0
+    response_index: int = 0
+    slash_sequence: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingFireAttack:
+    """【火攻】生效后的展示与同花色弃置结算状态。"""
+
+    user_id: str
+    target_id: str
+    trick_instance_id: str
+    reveal_window_id: str
+    revealed_instance_id: str | None = None
+    revealed_suit: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class _BatchRuntime:
     current_player_id: str
     turn_number: int = 1
@@ -185,6 +224,14 @@ class _BatchRuntime:
     pending_zone_choice: _PendingZoneChoice | None = None
     zone_choice_handles: Mapping[str, str] = MappingProxyType({})
     zone_choice_snapshot_digest: str | None = None
+    pending_duel: _PendingDuel | None = None
+    pending_fire_attack: _PendingFireAttack | None = None
+    fire_attack_reveal_handles: Mapping[str, str] = MappingProxyType({})
+    pending_damage_card_id: str | None = None
+    pending_damage_source_id: str | None = None
+    pending_damage_kill_credit: str | None = None
+    pending_damage_rescue_reason: str | None = None
+    pending_damage_death_reason: str | None = None
     winner_id: str | None = None
 
     def audit_value(self) -> dict[str, object]:
@@ -241,7 +288,43 @@ class _BatchRuntime:
             "pending_zone_choice": pending_zone_choice,
             "zone_choice_handles": dict(self.zone_choice_handles),
             "zone_choice_snapshot_digest": self.zone_choice_snapshot_digest,
+            "pending_duel": self._pending_duel_value(),
+            "pending_fire_attack": self._pending_fire_attack_value(),
+            "fire_attack_reveal_handles": dict(self.fire_attack_reveal_handles),
+            "pending_damage_card_id": self.pending_damage_card_id,
+            "pending_damage_source_id": self.pending_damage_source_id,
+            "pending_damage_kill_credit": self.pending_damage_kill_credit,
+            "pending_damage_rescue_reason": self.pending_damage_rescue_reason,
+            "pending_damage_death_reason": self.pending_damage_death_reason,
             "winner_id": self.winner_id,
+        }
+
+    def _pending_duel_value(self) -> dict[str, object] | None:
+        if self.pending_duel is None:
+            return None
+        duel = self.pending_duel
+        return {
+            "user_id": duel.user_id,
+            "target_id": duel.target_id,
+            "trick_instance_id": duel.trick_instance_id,
+            "responder_id": duel.responder_id,
+            "opponent_id": duel.opponent_id,
+            "round_index": duel.round_index,
+            "response_index": duel.response_index,
+            "slash_sequence": list(duel.slash_sequence),
+        }
+
+    def _pending_fire_attack_value(self) -> dict[str, object] | None:
+        if self.pending_fire_attack is None:
+            return None
+        fire = self.pending_fire_attack
+        return {
+            "user_id": fire.user_id,
+            "target_id": fire.target_id,
+            "trick_instance_id": fire.trick_instance_id,
+            "reveal_window_id": fire.reveal_window_id,
+            "revealed_instance_id": fire.revealed_instance_id,
+            "revealed_suit": fire.revealed_suit,
         }
 
 
@@ -430,6 +513,90 @@ def _zone_choice_handle_snapshot(
             for instance_id in state.card_ids_in(ZoneRef.hand(target_id))
         }
     )
+
+
+def _fire_reveal_handle(
+    session_id: str,
+    session_secret: bytes,
+    window_id: str,
+    instance_id: str,
+) -> str:
+    """生成仅对当前【火攻】展示窗口有效的不透明选择句柄。
+
+    句柄是 HMAC-SHA256（会话级256位随机秘密，消息含会话标识＋展示窗口ID＋
+    目标角色＋区域＋实体牌ID）的前128位；会话秘密只保存在服务端会话与权威
+    回放私有材料中，公开窗口ID、正式牌堆160个实体ID、正式CSV牌面与公开seed
+    均不足以离线枚举重建句柄。决策输入不携带实体牌ID、牌名、花色或点数，
+    无法从句柄反推出牌面。句柄只绑定当前窗口与目标手牌，目标手牌变化后
+    旧句柄不能解析到任何真实实体。
+    """
+
+    digest = hmac.new(
+        session_secret,
+        canonical_json(
+            {
+                "session_id": session_id,
+                "fire_attack_reveal_window": window_id,
+                "target_id": "hand_target",
+                "zone": "hand",
+                "instance_id": instance_id,
+            }
+        ).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return "h_" + digest[:32]
+
+
+def _fire_reveal_handle_snapshot(
+    session_id: str,
+    session_secret: bytes,
+    state: GameState,
+    target_id: str,
+    window_id: str,
+) -> Mapping[str, str]:
+    """为当前展示窗口生成目标手牌的不透明句柄快照（句柄到实体ID映射）。
+
+    该映射只保存在会话运行时与权威执行快照中，不进入玩家决策上下文、
+    普通合法动作负载或玩家可见回放导出。
+    """
+
+    return MappingProxyType(
+        {
+            _fire_reveal_handle(
+                session_id, session_secret, window_id, instance_id
+            ): instance_id
+            for instance_id in state.card_ids_in(ZoneRef.hand(target_id))
+        }
+    )
+
+
+def _resolve_fire_reveal_handle(
+    session_id: str,
+    session_secret: bytes,
+    state: GameState,
+    window_id: str,
+    target_id: str,
+    handle: object,
+) -> str | None:
+    """把展示句柄解析为目标当前手牌中的真实实体；无法解析时返回None。
+
+    校验顺序：
+    1. 句柄必须是字符串；
+    2. 句柄必须与HMAC-SHA256重算值一致（防伪造、防离线枚举）；
+    3. 实体必须仍在目标手牌中。
+    """
+
+    if not isinstance(handle, str):
+        return None
+    for instance_id in state.card_ids_in(ZoneRef.hand(target_id)):
+        if (
+            _fire_reveal_handle(
+                session_id, session_secret, window_id, instance_id
+            )
+            == handle
+        ):
+            return instance_id
+    return None
 
 
 def _replace_player(
@@ -850,6 +1017,18 @@ class ProductionBasicCardBatch:
             if runtime.pending_zone_choice is None:
                 raise ProductionBatchError("目标区域选牌阶段缺少选牌窗口")
             return runtime.pending_zone_choice.user_id
+        if runtime.phase is ProductionPhase.DUEL_RESPONSE:
+            if runtime.pending_duel is None:
+                raise ProductionBatchError("【决斗】响应阶段缺少结算状态")
+            return runtime.pending_duel.responder_id
+        if runtime.phase is ProductionPhase.FIRE_ATTACK_REVEAL:
+            if runtime.pending_fire_attack is None:
+                raise ProductionBatchError("【火攻】展示阶段缺少结算状态")
+            return runtime.pending_fire_attack.target_id
+        if runtime.phase is ProductionPhase.FIRE_ATTACK_DISCARD:
+            if runtime.pending_fire_attack is None:
+                raise ProductionBatchError("【火攻】弃牌阶段缺少结算状态")
+            return runtime.pending_fire_attack.user_id
         if runtime.phase is ProductionPhase.DYING_RESCUE:
             if not runtime.rescue_order:
                 raise ProductionBatchError("濒死阶段缺少救援顺序")
@@ -1088,6 +1267,29 @@ class ProductionBasicCardBatch:
         elif self.phase is ProductionPhase.ZONE_CHOICE:
             for adapter in self._formal_registry.adapters.values():
                 actions.extend(adapter.enumerate_legal_actions(state, context))
+        elif self.phase is ProductionPhase.DUEL_RESPONSE:
+            for adapter in self._formal_registry.adapters.values():
+                actions.extend(adapter.enumerate_legal_actions(state, context))
+            actions.append(
+                LegalAction(
+                    action_type=ActionType.PASS,
+                    actor_id=actor,
+                    payload={"operation": "pass_duel_slash"},
+                )
+            )
+        elif self.phase is ProductionPhase.FIRE_ATTACK_REVEAL:
+            for adapter in self._formal_registry.adapters.values():
+                actions.extend(adapter.enumerate_legal_actions(state, context))
+        elif self.phase is ProductionPhase.FIRE_ATTACK_DISCARD:
+            for adapter in self._formal_registry.adapters.values():
+                actions.extend(adapter.enumerate_legal_actions(state, context))
+            actions.append(
+                LegalAction(
+                    action_type=ActionType.PASS,
+                    actor_id=actor,
+                    payload={"operation": "pass_fire_attack_discard"},
+                )
+            )
         elif self.phase is ProductionPhase.DYING_RESCUE:
             for adapter in self._formal_registry.adapters.values():
                 actions.extend(adapter.enumerate_legal_actions(state, context))
@@ -1139,6 +1341,14 @@ class ProductionBasicCardBatch:
             if operation == "use_shunshou":
                 return self._formal_registry.adapter_for(
                     "sgs_trick_shunshouqianyang"
+                ).apply_action(state, context, action)
+            if operation == "use_duel":
+                return self._formal_registry.adapter_for(
+                    "sgs_trick_juedou"
+                ).apply_action(state, context, action)
+            if operation == "use_fire_attack":
+                return self._formal_registry.adapter_for(
+                    "sgs_trick_huogong"
                 ).apply_action(state, context, action)
             if action.action_type is ActionType.PASS and operation == (
                 "end_play_phase"
@@ -1199,6 +1409,37 @@ class ProductionBasicCardBatch:
                     choice.trick_key
                 ).apply_action(state, context, action)
             raise InvalidActionError("目标区域选牌阶段不支持当前动作")
+
+        if self.phase is ProductionPhase.DUEL_RESPONSE:
+            if operation == "play_slash_for_duel":
+                return self._formal_registry.adapter_for(
+                    "sgs_trick_juedou"
+                ).apply_action(state, context, action)
+            if action.action_type is ActionType.PASS and operation == (
+                "pass_duel_slash"
+            ):
+                return self.apply_pass_duel_slash(state, context, action)
+            raise InvalidActionError("【决斗】响应阶段不支持当前动作")
+
+        if self.phase is ProductionPhase.FIRE_ATTACK_REVEAL:
+            if operation == "reveal_card_for_fire_attack":
+                return self._formal_registry.adapter_for(
+                    "sgs_trick_huogong"
+                ).apply_action(state, context, action)
+            raise InvalidActionError("【火攻】展示阶段不支持当前动作")
+
+        if self.phase is ProductionPhase.FIRE_ATTACK_DISCARD:
+            if operation == "discard_same_suit_for_fire_attack":
+                return self._formal_registry.adapter_for(
+                    "sgs_trick_huogong"
+                ).apply_action(state, context, action)
+            if action.action_type is ActionType.PASS and operation == (
+                "pass_fire_attack_discard"
+            ):
+                return self.apply_pass_fire_attack_discard(
+                    state, context, action
+                )
+            raise InvalidActionError("【火攻】弃牌阶段不支持当前动作")
 
         raise ProductionBatchError(
             f"阶段{self.phase.value!r}不能应用动作"
@@ -1285,6 +1526,14 @@ class ProductionBasicCardBatch:
             response_window_source_sequence=None,
             pending_zone_choice=None,
             zone_choice_handles=MappingProxyType({}),
+            pending_duel=None,
+            pending_fire_attack=None,
+            fire_attack_reveal_handles=MappingProxyType({}),
+            pending_damage_card_id=None,
+            pending_damage_source_id=None,
+            pending_damage_kill_credit=None,
+            pending_damage_rescue_reason=None,
+            pending_damage_death_reason=None,
         )
 
     # ------------------------------------------------------------------
@@ -1482,6 +1731,15 @@ class ProductionBasicCardBatch:
                 ),
                 response_window_order=(rescue_order[0],),
                 response_window_source_sequence=dying_sequence,
+                pending_damage_card_id=pending.slash_instance_id,
+                pending_damage_source_id=pending.attacker_id,
+                pending_damage_kill_credit=pending.attacker_id,
+                pending_damage_rescue_reason=(
+                    "slash_damage_resolved_after_rescue"
+                ),
+                pending_damage_death_reason=(
+                    "slash_damage_resolved_with_death"
+                ),
             )
         else:
             next_state, finish_event = self._finish_processing(
@@ -1706,6 +1964,14 @@ class ProductionBasicCardBatch:
                     next_runtime = self._return_to_play(runtime)
                 elif trick.trick_key in ZONE_CHOICE_TRICK_KEYS:
                     next_state, next_runtime = self._open_zone_choice(
+                        state, runtime, trick
+                    )
+                elif trick.trick_key == "sgs_trick_juedou":
+                    next_state, next_runtime = self._open_duel(
+                        state, runtime, trick
+                    )
+                elif trick.trick_key == "sgs_trick_huogong":
+                    next_state, next_runtime = self._open_fire_attack(
                         state, runtime, trick
                     )
                 else:
@@ -2288,6 +2554,758 @@ class ProductionBasicCardBatch:
         )
         return next_state, (move_event, lost_event, gained_event)
 
+    # ------------------------------------------------------------------
+    # 【决斗】交替打出【杀】（普通锦囊第三批）
+    # ------------------------------------------------------------------
+
+    def apply_duel_use(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: JuedouAdapter,
+    ) -> GameState:
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.PLAY:
+            raise InvalidActionError("【决斗】只能在出牌阶段使用")
+        if context.actor_id != runtime.current_player_id:
+            raise InvalidActionError("只有当前回合角色可以使用【决斗】")
+        if action.card_instance_id is None or len(action.target_ids) != 1:
+            raise InvalidActionError(
+                "使用【决斗】必须指定一张实体牌和恰好一名目标"
+            )
+        card = state.cards_by_id[action.card_instance_id]
+        if card.card_key != adapter.card_key:
+            raise InvalidActionError("【决斗】动作的实体牌与适配器卡牌键不一致")
+        if str(action.payload.get("card_key", "")) != adapter.card_key:
+            raise InvalidActionError("【决斗】动作负载与适配器卡牌键不一致")
+        target = action.target_ids[0]
+        if target == context.actor_id:
+            raise InvalidActionError("【决斗】不能以自己为目标")
+        if not state.players_by_id[target].alive:
+            raise InvalidActionError("【决斗】不能以已死亡角色为目标")
+        if state.location_of(action.card_instance_id) != ZoneRef.hand(
+            context.actor_id
+        ):
+            raise InvalidActionError("只能使用行动角色真实手牌中的实体牌")
+        return self._open_trick_use_window(
+            state,
+            runtime,
+            context,
+            action,
+            adapter,
+            target,
+            move_reason="duel_use",
+            purpose="duel_alternating_slash",
+        )
+
+    def _open_duel(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        trick: _PendingTrick,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """无懈链结束后【决斗】生效，进入交替打出【杀】状态。
+
+        结算时重新检查目标是否存活；目标已死亡时按必要结算条件不再
+        合法完成无效果结算，不向死亡角色补结算伤害。
+        """
+        if not state.players_by_id[trick.target_id].alive:
+            next_state, finish_event = self._finish_processing(
+                state,
+                trick.trick_instance_id,
+                "duel_effect_resolved_no_valid_target",
+            )
+            self._events.extend((finish_event,))
+            return next_state, self._return_to_play(runtime)
+        next_runtime = replace(
+            runtime,
+            phase=ProductionPhase.DUEL_RESPONSE,
+            pending_duel=_PendingDuel(
+                user_id=trick.user_id,
+                target_id=trick.target_id,
+                trick_instance_id=trick.trick_instance_id,
+                responder_id=trick.target_id,
+                opponent_id=trick.user_id,
+            ),
+            pending_trick=None,
+            trick_effect_active=False,
+            trick_consecutive_passes=0,
+            trick_response_order=(),
+            trick_response_index=0,
+            trick_decision_count=0,
+            trick_direct_response_to=None,
+            response_window_id=None,
+            response_window_order=(),
+            response_window_source_sequence=None,
+        )
+        return state, next_runtime
+
+    def enumerate_duel_response_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        """枚举【决斗】响应动作：当前响应者打出合法【杀】。
+
+        响应【决斗】只接受当前卡名为【杀】的正式实体【杀】（普通／火／
+        雷）；只在使用时临时视为【杀】的材料牌不自动计入。动作类型为
+        打出（``PLAY_CARD``）。
+        """
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.DUEL_RESPONSE:
+            raise ProductionBatchError("【决斗】响应动作只能在决斗响应阶段枚举")
+        duel = runtime.pending_duel
+        if duel is None:
+            raise ProductionBatchError("当前没有进行中的【决斗】")
+        if context.actor_id != duel.responder_id:
+            return ()
+        if not state.players_by_id[duel.responder_id].alive:
+            # 死亡角色不能继续打出【杀】；轮到死亡角色继续响应时，
+            # 只保留放弃响应路径，由 apply_pass_duel_slash 立即结束决斗。
+            return ()
+        actions: list[LegalAction] = []
+        for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
+            card = state.cards_by_id[instance_id]
+            if card.card_key not in SLASH_CARD_KEYS:
+                continue
+            actions.append(
+                LegalAction(
+                    action_type=ActionType.PLAY_CARD,
+                    actor_id=context.actor_id,
+                    card_instance_id=instance_id,
+                    target_ids=(duel.target_id,),
+                    payload={
+                        "operation": "play_slash_for_duel",
+                        "card_key": card.card_key,
+                        "card_name": card.card_name,
+                        "response_to": duel.trick_instance_id,
+                        "root_trick_instance_id": duel.trick_instance_id,
+                        "duel_user_id": duel.user_id,
+                        "duel_target_id": duel.target_id,
+                        "duel_response_index": duel.response_index,
+                        "duel_round": duel.round_index,
+                    },
+                )
+            )
+        return tuple(actions)
+
+    def apply_duel_slash_play(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: object,
+    ) -> GameState:
+        del adapter
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.DUEL_RESPONSE:
+            raise InvalidActionError("响应【决斗】只能在决斗响应阶段进行")
+        duel = runtime.pending_duel
+        if duel is None:
+            raise InvalidActionError("当前没有进行中的【决斗】")
+        if context.actor_id != duel.responder_id:
+            raise InvalidActionError("只有当前响应者可以打出【杀】")
+        if not state.players_by_id[duel.responder_id].alive:
+            raise InvalidActionError("死亡角色不能继续打出【杀】；决斗应当立即结束")
+        if action.action_type is not ActionType.PLAY_CARD:
+            raise InvalidActionError("响应【决斗】的【杀】动作类型必须是打出")
+        if action.card_instance_id is None:
+            raise InvalidActionError("响应【决斗】必须指定真实实体【杀】")
+        card = state.cards_by_id[action.card_instance_id]
+        if card.card_key not in SLASH_CARD_KEYS:
+            raise InvalidActionError(
+                "响应【决斗】的实体牌必须是当前卡名为【杀】的正式实体【杀】"
+            )
+        if state.location_of(action.card_instance_id) != ZoneRef.hand(
+            context.actor_id
+        ):
+            raise InvalidActionError("只能打出行动角色真实手牌中的实体牌")
+        payload = action.payload
+        if str(payload.get("operation", "")) != "play_slash_for_duel":
+            raise InvalidActionError("【决斗】响应动作负载无效")
+        if payload.get("root_trick_instance_id") != duel.trick_instance_id:
+            raise InvalidActionError(
+                "【决斗】响应动作绑定的根锦囊与当前结算不一致"
+            )
+        if payload.get("response_to") != duel.trick_instance_id:
+            raise InvalidActionError(
+                "【决斗】响应动作的响应对象与当前结算不一致"
+            )
+        if payload.get("duel_response_index") != duel.response_index:
+            raise InvalidActionError(
+                "【决斗】响应动作绑定的响应轮次已过期"
+            )
+        if payload.get("duel_round") != duel.round_index:
+            raise InvalidActionError("【决斗】响应动作绑定的回合轮次已过期")
+
+        played_event = GameEvent(
+            event_type=EventType.CARD_PLAYED,
+            card_instance_id=action.card_instance_id,
+            card_key=card.card_key,
+            card_user=context.actor_id,
+            target_ids=(duel.target_id,),
+            payload={
+                "response_to": duel.trick_instance_id,
+                "root_trick_instance_id": duel.trick_instance_id,
+                "response_action": "play",
+                "purpose": "duel_slash_response",
+                "creates_card_used_event": False,
+                "creates_card_played_event": True,
+                "counts_for_use_or_play_total": True,
+                "physical_or_virtual": "physical",
+                "response_provider": context.actor_id,
+                "duel_user_id": duel.user_id,
+                "duel_target_id": duel.target_id,
+                "duel_response_index": duel.response_index,
+                "duel_round": duel.round_index,
+                "next_responder": duel.opponent_id,
+            },
+        )
+        next_state, move_events = self._consume_immediately(
+            state, action.card_instance_id, context.actor_id, "duel_slash_response"
+        )
+        self._events.extend((played_event, *move_events))
+        next_round = (duel.response_index + 1) // 2
+        next_duel = replace(
+            duel,
+            responder_id=duel.opponent_id,
+            opponent_id=duel.responder_id,
+            round_index=next_round,
+            response_index=duel.response_index + 1,
+            slash_sequence=(*duel.slash_sequence, action.card_instance_id),
+        )
+        if not state.players_by_id[next_duel.responder_id].alive:
+            # 死亡角色不能继续打出【杀】；轮到死亡角色继续响应时，
+            # 后续【决斗】立即结束，不向死亡角色凭空补结算伤害。
+            next_state, finish_event = self._finish_processing(
+                next_state,
+                duel.trick_instance_id,
+                "duel_resolved_responder_dead",
+                extra={
+                    "dead_responder": next_duel.responder_id,
+                    "root_trick_instance_id": duel.trick_instance_id,
+                },
+            )
+            self._events.extend((finish_event,))
+            next_runtime = self._return_to_play(runtime)
+        else:
+            next_runtime = replace(
+                runtime,
+                pending_duel=next_duel,
+            )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def apply_pass_duel_slash(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+    ) -> GameState:
+        del action
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.DUEL_RESPONSE:
+            raise InvalidActionError("放弃【决斗】响应只能在决斗响应阶段进行")
+        duel = runtime.pending_duel
+        if duel is None:
+            raise InvalidActionError("当前没有进行中的【决斗】")
+        if context.actor_id != duel.responder_id:
+            raise InvalidActionError("只有当前响应者可以放弃响应")
+        if not state.players_by_id[duel.responder_id].alive:
+            # 轮到死亡角色继续响应：后续【决斗】立即结束，
+            # 不向死亡角色凭空补结算一次伤害。
+            next_state, finish_event = self._finish_processing(
+                state,
+                duel.trick_instance_id,
+                "duel_resolved_responder_dead",
+                extra={
+                    "dead_responder": duel.responder_id,
+                    "root_trick_instance_id": duel.trick_instance_id,
+                },
+            )
+            self._events.extend((finish_event,))
+            next_runtime = self._return_to_play(runtime)
+            self._commit_runtime(runtime, next_runtime)
+            return next_state
+        # 当前响应者停止打出【杀】：受到另1名仍参与角色造成的1点无属性伤害。
+        next_state, next_runtime = self._apply_trick_damage(
+            state,
+            victim_id=duel.responder_id,
+            source_id=duel.opponent_id,
+            card_instance_id=duel.trick_instance_id,
+            card_key="sgs_trick_juedou",
+            card_user=duel.user_id,
+            damage_type="无属性",
+            resolved_reason="duel_damage_resolved",
+            death_reason="duel_damage_resolved_with_death",
+            rescue_reason="duel_damage_resolved_after_rescue",
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    # ------------------------------------------------------------------
+    # 【火攻】展示与同花色弃置（普通锦囊第三批）
+    # ------------------------------------------------------------------
+
+    def apply_fire_attack_use(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: HuogongAdapter,
+    ) -> GameState:
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.PLAY:
+            raise InvalidActionError("【火攻】只能在出牌阶段使用")
+        if context.actor_id != runtime.current_player_id:
+            raise InvalidActionError("只有当前回合角色可以使用【火攻】")
+        if action.card_instance_id is None or len(action.target_ids) != 1:
+            raise InvalidActionError(
+                "使用【火攻】必须指定一张实体牌和恰好一名目标"
+            )
+        card = state.cards_by_id[action.card_instance_id]
+        if card.card_key != adapter.card_key:
+            raise InvalidActionError("【火攻】动作的实体牌与适配器卡牌键不一致")
+        if str(action.payload.get("card_key", "")) != adapter.card_key:
+            raise InvalidActionError("【火攻】动作负载与适配器卡牌键不一致")
+        target = action.target_ids[0]
+        if not state.players_by_id[target].alive:
+            raise InvalidActionError("【火攻】不能以已死亡角色为目标")
+        if not state.card_ids_in(ZoneRef.hand(target)):
+            raise InvalidActionError(
+                "【火攻】目标必须至少有一张手牌；装备区与判定区的牌不能代替"
+            )
+        if state.location_of(action.card_instance_id) != ZoneRef.hand(
+            context.actor_id
+        ):
+            raise InvalidActionError("只能使用行动角色真实手牌中的实体牌")
+        return self._open_trick_use_window(
+            state,
+            runtime,
+            context,
+            action,
+            adapter,
+            target,
+            move_reason="fire_attack_use",
+            purpose="fire_attack_reveal_and_discard",
+        )
+
+    def _open_fire_attack(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        trick: _PendingTrick,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """无懈链结束后【火攻】生效，重新检查目标手牌并打开展示窗口。
+
+        结算到展示步骤时若目标已无手牌：不把原使用追溯为非法，不凭空
+        展示、不弃置、不造成伤害，本次【火攻】无效果完成并记录原因。
+        """
+        if not state.card_ids_in(ZoneRef.hand(trick.target_id)):
+            next_state, finish_event = self._finish_processing(
+                state,
+                trick.trick_instance_id,
+                "fire_attack_effect_resolved_no_legal_reveal_card",
+            )
+            self._events.extend((finish_event,))
+            return next_state, self._return_to_play(runtime)
+        window_id = (
+            f"fire-reveal:{runtime.turn_number}:{trick.trick_instance_id}"
+        )
+        next_runtime = replace(
+            runtime,
+            phase=ProductionPhase.FIRE_ATTACK_REVEAL,
+            pending_fire_attack=_PendingFireAttack(
+                user_id=trick.user_id,
+                target_id=trick.target_id,
+                trick_instance_id=trick.trick_instance_id,
+                reveal_window_id=window_id,
+            ),
+            fire_attack_reveal_handles=_fire_reveal_handle_snapshot(
+                self._session_id,
+                self._session_secret,
+                state,
+                trick.target_id,
+                window_id,
+            ),
+            pending_trick=None,
+            trick_effect_active=False,
+            trick_consecutive_passes=0,
+            trick_response_order=(),
+            trick_response_index=0,
+            trick_decision_count=0,
+            trick_direct_response_to=None,
+            response_window_id=None,
+            response_window_order=(),
+            response_window_source_sequence=None,
+        )
+        return state, next_runtime
+
+    def enumerate_fire_attack_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        """枚举【火攻】展示与同花色弃置动作。
+
+        展示动作由目标角色自己选择，只暴露绑定当前选择窗口的不透明
+        句柄，不泄露未展示手牌的实体ID、牌名、花色、点数或可识别
+        摘要；弃置动作由使用者从当前手牌中同花色的真实实体中选择。
+        """
+        runtime = self._runtime
+        fire = runtime.pending_fire_attack
+        if fire is None:
+            return ()
+        if runtime.phase is ProductionPhase.FIRE_ATTACK_REVEAL:
+            if context.actor_id != fire.target_id:
+                return ()
+            if fire.revealed_instance_id is not None:
+                return ()
+            state_hash = state_sha256(canonical_state_snapshot(state))
+            actions: list[LegalAction] = []
+            for instance_id in state.card_ids_in(ZoneRef.hand(fire.target_id)):
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.RESPOND,
+                        actor_id=context.actor_id,
+                        target_ids=(fire.target_id,),
+                        payload={
+                            "operation": "reveal_card_for_fire_attack",
+                            "trick_instance_id": fire.trick_instance_id,
+                            "root_trick_instance_id": fire.trick_instance_id,
+                            "user_id": fire.user_id,
+                            "target_id": fire.target_id,
+                            "window_id": fire.reveal_window_id,
+                            "state_hash": state_hash,
+                            "handle": _fire_reveal_handle(
+                                self._session_id,
+                                self._session_secret,
+                                fire.reveal_window_id,
+                                instance_id,
+                            ),
+                        },
+                    )
+                )
+            return tuple(actions)
+        if runtime.phase is ProductionPhase.FIRE_ATTACK_DISCARD:
+            if context.actor_id != fire.user_id:
+                return ()
+            if fire.revealed_suit is None or fire.revealed_instance_id is None:
+                raise ProductionBatchError(
+                    "【火攻】弃牌阶段缺少已展示牌信息"
+                )
+            actions = []
+            for instance_id in state.card_ids_in(ZoneRef.hand(fire.user_id)):
+                card = state.cards_by_id[instance_id]
+                if card.suit != fire.revealed_suit:
+                    continue
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.MOVE_CARD,
+                        actor_id=context.actor_id,
+                        card_instance_id=instance_id,
+                        target_ids=(fire.target_id,),
+                        payload={
+                            "operation": "discard_same_suit_for_fire_attack",
+                            "card_key": card.card_key,
+                            "trick_instance_id": fire.trick_instance_id,
+                            "root_trick_instance_id": fire.trick_instance_id,
+                            "user_id": fire.user_id,
+                            "target_id": fire.target_id,
+                            "revealed_instance_id": fire.revealed_instance_id,
+                            "revealed_suit": fire.revealed_suit,
+                        },
+                    )
+                )
+            return tuple(actions)
+        return ()
+
+    def apply_fire_attack_reveal(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: object,
+    ) -> GameState:
+        del adapter
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.FIRE_ATTACK_REVEAL:
+            raise InvalidActionError("展示【火攻】手牌只能在展示阶段进行")
+        fire = runtime.pending_fire_attack
+        if fire is None:
+            raise InvalidActionError("当前没有进行中的【火攻】")
+        if context.actor_id != fire.target_id:
+            raise InvalidActionError("只有【火攻】目标可以选择展示牌")
+        if fire.revealed_instance_id is not None:
+            raise InvalidActionError("【火攻】展示已经完成，不能重复展示")
+        payload = action.payload
+        if str(payload.get("operation", "")) != "reveal_card_for_fire_attack":
+            raise InvalidActionError("【火攻】展示动作负载无效")
+        if payload.get("trick_instance_id") != fire.trick_instance_id:
+            raise InvalidActionError("展示动作绑定的锦囊与当前结算不一致")
+        if payload.get("root_trick_instance_id") != fire.trick_instance_id:
+            raise InvalidActionError("展示动作绑定的根锦囊与当前结算不一致")
+        if payload.get("user_id") != fire.user_id:
+            raise InvalidActionError("展示动作绑定的使用者与当前结算不一致")
+        if payload.get("target_id") != fire.target_id:
+            raise InvalidActionError("展示动作绑定的目标与当前结算不一致")
+        if payload.get("window_id") != fire.reveal_window_id:
+            raise InvalidActionError("展示动作绑定的选择窗口已过期")
+        if payload.get("state_hash") != state_sha256(
+            canonical_state_snapshot(state)
+        ):
+            raise InvalidActionError("展示动作绑定的状态哈希与当前状态不一致")
+        if action.card_instance_id is not None:
+            raise InvalidActionError(
+                "目标展示选择不得携带实体牌ID，避免在决策前泄露牌面"
+            )
+        instance_id = _resolve_fire_reveal_handle(
+            self._session_id,
+            self._session_secret,
+            state,
+            fire.reveal_window_id,
+            fire.target_id,
+            payload.get("handle"),
+        )
+        if instance_id is None:
+            raise InvalidActionError(
+                "展示句柄无法解析为当前手牌中的真实实体，句柄已过期或系伪造"
+            )
+        card = state.cards_by_id[instance_id]
+        reveal_event = GameEvent(
+            event_type=EventType.CARD_REVEALED,
+            card_instance_id=instance_id,
+            card_key=card.card_key,
+            card_user=fire.target_id,
+            target_ids=(fire.target_id,),
+            payload={
+                "reason": "fire_attack_reveal",
+                "trick_instance_id": fire.trick_instance_id,
+                "root_trick_instance_id": fire.trick_instance_id,
+                "revealed_by": fire.target_id,
+                "card_name": card.card_name,
+                "suit": card.suit,
+                "rank": card.rank,
+            },
+        )
+        self._events.extend((reveal_event,))
+        next_runtime = replace(
+            runtime,
+            phase=ProductionPhase.FIRE_ATTACK_DISCARD,
+            pending_fire_attack=replace(
+                fire,
+                revealed_instance_id=instance_id,
+                revealed_suit=card.suit,
+            ),
+            fire_attack_reveal_handles=MappingProxyType({}),
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return state
+
+    def apply_fire_attack_discard(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: object,
+    ) -> GameState:
+        del adapter
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.FIRE_ATTACK_DISCARD:
+            raise InvalidActionError("弃置同花色手牌只能在【火攻】弃牌阶段进行")
+        fire = runtime.pending_fire_attack
+        if fire is None:
+            raise InvalidActionError("当前没有进行中的【火攻】")
+        if context.actor_id != fire.user_id:
+            raise InvalidActionError("只有【火攻】使用者可以选择弃置")
+        if fire.revealed_suit is None or fire.revealed_instance_id is None:
+            raise InvalidActionError("【火攻】弃牌阶段缺少已展示牌信息")
+        payload = action.payload
+        if str(payload.get("operation", "")) != "discard_same_suit_for_fire_attack":
+            raise InvalidActionError("【火攻】弃置动作负载无效")
+        if payload.get("root_trick_instance_id") != fire.trick_instance_id:
+            raise InvalidActionError("弃置动作绑定的根锦囊与当前结算不一致")
+        if payload.get("user_id") != fire.user_id:
+            raise InvalidActionError("弃置动作绑定的使用者与当前结算不一致")
+        if payload.get("target_id") != fire.target_id:
+            raise InvalidActionError("弃置动作绑定的目标与当前结算不一致")
+        if payload.get("revealed_instance_id") != fire.revealed_instance_id:
+            raise InvalidActionError("弃置动作绑定的展示牌与当前结算不一致")
+        if payload.get("revealed_suit") != fire.revealed_suit:
+            raise InvalidActionError("弃置动作绑定的展示花色与当前结算不一致")
+        if action.card_instance_id is None:
+            raise InvalidActionError("弃置同花色牌必须指定真实实体牌")
+        if action.card_instance_id == fire.trick_instance_id:
+            raise InvalidActionError("原【火攻】已在处理区，不能作为弃置材料")
+        card = state.cards_by_id[action.card_instance_id]
+        if card.suit != fire.revealed_suit:
+            raise InvalidActionError(
+                "只能弃置与展示牌花色相同的当前手牌实体"
+            )
+        if state.location_of(action.card_instance_id) != ZoneRef.hand(
+            fire.user_id
+        ):
+            raise InvalidActionError("只能弃置使用者当前手牌中的真实实体牌")
+        if payload.get("card_key") != card.card_key:
+            raise InvalidActionError("弃置动作的卡牌键与实体牌不一致")
+
+        source = ZoneRef.hand(fire.user_id)
+        next_state = state.move_card(action.card_instance_id, DISCARD_PILE)
+        card_key = _card_key(state, action.card_instance_id)
+        self._events.extend(
+            (
+                GameEvent(
+                    event_type=EventType.CARD_MOVED,
+                    card_instance_id=action.card_instance_id,
+                    card_key=card_key,
+                    card_user=fire.user_id,
+                    target_ids=(fire.target_id,),
+                    payload={
+                        "source": _zone_payload(source),
+                        "destination": _zone_payload(DISCARD_PILE),
+                        "reason": "fire_attack_discard_same_suit",
+                        "trick_instance_id": fire.trick_instance_id,
+                        "revealed_instance_id": fire.revealed_instance_id,
+                        "revealed_suit": fire.revealed_suit,
+                    },
+                ),
+                GameEvent(
+                    event_type=EventType.CARD_LOST,
+                    card_instance_id=action.card_instance_id,
+                    card_key=card_key,
+                    target_ids=(fire.user_id,),
+                    payload={
+                        "reason": "fire_attack_discard_same_suit",
+                        "source_zone": _zone_id(source),
+                        "trick_instance_id": fire.trick_instance_id,
+                    },
+                ),
+                GameEvent(
+                    event_type=EventType.CARD_DISCARDED,
+                    card_instance_id=action.card_instance_id,
+                    card_key=card_key,
+                    card_user=fire.user_id,
+                    target_ids=(fire.target_id,),
+                    payload={
+                        "reason": "fire_attack_discard_same_suit",
+                        "source_zone": _zone_id(source),
+                        "trick_instance_id": fire.trick_instance_id,
+                        "revealed_instance_id": fire.revealed_instance_id,
+                        "revealed_suit": fire.revealed_suit,
+                    },
+                ),
+            )
+        )
+        next_state, next_runtime = self._apply_trick_damage(
+            next_state,
+            victim_id=fire.target_id,
+            source_id=fire.user_id,
+            card_instance_id=fire.trick_instance_id,
+            card_key="sgs_trick_huogong",
+            card_user=fire.user_id,
+            damage_type="火属性",
+            resolved_reason="fire_attack_effect_resolved",
+            death_reason="fire_attack_damage_resolved_with_death",
+            rescue_reason="fire_attack_damage_resolved_after_rescue",
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def apply_pass_fire_attack_discard(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+    ) -> GameState:
+        del action
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.FIRE_ATTACK_DISCARD:
+            raise InvalidActionError("放弃弃置只能在【火攻】弃牌阶段进行")
+        fire = runtime.pending_fire_attack
+        if fire is None:
+            raise InvalidActionError("当前没有进行中的【火攻】")
+        if context.actor_id != fire.user_id:
+            raise InvalidActionError("只有【火攻】使用者可以选择不弃置")
+        next_state, finish_event = self._finish_processing(
+            state,
+            fire.trick_instance_id,
+            "fire_attack_effect_resolved_no_discard",
+            extra={"revealed_instance_id": fire.revealed_instance_id},
+        )
+        self._events.extend((finish_event,))
+        next_runtime = self._return_to_play(runtime)
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def _apply_trick_damage(
+        self,
+        state: GameState,
+        *,
+        victim_id: str,
+        source_id: str,
+        card_instance_id: str,
+        card_key: str,
+        card_user: str,
+        damage_type: str,
+        resolved_reason: str,
+        death_reason: str,
+        rescue_reason: str,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """普通锦囊伤害的公共结算：伤害事件、濒死救援或完成结算。
+
+        伤害来源、击杀归属与伤害关联牌由调用方按规则传入；濒死时记录
+        通用伤害来源字段，救援完成或死亡时由救援流程完成原锦囊结算。
+        """
+        runtime = self._runtime
+        victim = state.players_by_id[victim_id]
+        next_state = _replace_player(state, victim_id, hp=victim.hp - 1)
+        damage_event = DamageEvent(
+            target_id=victim_id,
+            amount=1,
+            damage_type=damage_type,
+            card_instance_id=card_instance_id,
+            card_key=card_key,
+            card_user=card_user,
+            damage_source=source_id,
+            kill_credit=source_id,
+        )
+        if next_state.players_by_id[victim_id].hp <= 0:
+            dying_event = GameEvent(
+                event_type=EventType.DYING,
+                damage_source=source_id,
+                kill_credit=source_id,
+                target_ids=(victim_id,),
+            )
+            self._events.extend((damage_event, dying_event))
+            dying_sequence = self._events.snapshot()[-1].sequence
+            assert dying_sequence is not None
+            rescue_order = (
+                runtime.current_player_id,
+                self.opponent_of(runtime.current_player_id),
+            )
+            next_runtime = replace(
+                runtime,
+                phase=ProductionPhase.DYING_RESCUE,
+                pending_dying_id=victim_id,
+                rescue_order=rescue_order,
+                rescue_index=0,
+                rescue_decision_count=0,
+                response_window_id=(
+                    f"dying:{runtime.turn_number}:{victim_id}"
+                    ":seat0:dec0"
+                ),
+                response_window_order=(rescue_order[0],),
+                response_window_source_sequence=dying_sequence,
+                pending_damage_card_id=card_instance_id,
+                pending_damage_source_id=source_id,
+                pending_damage_kill_credit=source_id,
+                pending_damage_rescue_reason=rescue_reason,
+                pending_damage_death_reason=death_reason,
+            )
+            return next_state, next_runtime
+        next_state, finish_event = self._finish_processing(
+            next_state, card_instance_id, resolved_reason
+        )
+        self._events.extend((damage_event, finish_event))
+        return next_state, self._return_to_play(runtime)
+
     def apply_peach_self_heal(
         self,
         state: GameState,
@@ -2388,6 +3406,34 @@ class ProductionBasicCardBatch:
         self._commit_runtime(runtime, next_runtime)
         return next_state
 
+    def _pending_damage_card_id(self, runtime: _BatchRuntime) -> str:
+        if runtime.pending_slash is not None:
+            return runtime.pending_slash.slash_instance_id
+        if runtime.pending_damage_card_id is not None:
+            return runtime.pending_damage_card_id
+        raise ProductionBatchError("濒死结算缺少伤害来源实体牌")
+
+    def _pending_damage_rescue_reason(self, runtime: _BatchRuntime) -> str:
+        if runtime.pending_slash is not None:
+            return "slash_damage_resolved_after_rescue"
+        if runtime.pending_damage_rescue_reason is not None:
+            return runtime.pending_damage_rescue_reason
+        raise ProductionBatchError("濒死结算缺少救援完成原因")
+
+    def _pending_damage_death_reason(self, runtime: _BatchRuntime) -> str:
+        if runtime.pending_slash is not None:
+            return "slash_damage_resolved_with_death"
+        if runtime.pending_damage_death_reason is not None:
+            return runtime.pending_damage_death_reason
+        raise ProductionBatchError("濒死结算缺少死亡完成原因")
+
+    def _pending_damage_source(self, runtime: _BatchRuntime) -> str:
+        if runtime.pending_slash is not None:
+            return runtime.pending_slash.attacker_id
+        if runtime.pending_damage_source_id is not None:
+            return runtime.pending_damage_source_id
+        raise ProductionBatchError("濒死结算缺少伤害来源角色")
+
     def _rescue_window_id(
         self, runtime: _BatchRuntime, seat: int, decision_count: int
     ) -> str:
@@ -2452,11 +3498,10 @@ class ProductionBasicCardBatch:
             *move_events,
         ]
         if next_state.players_by_id[dying_id].hp >= 1:
-            assert runtime.pending_slash is not None
             next_state, finish_event = self._finish_processing(
                 next_state,
-                runtime.pending_slash.slash_instance_id,
-                "slash_damage_resolved_after_rescue",
+                self._pending_damage_card_id(runtime),
+                self._pending_damage_rescue_reason(runtime),
             )
             pending_events.append(finish_event)
             self._events.extend(pending_events)
@@ -2532,11 +3577,10 @@ class ProductionBasicCardBatch:
             *move_events,
         ]
         if next_state.players_by_id[dying_id].hp >= 1:
-            assert runtime.pending_slash is not None
             next_state, finish_event = self._finish_processing(
                 next_state,
-                runtime.pending_slash.slash_instance_id,
-                "slash_damage_resolved_after_rescue",
+                self._pending_damage_card_id(runtime),
+                self._pending_damage_rescue_reason(runtime),
             )
             pending_events.append(finish_event)
             self._events.extend(pending_events)
@@ -2590,31 +3634,30 @@ class ProductionBasicCardBatch:
             return state
         dying = state.players_by_id[dying_id]
         if dying.hp >= 1:
-            assert runtime.pending_slash is not None
             next_state, finish_event = self._finish_processing(
                 state,
-                runtime.pending_slash.slash_instance_id,
-                "slash_damage_resolved_after_rescue",
+                self._pending_damage_card_id(runtime),
+                self._pending_damage_rescue_reason(runtime),
             )
             self._events.extend((finish_event,))
             next_runtime = self._return_to_play(runtime)
             self._commit_runtime(runtime, next_runtime)
             return next_state
-        assert runtime.pending_slash is not None
         next_state, finish_event = self._finish_processing(
             state,
-            runtime.pending_slash.slash_instance_id,
-            "slash_damage_resolved_with_death",
+            self._pending_damage_card_id(runtime),
+            self._pending_damage_death_reason(runtime),
         )
         next_state = _replace_player(next_state, dying_id, alive=False)
         winner = self.opponent_of(dying_id)
+        damage_source = self._pending_damage_source(runtime)
         self._events.extend(
             (
                 finish_event,
                 GameEvent(
                     event_type=EventType.DEATH,
-                    damage_source=runtime.pending_slash.attacker_id,
-                    kill_credit=runtime.pending_slash.attacker_id,
+                    damage_source=damage_source,
+                    kill_credit=damage_source,
                     target_ids=(dying_id,),
                 ),
                 GameEvent(
@@ -2635,6 +3678,14 @@ class ProductionBasicCardBatch:
             response_window_id=None,
             response_window_order=(),
             response_window_source_sequence=None,
+            pending_zone_choice=None,
+            zone_choice_handles=MappingProxyType({}),
+            pending_duel=None,
+            pending_fire_attack=None,
+            fire_attack_reveal_handles=MappingProxyType({}),
+            pending_damage_card_id=None,
+            pending_damage_source_id=None,
+            pending_damage_kill_credit=None,
         )
         self._commit_runtime(runtime, next_runtime)
         return next_state
