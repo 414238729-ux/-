@@ -317,7 +317,7 @@ AI合法动作枚举完整
 - 审计基线文档：`5eac686`；
 - 里程碑 A 测试专用单挑纵向切片：`455685d6eaa1c297e9ec48a0cfaeb803b81f3406`。
 - 隐藏手牌句柄HMAC安全修复：`1b5e125ad0baa129458b42043aac08b18dcfad96`（fix: secure hidden hand choice handles）。
-- 【决斗】／【火攻】批次（`CP-04G-PRODUCTION-DUEL-FIRE-ATTACK-BATCH`）：代码与测试已在当前工作树完成，尚未由用户执行真实Git提交，也未进行独立只读审计；基线为 `85ffee7ca4b06470b0dcb3b1b52155093055b219`（milestone-b2-zone-target-tricks-audited）。
+- 【决斗】／【火攻】批次（`CP-04G-PRODUCTION-DUEL-FIRE-ATTACK-BATCH`）：已由用户在外部PowerShell提交（实现提交哈希 `b3587912da97825871ae91ea8a88b3e95c39fdde`，feat: implement production duel and fire attack slice）；尚未进行独立只读审计，不得视为 audited；本批基线为 `85ffee7ca4b06470b0dcb3b1b52155093055b219`（milestone-b2-zone-target-tricks-audited）。
 
 里程碑 A 的提交只证明隔离三牌切片，不证明正式160张牌无技能单挑完成。
 

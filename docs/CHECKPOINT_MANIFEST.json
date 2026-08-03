@@ -22,7 +22,9 @@
     "milestone_b2_zone_target_handle_hmac_fix_commit": "1b5e125ad0baa129458b42043aac08b18dcfad96",
     "milestone_b2_zone_target_handle_hmac_fix_commit_note": "隐藏手牌句柄HMAC安全修复已由用户在外部PowerShell提交，提交哈希 1b5e125ad0baa129458b42043aac08b18dcfad96（fix: secure hidden hand choice handles）",
     "duel_fire_attack_worktree_branch": "deepseek-duel-fire-attack",
-    "duel_fire_attack_worktree_branch_note": "本批（【决斗】、【火攻】）实现所在工作树分支；该分支上的本批代码尚未由用户提交，当前 HEAD 仍为基线 85ffee7ca4b06470b0dcb3b1b52155093055b219"
+    "duel_fire_attack_worktree_branch_note": "本批（【决斗】、【火攻】）实现所在分支；该分支上的本批代码已由用户在外部PowerShell提交，实现提交哈希 b3587912da97825871ae91ea8a88b3e95c39fdde（feat: implement production duel and fire attack slice），当前 HEAD 已为该实现提交",
+    "milestone_b2_duel_fire_attack_batch_commit": "b3587912da97825871ae91ea8a88b3e95c39fdde",
+    "milestone_b2_duel_fire_attack_batch_commit_note": "伤害型普通锦囊批次（【决斗】、【火攻】）已由用户在外部PowerShell提交，实现提交哈希 b3587912da97825871ae91ea8a88b3e95c39fdde（feat: implement production duel and fire attack slice）"
   },
   "feature_status": {
     "authoritative_core_foundation": true,
@@ -114,9 +116,9 @@
     },
     {
       "id": "CP-04G-PRODUCTION-DUEL-FIRE-ATTACK-BATCH",
-      "status": "in_worktree_pending_commit_and_audit",
-      "commit": null,
-      "commit_note": "代码与测试已在当前工作树完成，尚未由用户在外部PowerShell提交真实Git提交，尚未进行独立只读审计；不得视为audited，不写入虚构提交哈希",
+      "status": "committed_pending_audit",
+      "commit": "b3587912da97825871ae91ea8a88b3e95c39fdde",
+      "commit_note": "本批（【决斗】、【火攻】）已由用户在外部PowerShell提交真实Git提交，实现提交哈希 b3587912da97825871ae91ea8a88b3e95c39fdde（feat: implement production duel and fire attack slice）；尚未进行独立只读审计，不得视为audited",
       "evidence": "scripts/sgs_engine/production_cards.py、scripts/sgs_engine/production_batch.py、scripts/sgs_engine/events.py、tests/test_sgs_production_duel_fire_attack.py；正式160张牌堆伤害型普通锦囊批次",
       "scope": "formal；【决斗】3张与【火攻】3张接入生产注册表与权威核心；交替打出【杀】状态机与打出而非使用事件、无属性／火焰伤害与濒死救援和死亡胜利、目标展示手牌与同花色弃置、HMAC展示句柄与未展示手牌隔离、严格规则重执行与篡改失败关闭；不构成普通锦囊批次、多人响应链、正式单挑或里程碑B完成"
     }
@@ -295,16 +297,16 @@
       "fire_attack_damage_type": "火属性",
       "reveal_handle_mechanism": "hmac_sha256_session_secret",
       "multi_player_response_chain": false,
-      "worktree_commit_pending": true,
+      "worktree_commit_pending": false,
       "independent_audit_done": false
     }
   },
   "sha256": {
     "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "57093ee848831938eadc821070931b59f4420e04f6babe8ac6f9285f78e8f4af",
     "docs/LEGACY_RESULTS_INVALID.md": "49b4d882e2fdd12f5074a9a9d1aae4377a8ac2c6d334e0a852d81081dfdbb294",
-    "docs/ENGINE_STATUS.md": "8efe5fd388f66b5f2b8a2e7e41c9f56f5211a9cc8fe21b9a8cdfd9e20e5c4150",
+    "docs/ENGINE_STATUS.md": "4d50945435cb5d94fd1fc467a33a3654984d8d76a64dc91464f51db02c625890",
     "docs/IMPLEMENTATION_MATRIX.md": "0483a36d92dcc77eb2a644d9b2a7b87c37a608300b71f3b80f322341fb38711e",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "d13c1d29025a6c4975ae0ed224cdaa440702d21e7b2260cf2dc01325e9837317",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "49609c61c5c3e5e584d2e744c1ec6fa84c95dd10d3ed603af7c9e6de8e56e421",
     "scripts/sgs_engine_gate.py": "c2f1384f0607588907f4721ec7be5edde1142afc89ed3d1b473fa627a631bc04",
     "scripts/sgs_formal_runner.py": "d139ef9b172c8840245fd659cc570f462f3590febe622a48f7863446bb8a6e00",
     "scripts/sgs_source_integrity_audit.py": "927ace5500cd11d066b7cef65213d087cc3fb5a19b3d7b5e4e0a22371c59836c",
