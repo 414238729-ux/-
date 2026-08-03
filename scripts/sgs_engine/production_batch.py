@@ -66,11 +66,16 @@ from .model import (
 )
 from .production_cards import (
     FormalCardRegistry,
+    GROUP_TRICK_KEYS,
+    GroupTargetTrickAdapter,
     GuoheChaiqiaoAdapter,
     HuogongAdapter,
     JuedouAdapter,
+    NanmanRuqinAdapter,
     ShunshouQianyangAdapter,
     SlashAdapter,
+    TaoyuanJieyiAdapter,
+    WanjianQifaAdapter,
     WuxiekejiAdapter,
     WuzhongshengyouAdapter,
     SLASH_CARD_KEYS,
@@ -94,6 +99,8 @@ class ProductionPhase(str, Enum):
     DUEL_RESPONSE = "duel_response"
     FIRE_ATTACK_REVEAL = "fire_attack_reveal"
     FIRE_ATTACK_DISCARD = "fire_attack_discard"
+    NANMAN_RESPONSE = "nanman_response"
+    WANJIAN_RESPONSE = "wanjian_response"
     DYING_RESCUE = "dying_rescue"
     END = "end"
     FINISHED = "finished"
@@ -107,6 +114,8 @@ BATCH_PHASES: tuple[ProductionPhase, ...] = (
     ProductionPhase.DUEL_RESPONSE,
     ProductionPhase.FIRE_ATTACK_REVEAL,
     ProductionPhase.FIRE_ATTACK_DISCARD,
+    ProductionPhase.NANMAN_RESPONSE,
+    ProductionPhase.WANJIAN_RESPONSE,
     ProductionPhase.DYING_RESCUE,
     ProductionPhase.END,
 )
@@ -199,6 +208,26 @@ class _PendingFireAttack:
 
 
 @dataclass(frozen=True, slots=True)
+class _PendingGroupTrick:
+    """群体普通锦囊逐目标结算状态机。
+
+    保存根锦囊实体、使用者、使用时快照的固定目标序列、当前目标索引、
+    已完成目标与当前响应目标。目标集合由服务器在使用时自动生成，不
+    接收玩家提交、删减或重排的目标；每个目标依次建立独立的
+    【无懈可击】窗口与效果步骤，前一目标的无懈状态不会泄漏到后一目标。
+    濒死救援期间本状态保留在运行时中，救援完成后按索引继续推进。
+    """
+
+    user_id: str
+    trick_instance_id: str
+    trick_key: str
+    target_sequence: tuple[str, ...]
+    current_target_index: int = 0
+    completed_target_ids: tuple[str, ...] = ()
+    responder_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class _BatchRuntime:
     current_player_id: str
     turn_number: int = 1
@@ -227,6 +256,9 @@ class _BatchRuntime:
     pending_duel: _PendingDuel | None = None
     pending_fire_attack: _PendingFireAttack | None = None
     fire_attack_reveal_handles: Mapping[str, str] = MappingProxyType({})
+    pending_group_trick: _PendingGroupTrick | None = None
+    group_response_handles: Mapping[str, str] = MappingProxyType({})
+    group_response_snapshot_digest: str | None = None
     pending_damage_card_id: str | None = None
     pending_damage_source_id: str | None = None
     pending_damage_kill_credit: str | None = None
@@ -263,6 +295,18 @@ class _BatchRuntime:
                 "window_id": self.pending_zone_choice.window_id,
                 "zones": list(self.pending_zone_choice.zones),
             }
+        pending_group_trick = None
+        if self.pending_group_trick is not None:
+            group = self.pending_group_trick
+            pending_group_trick = {
+                "user_id": group.user_id,
+                "trick_instance_id": group.trick_instance_id,
+                "trick_key": group.trick_key,
+                "target_sequence": list(group.target_sequence),
+                "current_target_index": group.current_target_index,
+                "completed_target_ids": list(group.completed_target_ids),
+                "responder_id": group.responder_id,
+            }
         return {
             "current_player_id": self.current_player_id,
             "turn_number": self.turn_number,
@@ -291,6 +335,11 @@ class _BatchRuntime:
             "pending_duel": self._pending_duel_value(),
             "pending_fire_attack": self._pending_fire_attack_value(),
             "fire_attack_reveal_handles": dict(self.fire_attack_reveal_handles),
+            "pending_group_trick": pending_group_trick,
+            "group_response_handles": dict(self.group_response_handles),
+            "group_response_snapshot_digest": (
+                self.group_response_snapshot_digest
+            ),
             "pending_damage_card_id": self.pending_damage_card_id,
             "pending_damage_source_id": self.pending_damage_source_id,
             "pending_damage_kill_credit": self.pending_damage_kill_credit,
@@ -470,6 +519,102 @@ def _resolve_hand_choice_handle(
         window_id,
         target_id,
         zone,
+        snapshot_digest,
+        instance_id,
+    )
+    if not hmac.compare_digest(expected, handle):
+        return None
+    if state.location_of(instance_id) != ZoneRef.hand(target_id):
+        return None
+    current_digest = sha256_value(
+        tuple(state.card_ids_in(ZoneRef.hand(target_id)))
+    )
+    if not hmac.compare_digest(current_digest, snapshot_digest):
+        return None
+    return instance_id
+
+
+GROUP_RESPONSE_HANDLE_PREFIX = "gr_"
+GROUP_RESPONSE_HANDLE_HEX_CHARS = 32
+
+
+def _group_response_handle_message(
+    session_id: str,
+    window_id: str,
+    target_id: str,
+    snapshot_digest: str,
+    instance_id: str,
+) -> str:
+    """构造群体锦囊响应句柄的HMAC消息。
+
+    消息由会话标识、响应窗口ID、当前目标角色、手牌快照摘要与实体牌ID
+    组成；保密性完全来自会话级随机秘密，与隐藏手牌选择句柄同一机制。
+    """
+
+    return canonical_json(
+        {
+            "session_id": session_id,
+            "group_response_window": window_id,
+            "target_id": target_id,
+            "hand_snapshot_sha256": snapshot_digest,
+            "instance_id": instance_id,
+        }
+    )
+
+
+def _group_response_handle(
+    session_id: str,
+    session_secret: bytes,
+    window_id: str,
+    target_id: str,
+    snapshot_digest: str,
+    instance_id: str,
+) -> str:
+    """生成仅对当前群体锦囊响应窗口有效的不透明句柄。
+
+    句柄是 HMAC-SHA256（会话级256位随机秘密）前128位；决策输入不携带
+    实体牌ID、牌名、花色或点数，玩家可见回放不能据此还原未打出的手牌。
+    """
+
+    digest = hmac.new(
+        session_secret,
+        _group_response_handle_message(
+            session_id, window_id, target_id, snapshot_digest, instance_id
+        ).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return GROUP_RESPONSE_HANDLE_PREFIX + digest[:GROUP_RESPONSE_HANDLE_HEX_CHARS]
+
+
+def _resolve_group_response_handle(
+    session_id: str,
+    session_secret: bytes,
+    state: GameState,
+    window_id: str,
+    target_id: str,
+    snapshot_digest: str | None,
+    snapshot_handles: Mapping[str, str],
+    handle: object,
+) -> str | None:
+    """把群体响应句柄解析为窗口快照中的真实实体；任何绑定不符都返回None。
+
+    校验顺序：句柄必须存在于窗口打开时的服务端快照映射；句柄必须与
+    HMAC-SHA256重算值一致；实体必须仍在目标手牌中；当前手牌摘要必须
+    仍等于窗口打开时的快照摘要。
+    """
+
+    if not isinstance(handle, str):
+        return None
+    if snapshot_digest is None:
+        return None
+    instance_id = snapshot_handles.get(handle)
+    if instance_id is None:
+        return None
+    expected = _group_response_handle(
+        session_id,
+        session_secret,
+        window_id,
+        target_id,
         snapshot_digest,
         instance_id,
     )
@@ -1029,6 +1174,18 @@ class ProductionBasicCardBatch:
             if runtime.pending_fire_attack is None:
                 raise ProductionBatchError("【火攻】弃牌阶段缺少结算状态")
             return runtime.pending_fire_attack.user_id
+        if runtime.phase in (
+            ProductionPhase.NANMAN_RESPONSE,
+            ProductionPhase.WANJIAN_RESPONSE,
+        ):
+            if (
+                runtime.pending_group_trick is None
+                or runtime.pending_group_trick.responder_id is None
+            ):
+                raise ProductionBatchError(
+                    "群体锦囊响应阶段缺少当前响应目标"
+                )
+            return runtime.pending_group_trick.responder_id
         if runtime.phase is ProductionPhase.DYING_RESCUE:
             if not runtime.rescue_order:
                 raise ProductionBatchError("濒死阶段缺少救援顺序")
@@ -1081,6 +1238,29 @@ class ProductionBasicCardBatch:
                         "trick_key": runtime.pending_trick.trick_key,
                         "root_trick_instance_id": (
                             runtime.pending_trick.trick_instance_id
+                        ),
+                    }
+                ),
+                "pending_group_trick": (
+                    None
+                    if runtime.pending_group_trick is None
+                    else {
+                        "user_id": runtime.pending_group_trick.user_id,
+                        "trick_instance_id": (
+                            runtime.pending_group_trick.trick_instance_id
+                        ),
+                        "trick_key": runtime.pending_group_trick.trick_key,
+                        "target_sequence": list(
+                            runtime.pending_group_trick.target_sequence
+                        ),
+                        "current_target_index": (
+                            runtime.pending_group_trick.current_target_index
+                        ),
+                        "completed_target_ids": list(
+                            runtime.pending_group_trick.completed_target_ids
+                        ),
+                        "responder_id": (
+                            runtime.pending_group_trick.responder_id
                         ),
                     }
                 ),
@@ -1290,6 +1470,26 @@ class ProductionBasicCardBatch:
                     payload={"operation": "pass_fire_attack_discard"},
                 )
             )
+        elif self.phase is ProductionPhase.NANMAN_RESPONSE:
+            for adapter in self._formal_registry.adapters.values():
+                actions.extend(adapter.enumerate_legal_actions(state, context))
+            actions.append(
+                LegalAction(
+                    action_type=ActionType.PASS,
+                    actor_id=actor,
+                    payload={"operation": "pass_nanman_slash"},
+                )
+            )
+        elif self.phase is ProductionPhase.WANJIAN_RESPONSE:
+            for adapter in self._formal_registry.adapters.values():
+                actions.extend(adapter.enumerate_legal_actions(state, context))
+            actions.append(
+                LegalAction(
+                    action_type=ActionType.PASS,
+                    actor_id=actor,
+                    payload={"operation": "pass_wanjian_jink"},
+                )
+            )
         elif self.phase is ProductionPhase.DYING_RESCUE:
             for adapter in self._formal_registry.adapters.values():
                 actions.extend(adapter.enumerate_legal_actions(state, context))
@@ -1349,6 +1549,18 @@ class ProductionBasicCardBatch:
             if operation == "use_fire_attack":
                 return self._formal_registry.adapter_for(
                     "sgs_trick_huogong"
+                ).apply_action(state, context, action)
+            if operation == "use_nanman":
+                return self._formal_registry.adapter_for(
+                    "sgs_trick_nanmanruqin"
+                ).apply_action(state, context, action)
+            if operation == "use_wanjian":
+                return self._formal_registry.adapter_for(
+                    "sgs_trick_wanjianqifa"
+                ).apply_action(state, context, action)
+            if operation == "use_taoyuan":
+                return self._formal_registry.adapter_for(
+                    "sgs_trick_taoyuanjieyi"
                 ).apply_action(state, context, action)
             if action.action_type is ActionType.PASS and operation == (
                 "end_play_phase"
@@ -1441,6 +1653,28 @@ class ProductionBasicCardBatch:
                 )
             raise InvalidActionError("【火攻】弃牌阶段不支持当前动作")
 
+        if self.phase is ProductionPhase.NANMAN_RESPONSE:
+            if operation == "play_slash_for_nanman":
+                return self._formal_registry.adapter_for(
+                    "sgs_trick_nanmanruqin"
+                ).apply_action(state, context, action)
+            if action.action_type is ActionType.PASS and operation == (
+                "pass_nanman_slash"
+            ):
+                return self.apply_pass_nanman_slash(state, context, action)
+            raise InvalidActionError("【南蛮入侵】响应阶段不支持当前动作")
+
+        if self.phase is ProductionPhase.WANJIAN_RESPONSE:
+            if operation == "play_jink_for_wanjian":
+                return self._formal_registry.adapter_for(
+                    "sgs_trick_wanjianqifa"
+                ).apply_action(state, context, action)
+            if action.action_type is ActionType.PASS and operation == (
+                "pass_wanjian_jink"
+            ):
+                return self.apply_pass_wanjian_jink(state, context, action)
+            raise InvalidActionError("【万箭齐发】响应阶段不支持当前动作")
+
         raise ProductionBatchError(
             f"阶段{self.phase.value!r}不能应用动作"
         )
@@ -1529,6 +1763,9 @@ class ProductionBasicCardBatch:
             pending_duel=None,
             pending_fire_attack=None,
             fire_attack_reveal_handles=MappingProxyType({}),
+            pending_group_trick=None,
+            group_response_handles=MappingProxyType({}),
+            group_response_snapshot_digest=None,
             pending_damage_card_id=None,
             pending_damage_source_id=None,
             pending_damage_kill_credit=None,
@@ -1759,6 +1996,13 @@ class ProductionBasicCardBatch:
     def _trick_window_id(
         self, runtime: _BatchRuntime, decision_index: int
     ) -> str:
+        group = runtime.pending_group_trick
+        if group is not None:
+            return (
+                f"trick:{runtime.turn_number}:"
+                f"{group.trick_instance_id}:gt{group.current_target_index}:"
+                f"dec{decision_index}"
+            )
         if runtime.pending_trick is None:
             raise ProductionBatchError("锦囊响应窗口缺少待响应的锦囊")
         return (
@@ -1974,10 +2218,21 @@ class ProductionBasicCardBatch:
                     next_state, next_runtime = self._open_fire_attack(
                         state, runtime, trick
                     )
+                elif trick.trick_key in GROUP_TRICK_KEYS:
+                    next_state, next_runtime = (
+                        self._resolve_group_trick_target(state, runtime, trick)
+                    )
                 else:
                     raise ProductionBatchError(
                         f"卡牌{trick.trick_key!r}尚未实现锦囊生效结算；失败关闭"
                     )
+            elif runtime.pending_group_trick is not None:
+                # 群体锦囊：一张无懈只取消当前目标的效果，
+                # 当前目标取消后不响应【杀】／【闪】、不受伤或不回复，
+                # 并继续推进下一目标；原锦囊不到全部目标完成不进入弃牌堆。
+                next_state, next_runtime = (
+                    self._resolve_group_trick_target(state, runtime, trick)
+                )
             else:
                 cancelled_event = GameEvent(
                     event_type=EventType.CARD_EFFECT_CANCELLED,
@@ -3234,6 +3489,807 @@ class ProductionBasicCardBatch:
         self._commit_runtime(runtime, next_runtime)
         return next_state
 
+    # ------------------------------------------------------------------
+    # 群体普通锦囊：逐目标结算状态机（【南蛮入侵】【万箭齐发】【桃园结义】）
+    # ------------------------------------------------------------------
+
+    def apply_group_trick_use(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: GroupTargetTrickAdapter,
+    ) -> GameState:
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.PLAY:
+            raise InvalidActionError(f"{adapter.card_name}只能在出牌阶段使用")
+        if context.actor_id != runtime.current_player_id:
+            raise InvalidActionError(
+                f"只有当前回合角色可以使用{adapter.card_name}"
+            )
+        if action.card_instance_id is None:
+            raise InvalidActionError(f"使用{adapter.card_name}必须指定实体牌")
+        card = state.cards_by_id[action.card_instance_id]
+        if card.card_key != adapter.card_key:
+            raise InvalidActionError(
+                f"{adapter.card_name}动作的实体牌与适配器卡牌键不一致"
+            )
+        if str(action.payload.get("card_key", "")) != adapter.card_key:
+            raise InvalidActionError(
+                f"{adapter.card_name}动作负载与适配器卡牌键不一致"
+            )
+        if action.target_ids:
+            raise InvalidActionError(
+                f"{adapter.card_name}的目标集合由服务器自动生成，"
+                "不接受玩家提交、删减或重排的目标"
+            )
+        if state.location_of(action.card_instance_id) != ZoneRef.hand(
+            context.actor_id
+        ):
+            raise InvalidActionError("只能使用行动角色真实手牌中的实体牌")
+
+        sequence = self._group_target_sequence(
+            state, context.actor_id, adapter
+        )
+        if not sequence:
+            raise InvalidActionError(
+                f"{adapter.card_name}当前没有合法目标，不能使用"
+            )
+
+        next_state, move_event = self._move_to_processing(
+            state,
+            action.card_instance_id,
+            context.actor_id,
+            f"{adapter.card_key}_use",
+        )
+        used_event = GameEvent(
+            event_type=EventType.CARD_USED,
+            card_instance_id=action.card_instance_id,
+            card_key=adapter.card_key,
+            card_user=context.actor_id,
+            target_ids=sequence,
+            payload={
+                "purpose": (
+                    "nanman_sequential_slash_response"
+                    if adapter.card_key == "sgs_trick_nanmanruqin"
+                    else "wanjian_sequential_jink_response"
+                    if adapter.card_key == "sgs_trick_wanjianqifa"
+                    else "taoyuan_sequential_recovery"
+                ),
+                "card_name": adapter.card_name,
+            },
+        )
+        queued = self._events.extend((used_event, move_event))
+        used_sequence = queued[0].sequence
+        assert used_sequence is not None
+        group = _PendingGroupTrick(
+            user_id=context.actor_id,
+            trick_instance_id=action.card_instance_id,
+            trick_key=adapter.card_key,
+            target_sequence=sequence,
+        )
+        first_target = sequence[0]
+        order = (
+            runtime.current_player_id,
+            self.opponent_of(runtime.current_player_id),
+        )
+        next_runtime = replace(
+            runtime,
+            phase=ProductionPhase.TRICK_RESPONSE,
+            pending_group_trick=group,
+            pending_trick=_PendingTrick(
+                context.actor_id,
+                first_target,
+                action.card_instance_id,
+                adapter.card_key,
+            ),
+            trick_effect_active=True,
+            trick_consecutive_passes=0,
+            trick_response_order=order,
+            trick_response_index=0,
+            trick_decision_count=0,
+            trick_direct_response_to=action.card_instance_id,
+            response_window_id=(
+                f"trick:{runtime.turn_number}:"
+                f"{action.card_instance_id}:gt0:dec0"
+            ),
+            response_window_order=(order[0],),
+            response_window_source_sequence=used_sequence,
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def _group_target_sequence(
+        self,
+        state: GameState,
+        user_id: str,
+        adapter: GroupTargetTrickAdapter,
+    ) -> tuple[str, ...]:
+        """服务器自动生成群体锦囊目标序列（使用时快照）。
+
+        顺序采用项目通用行动顺序：从使用者开始沿当前座次数字递增方向
+        循环（基础术语第4.1节），跳过已确认死亡的角色；【南蛮入侵】与
+        【万箭齐发】排除使用者，【桃园结义】只包含已受伤角色且包括
+        使用者。序列在使用时固定，结算时不动态增删目标。
+        """
+
+        user_seat = state.players_by_id[user_id].seat
+        ring_size = max(1, len(state.players))
+        ordered = sorted(
+            (player for player in state.players if player.alive),
+            key=lambda player: (player.seat - user_seat) % ring_size,
+        )
+        if not adapter.includes_self:
+            ordered = [
+                player for player in ordered if player.player_id != user_id
+            ]
+        if adapter.wounded_targets_only:
+            ordered = [
+                player for player in ordered if player.hp < player.max_hp
+            ]
+        return tuple(player.player_id for player in ordered)
+
+    def _group_resolved_event(
+        self,
+        state: GameState,
+        group: _PendingGroupTrick,
+        target_id: str,
+        *,
+        result: str,
+        damage_amount: int | None = None,
+        damage_type: str | None = None,
+        damage_source_id: str | None = None,
+        recover_amount: int | None = None,
+        rescued: bool | None = None,
+    ) -> GameEvent:
+        """当前目标的独立、可审计的逐目标结算事件。"""
+
+        next_index = group.current_target_index + 1
+        next_target_id = None
+        if next_index < len(group.target_sequence):
+            next_target_id = group.target_sequence[next_index]
+        payload: dict[str, object] = {
+            "root_trick_instance_id": group.trick_instance_id,
+            "user_id": group.user_id,
+            "target_index": group.current_target_index,
+            "target_count": len(group.target_sequence),
+            "result": result,
+            "next_target_id": next_target_id,
+            "next_target_index": (
+                next_index if next_target_id is not None else None
+            ),
+        }
+        if damage_amount is not None:
+            payload["damage_amount"] = damage_amount
+        if damage_type is not None:
+            payload["damage_type"] = damage_type
+        if damage_source_id is not None:
+            payload["damage_source_id"] = damage_source_id
+        if recover_amount is not None:
+            payload["recover_amount"] = recover_amount
+        if rescued is not None:
+            payload["rescued"] = rescued
+        return GameEvent(
+            event_type=EventType.GROUP_TARGET_RESOLVED,
+            card_instance_id=group.trick_instance_id,
+            card_key=group.trick_key,
+            card_user=group.user_id,
+            target_ids=(target_id,),
+            payload=payload,
+        )
+
+    def _hp_recover_event(
+        self,
+        group: _PendingGroupTrick,
+        target_id: str,
+        amount: int,
+    ) -> GameEvent:
+        """正式恢复事件：记录恢复原因、目标、实际恢复量与根锦囊归属。"""
+
+        return GameEvent(
+            event_type=EventType.HP_RECOVER,
+            card_instance_id=group.trick_instance_id,
+            card_key=group.trick_key,
+            card_user=group.user_id,
+            target_ids=(target_id,),
+            payload={
+                "amount": amount,
+                "actual_amount": amount,
+                "root_trick_instance_id": group.trick_instance_id,
+                "target_index": group.current_target_index,
+                "target_count": len(group.target_sequence),
+                "reason": "taoyuan_jieyi_effect",
+                "user_id": group.user_id,
+            },
+        )
+
+    def _resolve_group_trick_target(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        trick: _PendingTrick,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """当前目标的无懈链结束后：取消、跳过死亡目标或进入目标效果。"""
+
+        group = runtime.pending_group_trick
+        if group is None:
+            raise ProductionBatchError("群体锦囊结算缺少逐目标状态")
+        if (
+            group.trick_key != trick.trick_key
+            or group.trick_instance_id != trick.trick_instance_id
+        ):
+            raise ProductionBatchError("群体锦囊结算状态与当前锦囊不一致")
+        if group.current_target_index >= len(group.target_sequence):
+            raise ProductionBatchError("群体锦囊目标索引越界")
+        current = group.target_sequence[group.current_target_index]
+        if current != trick.target_id:
+            raise ProductionBatchError(
+                "群体锦囊当前目标与响应窗口目标不一致"
+            )
+        if not runtime.trick_effect_active:
+            cancelled_event = GameEvent(
+                event_type=EventType.CARD_EFFECT_CANCELLED,
+                card_instance_id=group.trick_instance_id,
+                card_key=group.trick_key,
+                card_user=group.user_id,
+                target_ids=(current,),
+                payload={
+                    "reason": "nullified_by_wuxie",
+                    "root_trick_instance_id": group.trick_instance_id,
+                    "target_index": group.current_target_index,
+                    "target_count": len(group.target_sequence),
+                },
+            )
+            resolved = self._group_resolved_event(
+                state, group, current, result="cancelled"
+            )
+            self._events.extend((cancelled_event, resolved))
+            return self._advance_group_target(
+                state, runtime, group, current
+            )
+        if not state.players_by_id[current].alive:
+            # 目标在轮到自己前死亡：跳过，不响应、不受伤或不回复。
+            resolved = self._group_resolved_event(
+                state, group, current, result="skipped_dead"
+            )
+            self._events.extend((resolved,))
+            return self._advance_group_target(
+                state, runtime, group, current
+            )
+        if group.trick_key == "sgs_trick_taoyuanjieyi":
+            return self._taoyuan_resolve_target(
+                state, runtime, group, current
+            )
+        if group.trick_key in (
+            "sgs_trick_nanmanruqin",
+            "sgs_trick_wanjianqifa",
+        ):
+            return self._open_group_response_phase(
+                state, runtime, group, current
+            )
+        raise ProductionBatchError(
+            f"群体锦囊{group.trick_key!r}未实现逐目标结算；失败关闭"
+        )
+
+    def _group_response_window_id(
+        self, runtime: _BatchRuntime, group: _PendingGroupTrick
+    ) -> str:
+        return (
+            f"{group.trick_key}:{runtime.turn_number}:"
+            f"{group.trick_instance_id}:gt{group.current_target_index}"
+        )
+
+    def _open_group_response_phase(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        group: _PendingGroupTrick,
+        target_id: str,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """当前目标效果生效：为【南蛮入侵】／【万箭齐发】打开响应阶段。"""
+
+        if group.trick_key == "sgs_trick_nanmanruqin":
+            phase = ProductionPhase.NANMAN_RESPONSE
+        elif group.trick_key == "sgs_trick_wanjianqifa":
+            phase = ProductionPhase.WANJIAN_RESPONSE
+        else:
+            raise ProductionBatchError(
+                f"群体锦囊{group.trick_key!r}没有响应阶段"
+            )
+        window_id = self._group_response_window_id(runtime, group)
+        digest = sha256_value(
+            tuple(state.card_ids_in(ZoneRef.hand(target_id)))
+        )
+        legal_keys = (
+            SLASH_CARD_KEYS
+            if group.trick_key == "sgs_trick_nanmanruqin"
+            else ("sgs_basic_shan",)
+        )
+        handles = MappingProxyType(
+            {
+                _group_response_handle(
+                    self._session_id,
+                    self._session_secret,
+                    window_id,
+                    target_id,
+                    digest,
+                    instance_id,
+                ): instance_id
+                for instance_id in state.card_ids_in(
+                    ZoneRef.hand(target_id)
+                )
+                if state.cards_by_id[instance_id].card_key in legal_keys
+            }
+        )
+        next_runtime = replace(
+            runtime,
+            phase=phase,
+            pending_group_trick=replace(
+                group, responder_id=target_id
+            ),
+            pending_trick=None,
+            trick_effect_active=True,
+            trick_consecutive_passes=0,
+            trick_response_order=(),
+            trick_response_index=0,
+            trick_decision_count=0,
+            trick_direct_response_to=None,
+            response_window_id=None,
+            response_window_order=(),
+            response_window_source_sequence=None,
+            group_response_handles=handles,
+            group_response_snapshot_digest=digest,
+        )
+        return state, next_runtime
+
+    def _advance_group_target(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        group: _PendingGroupTrick,
+        resolved_target: str,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """推进到下一目标（建立新的无懈窗口）或完成整张群体锦囊。"""
+
+        completed = (*group.completed_target_ids, resolved_target)
+        next_index = group.current_target_index + 1
+        if next_index >= len(group.target_sequence):
+            # 全部目标完成：原锦囊此时才从处理区进入弃牌堆。
+            next_state, finish_event = self._finish_processing(
+                state,
+                group.trick_instance_id,
+                f"{group.trick_key}_all_targets_resolved",
+            )
+            self._events.extend((finish_event,))
+            return next_state, self._return_to_play(runtime)
+        next_target = group.target_sequence[next_index]
+        order = (
+            runtime.current_player_id,
+            self.opponent_of(runtime.current_player_id),
+        )
+        last_events = self._events.snapshot()
+        source_sequence = last_events[-1].sequence if last_events else None
+        next_group = replace(
+            group,
+            current_target_index=next_index,
+            completed_target_ids=completed,
+            responder_id=None,
+        )
+        next_runtime = replace(
+            runtime,
+            phase=ProductionPhase.TRICK_RESPONSE,
+            pending_group_trick=next_group,
+            pending_trick=_PendingTrick(
+                group.user_id,
+                next_target,
+                group.trick_instance_id,
+                group.trick_key,
+            ),
+            trick_effect_active=True,
+            trick_consecutive_passes=0,
+            trick_response_order=order,
+            trick_response_index=0,
+            trick_decision_count=0,
+            trick_direct_response_to=group.trick_instance_id,
+            response_window_id=(
+                f"trick:{runtime.turn_number}:"
+                f"{group.trick_instance_id}:gt{next_index}:dec0"
+            ),
+            response_window_order=(order[0],),
+            response_window_source_sequence=source_sequence,
+            group_response_handles=MappingProxyType({}),
+            group_response_snapshot_digest=None,
+        )
+        return state, next_runtime
+
+    def _taoyuan_resolve_target(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        group: _PendingGroupTrick,
+        target_id: str,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """【桃园结义】当前目标：受伤恢复1点，满体力结算为无效果。"""
+
+        player = state.players_by_id[target_id]
+        events: list[GameEvent] = []
+        if player.hp < player.max_hp:
+            next_state = _replace_player(
+                state,
+                target_id,
+                hp=min(player.max_hp, player.hp + 1),
+            )
+            events.append(
+                self._hp_recover_event(group, target_id, 1)
+            )
+            resolved = self._group_resolved_event(
+                next_state,
+                group,
+                target_id,
+                result="recovered",
+                recover_amount=1,
+            )
+        else:
+            next_state = state
+            resolved = self._group_resolved_event(
+                state,
+                group,
+                target_id,
+                result="no_effect",
+                recover_amount=0,
+            )
+        events.append(resolved)
+        self._events.extend(events)
+        return self._advance_group_target(
+            next_state, runtime, group, target_id
+        )
+
+    def _apply_group_trick_damage(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        group: _PendingGroupTrick,
+        victim_id: str,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """群体锦囊当前目标不响应时造成1点无属性伤害。
+
+        伤害来源为群体锦囊使用者；濒死时暂停目标队列并进入正式救援，
+        救援完成后从下一目标继续；原锦囊在全部目标完成前不进入弃牌堆。
+        """
+
+        if group.current_target_index >= len(group.target_sequence):
+            raise ProductionBatchError("群体锦囊目标索引越界")
+        current = group.target_sequence[group.current_target_index]
+        if current != victim_id:
+            raise ProductionBatchError("群体锦囊伤害目标不是当前目标")
+        victim = state.players_by_id[victim_id]
+        next_state = _replace_player(state, victim_id, hp=victim.hp - 1)
+        damage_event = DamageEvent(
+            target_id=victim_id,
+            amount=1,
+            damage_type="无属性",
+            card_instance_id=group.trick_instance_id,
+            card_key=group.trick_key,
+            card_user=group.user_id,
+            damage_source=group.user_id,
+            kill_credit=group.user_id,
+            payload={
+                "root_trick_instance_id": group.trick_instance_id,
+                "target_index": group.current_target_index,
+                "target_count": len(group.target_sequence),
+            },
+        )
+        if next_state.players_by_id[victim_id].hp <= 0:
+            dying_event = GameEvent(
+                event_type=EventType.DYING,
+                damage_source=group.user_id,
+                kill_credit=group.user_id,
+                target_ids=(victim_id,),
+            )
+            self._events.extend((damage_event, dying_event))
+            dying_sequence = self._events.snapshot()[-1].sequence
+            assert dying_sequence is not None
+            rescue_order = (
+                runtime.current_player_id,
+                self.opponent_of(runtime.current_player_id),
+            )
+            next_runtime = replace(
+                runtime,
+                phase=ProductionPhase.DYING_RESCUE,
+                pending_dying_id=victim_id,
+                rescue_order=rescue_order,
+                rescue_index=0,
+                rescue_decision_count=0,
+                response_window_id=(
+                    f"dying:{runtime.turn_number}:{victim_id}"
+                    ":seat0:dec0"
+                ),
+                response_window_order=(rescue_order[0],),
+                response_window_source_sequence=dying_sequence,
+                pending_damage_card_id=group.trick_instance_id,
+                pending_damage_source_id=group.user_id,
+                pending_damage_kill_credit=group.user_id,
+                pending_damage_rescue_reason=(
+                    f"{group.trick_key}_target_resolved_after_rescue"
+                ),
+                pending_damage_death_reason=(
+                    f"{group.trick_key}_target_resolved_with_death"
+                ),
+            )
+            return next_state, next_runtime
+        self._events.extend((damage_event,))
+        resolved = self._group_resolved_event(
+            next_state,
+            group,
+            victim_id,
+            result="damaged",
+            damage_amount=1,
+            damage_type="无属性",
+            damage_source_id=group.user_id,
+        )
+        self._events.extend((resolved,))
+        return self._advance_group_target(
+            next_state, runtime, group, victim_id
+        )
+
+    def _resume_group_after_damage(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        victim_id: str,
+        *,
+        rescued: bool,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """濒死救援结束后恢复群体目标队列继续位置。"""
+
+        group = runtime.pending_group_trick
+        if group is None:
+            raise ProductionBatchError(
+                "濒死救援完成但缺少群体锦囊继续状态"
+            )
+        if (
+            group.current_target_index >= len(group.target_sequence)
+            or group.target_sequence[group.current_target_index] != victim_id
+        ):
+            raise ProductionBatchError(
+                "群体锦囊救援恢复的目标不是当前目标"
+            )
+        resolved = self._group_resolved_event(
+            state,
+            group,
+            victim_id,
+            result="damaged",
+            damage_amount=1,
+            damage_type="无属性",
+            damage_source_id=group.user_id,
+            rescued=rescued,
+        )
+        self._events.extend((resolved,))
+        return self._advance_group_target(
+            state, runtime, group, victim_id
+        )
+
+    def enumerate_group_response_actions(
+        self,
+        state: GameState,
+        context: ActionContext,
+        adapter: GroupTargetTrickAdapter,
+    ) -> tuple[LegalAction, ...]:
+        """枚举当前目标的合法响应动作（打出【杀】或【闪】）。
+
+        候选只以绑定当前响应窗口的不透明句柄暴露，不在动作负载中携带
+        实体牌ID、牌名、花色或点数；未打出的目标手牌不会进入玩家可见
+        回放材料。
+        """
+
+        runtime = self._runtime
+        group = runtime.pending_group_trick
+        if group is None or group.trick_key != adapter.card_key:
+            return ()
+        if runtime.phase.value != adapter.response_phase_value:
+            return ()
+        if group.responder_id is None or group.responder_id != context.actor_id:
+            return ()
+        current = group.target_sequence[group.current_target_index]
+        if not state.players_by_id[current].alive:
+            return ()
+        window_id = self._group_response_window_id(runtime, group)
+        if runtime.group_response_snapshot_digest is None:
+            return ()
+        if sha256_value(
+            tuple(state.card_ids_in(ZoneRef.hand(current)))
+        ) != runtime.group_response_snapshot_digest:
+            # 响应窗口打开后手牌已变化：不再铸造任何动作，旧句柄失败关闭。
+            return ()
+        actions: list[LegalAction] = []
+        for handle in sorted(runtime.group_response_handles):
+            actions.append(
+                LegalAction(
+                    action_type=ActionType.PLAY_CARD,
+                    actor_id=context.actor_id,
+                    target_ids=(current,),
+                    payload={
+                        "operation": adapter.response_operation,
+                        "response_to": group.trick_instance_id,
+                        "root_trick_instance_id": group.trick_instance_id,
+                        "target_id": current,
+                        "target_index": group.current_target_index,
+                        "window_id": window_id,
+                        "state_hash": state_sha256(
+                            canonical_state_snapshot(state)
+                        ),
+                        "handle": handle,
+                    },
+                )
+            )
+        return tuple(actions)
+
+    def apply_group_response_play(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: GroupTargetTrickAdapter,
+    ) -> GameState:
+        """权威解析群体锦囊响应动作：当前目标打出合法【杀】或【闪】。"""
+
+        runtime = self._runtime
+        if runtime.phase.value != adapter.response_phase_value:
+            raise InvalidActionError(
+                f"响应{adapter.card_name}只能在对应响应阶段进行"
+            )
+        group = runtime.pending_group_trick
+        if group is None or group.trick_key != adapter.card_key:
+            raise InvalidActionError("当前没有进行中的群体锦囊响应")
+        if group.responder_id is None or context.actor_id != group.responder_id:
+            raise InvalidActionError("只有当前响应目标可以打出响应牌")
+        if action.action_type is not ActionType.PLAY_CARD:
+            raise InvalidActionError(f"响应{adapter.card_name}的动作类型必须是打出")
+        current = group.target_sequence[group.current_target_index]
+        payload = action.payload
+        if str(payload.get("operation", "")) != adapter.response_operation:
+            raise InvalidActionError(f"{adapter.card_name}响应动作负载无效")
+        if payload.get("root_trick_instance_id") != group.trick_instance_id:
+            raise InvalidActionError(
+                f"{adapter.card_name}响应动作绑定的根锦囊与当前结算不一致"
+            )
+        if payload.get("response_to") != group.trick_instance_id:
+            raise InvalidActionError(
+                f"{adapter.card_name}响应动作的响应对象与当前结算不一致"
+            )
+        if payload.get("target_id") != current:
+            raise InvalidActionError(
+                f"{adapter.card_name}响应动作绑定的目标不是当前目标"
+            )
+        if payload.get("target_index") != group.current_target_index:
+            raise InvalidActionError(
+                f"{adapter.card_name}响应动作绑定的目标索引已过期"
+            )
+        if payload.get("window_id") != self._group_response_window_id(
+            runtime, group
+        ):
+            raise InvalidActionError(f"{adapter.card_name}响应窗口已过期")
+        if payload.get("state_hash") != state_sha256(
+            canonical_state_snapshot(state)
+        ):
+            raise InvalidActionError(
+                f"{adapter.card_name}响应动作绑定的状态哈希与当前状态不一致"
+            )
+        handle = payload.get("handle")
+        instance_id = _resolve_group_response_handle(
+            self._session_id,
+            self._session_secret,
+            state,
+            self._group_response_window_id(runtime, group),
+            current,
+            runtime.group_response_snapshot_digest,
+            runtime.group_response_handles,
+            handle,
+        )
+        if instance_id is None:
+            raise InvalidActionError(
+                f"{adapter.card_name}响应句柄无效、伪造或已过期"
+            )
+        card = state.cards_by_id[instance_id]
+        if card.card_key not in adapter.response_card_keys:
+            raise InvalidActionError(
+                f"响应{adapter.card_name}的实体牌必须是合法响应牌"
+            )
+        if state.location_of(instance_id) != ZoneRef.hand(context.actor_id):
+            raise InvalidActionError("只能打出行动角色真实手牌中的实体牌")
+
+        played_event = GameEvent(
+            event_type=EventType.CARD_PLAYED,
+            card_instance_id=instance_id,
+            card_key=card.card_key,
+            card_user=context.actor_id,
+            target_ids=(current,),
+            payload={
+                "response_to": group.trick_instance_id,
+                "root_trick_instance_id": group.trick_instance_id,
+                "response_action": "play",
+                "purpose": f"{group.trick_key}_response",
+                "creates_card_used_event": False,
+                "creates_card_played_event": True,
+                "counts_for_use_or_play_total": True,
+                "physical_or_virtual": "physical",
+                "response_provider": context.actor_id,
+                "group_target_id": current,
+                "group_target_index": group.current_target_index,
+                "group_target_count": len(group.target_sequence),
+                "group_user_id": group.user_id,
+            },
+        )
+        next_state, move_events = self._consume_immediately(
+            state,
+            instance_id,
+            context.actor_id,
+            f"{group.trick_key}_response",
+        )
+        self._events.extend((played_event, *move_events))
+        resolved = self._group_resolved_event(
+            next_state, group, current, result="responded"
+        )
+        self._events.extend((resolved,))
+        next_state, next_runtime = self._advance_group_target(
+            next_state, runtime, group, current
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def apply_pass_group_response(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: GroupTargetTrickAdapter,
+    ) -> GameState:
+        """当前目标主动不响应：受到1点无属性伤害并进入濒死／继续流程。"""
+
+        del action
+        runtime = self._runtime
+        if runtime.phase.value != adapter.response_phase_value:
+            raise InvalidActionError(
+                f"放弃{adapter.card_name}响应只能在对应响应阶段进行"
+            )
+        group = runtime.pending_group_trick
+        if group is None or group.trick_key != adapter.card_key:
+            raise InvalidActionError("当前没有进行中的群体锦囊响应")
+        if group.responder_id is None or context.actor_id != group.responder_id:
+            raise InvalidActionError("只有当前响应目标可以放弃响应")
+        current = group.target_sequence[group.current_target_index]
+        next_state, next_runtime = self._apply_group_trick_damage(
+            state, runtime, group, current
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def apply_pass_nanman_slash(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+    ) -> GameState:
+        return self.apply_pass_group_response(
+            state,
+            context,
+            action,
+            self._formal_registry.adapter_for("sgs_trick_nanmanruqin"),
+        )
+
+    def apply_pass_wanjian_jink(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+    ) -> GameState:
+        return self.apply_pass_group_response(
+            state,
+            context,
+            action,
+            self._formal_registry.adapter_for("sgs_trick_wanjianqifa"),
+        )
+
     def _apply_trick_damage(
         self,
         state: GameState,
@@ -3498,14 +4554,22 @@ class ProductionBasicCardBatch:
             *move_events,
         ]
         if next_state.players_by_id[dying_id].hp >= 1:
-            next_state, finish_event = self._finish_processing(
-                next_state,
-                self._pending_damage_card_id(runtime),
-                self._pending_damage_rescue_reason(runtime),
-            )
-            pending_events.append(finish_event)
-            self._events.extend(pending_events)
-            next_runtime = self._return_to_play(runtime)
+            if runtime.pending_group_trick is not None:
+                self._events.extend(pending_events)
+                # 群体锦囊：救援完成后恢复逐目标队列，原锦囊继续留在
+                # 处理区，直到全部目标完成才进入弃牌堆。
+                next_state, next_runtime = self._resume_group_after_damage(
+                    next_state, runtime, dying_id, rescued=True
+                )
+            else:
+                next_state, finish_event = self._finish_processing(
+                    next_state,
+                    self._pending_damage_card_id(runtime),
+                    self._pending_damage_rescue_reason(runtime),
+                )
+                pending_events.append(finish_event)
+                self._events.extend(pending_events)
+                next_runtime = self._return_to_play(runtime)
         else:
             self._events.extend(pending_events)
             decision_count = runtime.rescue_decision_count + 1
@@ -3577,14 +4641,22 @@ class ProductionBasicCardBatch:
             *move_events,
         ]
         if next_state.players_by_id[dying_id].hp >= 1:
-            next_state, finish_event = self._finish_processing(
-                next_state,
-                self._pending_damage_card_id(runtime),
-                self._pending_damage_rescue_reason(runtime),
-            )
-            pending_events.append(finish_event)
-            self._events.extend(pending_events)
-            next_runtime = self._return_to_play(runtime)
+            if runtime.pending_group_trick is not None:
+                self._events.extend(pending_events)
+                # 群体锦囊：救援完成后恢复逐目标队列，原锦囊继续留在
+                # 处理区，直到全部目标完成才进入弃牌堆。
+                next_state, next_runtime = self._resume_group_after_damage(
+                    next_state, runtime, dying_id, rescued=True
+                )
+            else:
+                next_state, finish_event = self._finish_processing(
+                    next_state,
+                    self._pending_damage_card_id(runtime),
+                    self._pending_damage_rescue_reason(runtime),
+                )
+                pending_events.append(finish_event)
+                self._events.extend(pending_events)
+                next_runtime = self._return_to_play(runtime)
         else:
             self._events.extend(pending_events)
             decision_count = runtime.rescue_decision_count + 1
@@ -3634,6 +4706,14 @@ class ProductionBasicCardBatch:
             return state
         dying = state.players_by_id[dying_id]
         if dying.hp >= 1:
+            if runtime.pending_group_trick is not None:
+                # 群体锦囊：救援完成后恢复逐目标队列，原锦囊继续留在
+                # 处理区，直到全部目标完成才进入弃牌堆。
+                next_state, next_runtime = self._resume_group_after_damage(
+                    state, runtime, dying_id, rescued=True
+                )
+                self._commit_runtime(runtime, next_runtime)
+                return next_state
             next_state, finish_event = self._finish_processing(
                 state,
                 self._pending_damage_card_id(runtime),
@@ -3683,6 +4763,9 @@ class ProductionBasicCardBatch:
             pending_duel=None,
             pending_fire_attack=None,
             fire_attack_reveal_handles=MappingProxyType({}),
+            pending_group_trick=None,
+            group_response_handles=MappingProxyType({}),
+            group_response_snapshot_digest=None,
             pending_damage_card_id=None,
             pending_damage_source_id=None,
             pending_damage_kill_credit=None,
@@ -3744,6 +4827,9 @@ class ProductionBasicCardBatch:
             response_window_id=None,
             response_window_order=(),
             response_window_source_sequence=None,
+            pending_group_trick=None,
+            group_response_handles=MappingProxyType({}),
+            group_response_snapshot_digest=None,
         )
         self._commit_runtime(runtime, next_runtime)
         return next_state

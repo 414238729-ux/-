@@ -29,9 +29,11 @@ class EventType(str, Enum):
     CARD_REVEALED = "card_revealed"
     DAMAGE = "damage"
     LOSE_HP = "lose_hp"
+    HP_RECOVER = "hp_recover"
     DYING = "dying"
     DEATH = "death"
     VICTORY = "victory"
+    GROUP_TARGET_RESOLVED = "group_target_resolved"
 
 
 def _validate_id(value: object, field_name: str) -> None:
@@ -230,6 +232,17 @@ def validate_event_contract(event: GameEvent) -> GameEvent:
         amount = event.payload.get("amount")
         if isinstance(amount, bool) or not isinstance(amount, int) or amount <= 0:
             raise ValueError("失去体力事件payload.amount必须是正整数")
+    if event.event_type is EventType.HP_RECOVER:
+        if len(event.target_ids) != 1:
+            raise ValueError("恢复体力事件必须且只能指定一名目标角色")
+        amount = event.payload.get("amount")
+        if isinstance(amount, bool) or not isinstance(amount, int) or amount <= 0:
+            raise ValueError("恢复体力事件payload.amount必须是正整数")
+    if event.event_type is EventType.GROUP_TARGET_RESOLVED:
+        if event.card_instance_id is None:
+            raise ValueError("群体锦囊逐目标结算事件必须提供根锦囊实体牌ID")
+        if len(event.target_ids) != 1:
+            raise ValueError("群体锦囊逐目标结算事件必须且只能指定当前目标角色")
     if event.event_type in (EventType.DYING, EventType.DEATH) and len(event.target_ids) != 1:
         raise ValueError("濒死或死亡事件必须且只能指定一名目标角色")
     if event.event_type is EventType.VICTORY and not event.target_ids:

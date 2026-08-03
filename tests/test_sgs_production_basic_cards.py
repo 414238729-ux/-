@@ -744,13 +744,13 @@ def test_actions_must_pass_enumerate_validate_apply_pipeline() -> None:
 def test_unimplemented_trick_cards_fail_closed_without_fallback() -> None:
     game = ProductionBasicCardBatch(seed=49)
     registry = game.formal_registry
-    assert "sgs_trick_nanmanruqin" in registry.unimplemented_card_keys
+    assert "sgs_trick_jiedaosharen" in registry.unimplemented_card_keys
     with pytest.raises(UnsupportedRuleError):
-        registry.adapter_for("sgs_trick_nanmanruqin")
+        registry.adapter_for("sgs_trick_jiedaosharen")
     with pytest.raises(UnsupportedRuleError):
         registry.adapter_for("sgs_delayed_shandian")
     with pytest.raises(UnsupportedRuleError):
-        registry.rule_spec_for("sgs_trick_nanmanruqin")
+        registry.rule_spec_for("sgs_trick_jiedaosharen")
     with pytest.raises(UnsupportedRuleError):
         registry.assert_no_unimplemented_fallback()
 

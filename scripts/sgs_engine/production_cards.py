@@ -56,6 +56,9 @@ CARD_NAMES_BY_KEY: Mapping[str, str] = {
     "sgs_basic_jiu": "酒",
     "sgs_trick_juedou": "决斗",
     "sgs_trick_huogong": "火攻",
+    "sgs_trick_nanmanruqin": "南蛮入侵",
+    "sgs_trick_wanjianqifa": "万箭齐发",
+    "sgs_trick_taoyuanjieyi": "桃园结义",
 }
 
 SLASH_CARD_KEYS: tuple[str, ...] = (
@@ -73,6 +76,15 @@ PRODUCTION_TRICK_KEYS: tuple[str, ...] = (
     "sgs_trick_shunshouqianyang",
     "sgs_trick_juedou",
     "sgs_trick_huogong",
+    "sgs_trick_nanmanruqin",
+    "sgs_trick_wanjianqifa",
+    "sgs_trick_taoyuanjieyi",
+)
+
+GROUP_TRICK_KEYS: tuple[str, ...] = (
+    "sgs_trick_nanmanruqin",
+    "sgs_trick_wanjianqifa",
+    "sgs_trick_taoyuanjieyi",
 )
 
 
@@ -1206,6 +1218,201 @@ class HuogongAdapter(TrickCardAdapter):
         raise InvalidActionError("【火攻】生产适配器不能处理当前阶段的动作")
 
 
+class GroupTargetTrickAdapter(TrickCardAdapter):
+    """群体普通锦囊的公共适配器基类。
+
+    三张群体锦囊（【南蛮入侵】【万箭齐发】【桃园结义】）共用同一套
+    “自动目标序列＋按行动顺序逐目标结算”基础设施：使用时由服务器在
+    运行时生成固定目标序列，玩家不能提交、修改、删减或重排目标；每个
+    目标依次打开独立【无懈可击】窗口，当前目标被无懈只取消该目标效果。
+    本适配器只描述卡牌自身参数，逐目标状态机由生产批处理会话统一推进，
+    不为每张牌复制一套目标队列代码。
+    """
+
+    card_key: str
+    card_name: str
+    response_card_keys: tuple[str, ...] = ()
+    includes_self: bool = False
+    wounded_targets_only: bool = False
+    damage_type: str = "无属性"
+    response_phase_value: str | None = None
+    response_operation: str | None = None
+
+    def __init__(
+        self, session: "ProductionBasicCardBatch | None" = None
+    ) -> None:
+        super().__init__(session)
+        if self.card_key not in GROUP_TRICK_KEYS:
+            raise ValueError(f"{self.card_key}不是本批次的群体普通锦囊卡牌键")
+
+    def rule_spec(self) -> dict[str, object]:
+        response_requirements: list[dict[str, object]] = [
+            {
+                "response_card_key": "sgs_trick_wuxiekeji",
+                "action": "use",
+                "event_type": "card_used",
+                "note": (
+                    "多目标锦囊逐名结算，一张无懈只抵消对当前角色的效果"
+                ),
+            }
+        ]
+        if self.response_card_keys:
+            response_requirements.append(
+                {
+                    "response_card_key": (
+                        "|".join(self.response_card_keys)
+                    ),
+                    "action": "play",
+                    "event_type": "card_played",
+                }
+            )
+        return {
+            "card_key": self.card_key,
+            "card_name": self.card_name,
+            "use_timing": "own_play_phase",
+            "use_limit": "unlimited_base;requires_entity_card_and_legal_targets",
+            "target_count": "all_auto_generated_by_server",
+            "target_filter": (
+                "wounded_characters_including_self"
+                if self.wounded_targets_only
+                else "all_other_characters"
+            ),
+            "distance_rule": "not_applicable",
+            "response_requirements": response_requirements,
+            "nullification_eligible": True,
+            "movement_lifecycle": (
+                "trick:hand->processing->discard(after_all_targets);"
+                "response_card:hand->processing->discard(played)"
+            ),
+            "effect_resolution": (
+                "per_target_nullification_window;then_per_target_effect;"
+                "target_sequence_advanced_by_server"
+            ),
+            "damage_type": self.damage_type,
+            "completion_event": (
+                "card_used + per_target(card_played|damage|recover|cancel) + "
+                "card_moved_to_discard_after_all_targets"
+            ),
+            "adapter_version": self.adapter_version,
+            "implemented": self.implemented,
+            "tested": self.tested,
+            "production_adapter": self.production_adapter,
+        }
+
+    def enumerate_legal_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        session = self._require_session()
+        if session.phase.value == "play":
+            if context.actor_id != session.current_player_id:
+                return ()
+            actions: list[LegalAction] = []
+            for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
+                card = state.cards_by_id[instance_id]
+                if card.card_key != self.card_key:
+                    continue
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.USE_CARD,
+                        actor_id=context.actor_id,
+                        card_instance_id=instance_id,
+                        payload={
+                            "operation": (
+                                "use_nanman"
+                                if self.card_key == "sgs_trick_nanmanruqin"
+                                else "use_wanjian"
+                                if self.card_key == "sgs_trick_wanjianqifa"
+                                else "use_taoyuan"
+                            ),
+                            "card_key": self.card_key,
+                            "card_name": self.card_name,
+                        },
+                    )
+                )
+            return tuple(actions)
+        if session.phase.value == self.response_phase_value:
+            if self.response_operation is None:
+                return ()
+            return session.enumerate_group_response_actions(
+                state, context, self
+            )
+        return ()
+
+    def apply_action(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        session = self._require_session()
+        if session.phase.value == "play":
+            return session.apply_group_trick_use(
+                state, context, action, self
+            )
+        if session.phase.value == self.response_phase_value:
+            if self.response_operation is None:
+                raise InvalidActionError(
+                    f"{self.card_name}没有响应阶段动作"
+                )
+            return session.apply_group_response_play(
+                state, context, action, self
+            )
+        raise InvalidActionError(
+            f"{self.card_name}生产适配器不能处理当前阶段的动作"
+        )
+
+
+class NanmanRuqinAdapter(GroupTargetTrickAdapter):
+    """【南蛮入侵】的生产适配器。
+
+    目标为除使用者外的所有其他角色；每名目标依次结算，未打出1张【杀】
+    的目标受到使用者造成的1点无属性伤害。
+    """
+
+    def __init__(
+        self, session: "ProductionBasicCardBatch | None" = None
+    ) -> None:
+        self.card_key = "sgs_trick_nanmanruqin"
+        self.card_name = "南蛮入侵"
+        self.response_card_keys = SLASH_CARD_KEYS
+        self.response_phase_value = "nanman_response"
+        self.response_operation = "play_slash_for_nanman"
+        super().__init__(session)
+
+
+class WanjianQifaAdapter(GroupTargetTrickAdapter):
+    """【万箭齐发】的生产适配器。
+
+    目标为除使用者外的所有其他角色；每名目标依次结算，未打出1张【闪】
+    的目标受到使用者造成的1点无属性伤害。
+    """
+
+    def __init__(
+        self, session: "ProductionBasicCardBatch | None" = None
+    ) -> None:
+        self.card_key = "sgs_trick_wanjianqifa"
+        self.card_name = "万箭齐发"
+        self.response_card_keys = ("sgs_basic_shan",)
+        self.response_phase_value = "wanjian_response"
+        self.response_operation = "play_jink_for_wanjian"
+        super().__init__(session)
+
+
+class TaoyuanJieyiAdapter(GroupTargetTrickAdapter):
+    """【桃园结义】的生产适配器。
+
+    目标为所有已受伤角色（包括使用者）；每名目标依次结算，受伤目标恢复
+    1点体力且不超过体力上限，未受伤目标结算为无效果。目标集合在使用时
+    由服务器快照生成，结算时不动态增删目标。
+    """
+
+    def __init__(
+        self, session: "ProductionBasicCardBatch | None" = None
+    ) -> None:
+        self.card_key = "sgs_trick_taoyuanjieyi"
+        self.card_name = "桃园结义"
+        self.includes_self = True
+        self.wounded_targets_only = True
+        super().__init__(session)
+
+
 def _default_adapters() -> dict[str, RuleAdapter]:
     return {
         "sgs_basic_sha": SlashAdapter("sgs_basic_sha", "无属性"),
@@ -1220,6 +1427,9 @@ def _default_adapters() -> dict[str, RuleAdapter]:
         "sgs_trick_shunshouqianyang": ShunshouQianyangAdapter(),
         "sgs_trick_juedou": JuedouAdapter(),
         "sgs_trick_huogong": HuogongAdapter(),
+        "sgs_trick_nanmanruqin": NanmanRuqinAdapter(),
+        "sgs_trick_wanjianqifa": WanjianQifaAdapter(),
+        "sgs_trick_taoyuanjieyi": TaoyuanJieyiAdapter(),
     }
 
 
@@ -1353,14 +1563,19 @@ class FormalCardRegistry:
 __all__ = [
     "CARD_NAMES_BY_KEY",
     "DEFAULT_ATTACK_RANGE",
+    "GROUP_TRICK_KEYS",
     "PRODUCTION_BASIC_CARD_KEYS",
     "PRODUCTION_TRICK_KEYS",
     "SLASH_CARD_KEYS",
     "GuoheChaiqiaoAdapter",
+    "GroupTargetTrickAdapter",
     "HuogongAdapter",
     "JuedouAdapter",
+    "NanmanRuqinAdapter",
     "ShunshouQianyangAdapter",
+    "TaoyuanJieyiAdapter",
     "TrickCardAdapter",
+    "WanjianQifaAdapter",
     "WuxiekejiAdapter",
     "WuzhongshengyouAdapter",
     "BasicCardAdapter",

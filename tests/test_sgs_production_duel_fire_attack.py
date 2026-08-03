@@ -245,13 +245,13 @@ def test_implemented_and_remaining_card_counts_updated() -> None:
     registry = game.formal_registry
     assert DUEL in registry.implemented_card_keys
     assert HUO in registry.implemented_card_keys
-    assert len(registry.implemented_card_keys) == 12
-    assert len(registry.unimplemented_card_keys) == 26
+    assert len(registry.implemented_card_keys) == 15
+    assert len(registry.unimplemented_card_keys) == 23
     assert DUEL not in registry.unimplemented_card_keys
     assert HUO not in registry.unimplemented_card_keys
     assert (
         sum(len(registry.instances_of(key)) for key in registry.implemented_card_keys)
-        == 113
+        == 118
     )
     assert {DUEL, HUO} <= set(PRODUCTION_TRICK_KEYS)
 
@@ -259,7 +259,7 @@ def test_implemented_and_remaining_card_counts_updated() -> None:
 def test_other_unimplemented_cards_stay_fail_closed() -> None:
     game = ProductionBasicCardBatch(seed=3)
     registry = game.formal_registry
-    for key in ("sgs_trick_jiedaosharen", "sgs_trick_nanmanruqin"):
+    for key in ("sgs_trick_jiedaosharen", "sgs_trick_wugufengdeng"):
         assert key in registry.unimplemented_card_keys
         with pytest.raises(UnsupportedRuleError):
             registry.adapter_for(key)
