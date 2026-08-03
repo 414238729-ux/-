@@ -28,9 +28,11 @@
     "duel_fire_attack_audit_close_note": "伤害型普通锦囊批次（【决斗】、【火攻】）已通过独立只读审计（AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，2026-08-03）；审计收尾真实提交 9c2070017fe624295ebd735bf5163f48a6ac2207（test: close duel and fire attack audit gaps），里程碑标签 milestone-b2-duel-fire-attack-audited 已建立；本文档的最终状态回填由用户提交后移动标签",
     "duel_fire_attack_audit_close_commit": "9c2070017fe624295ebd735bf5163f48a6ac2207",
     "group_target_trick_worktree_branch": "deepseek-group-target-tricks",
-    "group_target_trick_worktree_branch_note": "本批（【南蛮入侵】、【万箭齐发】、【桃园结义】）实现所在分支；实现提交 5f2fbf27b7041bbf3010636de37306eea5da6256（feat: implement production group-target trick slice）；检查点提交 8d68231e336dbe213ffad1c5aaa3101896fe5f2f（docs: record group-target trick checkpoint）；首次审计问题修复提交 ef98245aef32848468c7b2c4a7821ec9ae65146b（test: close group-target trick audit gaps）；独立复审在专用复审分支上执行；分支名只代表工作流程，提交哈希才是权威依据",
+    "group_target_trick_worktree_branch_note": "本批（【南蛮入侵】、【万箭齐发】、【桃园结义】）实现所在分支；基线提交 7414b0661a5cd7599d392f5ae5b287a7147438ac（docs: finalize duel and fire attack audit milestone）；实现提交 5f2fbf27b7041bbf3010636de37306eea5da6256（feat: implement production group-target trick slice）；检查点提交 8d68231e336dbe213ffad1c5aaa3101896fe5f2f（docs: record group-target trick checkpoint）；首次审计问题修复提交 ef98245aef32848468c7b2c4a7821ec9ae65146b（test: close group-target trick audit gaps）；最终独立复审收尾提交 d2e4f49925c0bb285d44092821c3a85c496571ef（test: complete group-target trick reaudit closure）；分支名只代表工作流程，提交哈希才是权威依据",
     "milestone_b2_group_target_trick_batch_commit": "5f2fbf27b7041bbf3010636de37306eea5da6256",
-    "milestone_b2_group_target_trick_batch_commit_note": "群体普通锦囊批次（【南蛮入侵】、【万箭齐发】、【桃园结义】）已由用户在外部PowerShell提交，实现提交哈希 5f2fbf27b7041bbf3010636de37306eea5da6256（feat: implement production group-target trick slice）"
+    "milestone_b2_group_target_trick_batch_commit_note": "群体普通锦囊批次（【南蛮入侵】、【万箭齐发】、【桃园结义】）已由用户在外部PowerShell提交，实现提交哈希 5f2fbf27b7041bbf3010636de37306eea5da6256（feat: implement production group-target trick slice）",
+    "group_target_trick_audit_close_note": "群体普通锦囊批次（【南蛮入侵】、【万箭齐发】、【桃园结义】）已完成最终独立复审：初次独立只读审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES（2026-08-03），首次审计问题修复提交 ef98245aef32848468c7b2c4a7821ec9ae65146b（test: close group-target trick audit gaps）；最终独立复审在专用复审分支上执行，结论 AUDIT_PASSED，复审残项关闭真实提交 d2e4f49925c0bb285d44092821c3a85c496571ef（test: complete group-target trick reaudit closure）；里程碑标签待用户提交文档后建立",
+    "group_target_trick_audit_close_commit": "d2e4f49925c0bb285d44092821c3a85c496571ef"
   },
   "feature_status": {
     "authoritative_core_foundation": true,
@@ -144,15 +146,24 @@
     },
     {
       "id": "CP-04H-PRODUCTION-GROUP-TARGET-TRICK-BATCH",
-      "status": "committed_pending_audit",
+      "status": "audited",
       "commit": "5f2fbf27b7041bbf3010636de37306eea5da6256",
-      "commit_note": "本批（【南蛮入侵】、【万箭齐发】、【桃园结义】）已由用户在外部PowerShell提交真实Git提交，提交信息 feat: implement production group-target trick slice，完整提交哈希 5f2fbf27b7041bbf3010636de37306eea5da6256；尚未完成独立只读审计，不得视为 audited",
+      "commit_note": "本批（【南蛮入侵】、【万箭齐发】、【桃园结义】）基线提交 7414b0661a5cd7599d392f5ae5b287a7147438ac（docs: finalize duel and fire attack audit milestone）；实现提交 5f2fbf27b7041bbf3010636de37306eea5da6256（feat: implement production group-target trick slice）；检查点文档提交 8d68231e336dbe213ffad1c5aaa3101896fe5f2f（docs: record group-target trick checkpoint）。2026-08-03 完成独立只读审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，首次审计问题修复提交 ef98245aef32848468c7b2c4a7821ec9ae65146b（test: close group-target trick audit gaps）；最终独立复审在专用复审分支上执行，复审残项关闭提交 d2e4f49925c0bb285d44092821c3a85c496571ef（test: complete group-target trick reaudit closure），最终结论 AUDIT_PASSED；未发现规则、隐藏信息、回放、第二套引擎或虚假测试阻塞问题。本文档为最终状态回填，里程碑标签待用户提交文档后建立；文档提交自身哈希由用户提交后确认，不在此虚构",
       "evidence": "scripts/sgs_engine/production_cards.py、scripts/sgs_engine/production_batch.py、scripts/sgs_engine/events.py、scripts/sgs_engine/__init__.py、tests/test_sgs_production_group_target_tricks.py；正式160张牌堆群体普通锦囊批次",
       "scope": "formal；【南蛮入侵】3张、【万箭齐发】1张与【桃园结义】1张接入生产注册表与权威核心；建立群体普通锦囊按行动顺序逐目标结算框架（服务器自动目标序列、逐目标独立【无懈可击】窗口、当前目标响应或受伤／回复、濒死救援期间队列暂停与恢复）；当前正式生产入口仅支持双人会话，三人以上目标顺序未由正式生产入口证明（NOT PROVEN）；不构成普通锦囊批次、多人响应链、正式单挑或里程碑B完成",
       "audit": {
-        "conclusion": "NOT_AUDITED_YET",
-        "audited_at": null,
-        "auditor_note": "独立只读审计尚未执行；不得写成audited"
+        "conclusion": "AUDIT_PASSED",
+        "initial_conclusion": "AUDIT_PASSED_WITH_NONBLOCKING_ISSUES",
+        "audited_at": "2026-08-03",
+        "auditor_note": "最终独立复审；初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，首次审计问题修复提交 ef98245aef32848468c7b2c4a7821ec9ae65146b（test: close group-target trick audit gaps）；复审残项关闭提交 d2e4f49925c0bb285d44092821c3a85c496571ef（test: complete group-target trick reaudit closure）；无规则、隐藏信息、回放、第二套引擎或虚假测试阻塞问题",
+        "closed_test_gaps": [
+          "test_nanman_forged_responder_index_window_and_hash_fail",
+          "test_wanjian_forged_responder_index_window_and_hash_fail"
+        ],
+        "audit_close_commit": "d2e4f49925c0bb285d44092821c3a85c496571ef",
+        "audit_close_commit_message": "test: complete group-target trick reaudit closure",
+        "milestone_tag": null,
+        "final_status": "audited"
       }
     }
   ],
@@ -373,15 +384,20 @@
       "multi_player_production_proven": false,
       "multi_player_production_note": "当前正式生产入口原生仅支持双人会话；三人以上目标顺序、中间目标濒死／死亡后的继续位置与来源死亡处理均未由正式生产入口证明（NOT PROVEN）",
       "worktree_commit_pending": false,
-      "independent_audit_done": false,
-      "audit_conclusion": "NOT_AUDITED_YET"
+      "independent_audit_done": true,
+      "audit_conclusion": "AUDIT_PASSED",
+      "initial_audit_conclusion": "AUDIT_PASSED_WITH_NONBLOCKING_ISSUES",
+      "audit_closed_test_gaps": [
+        "test_nanman_forged_responder_index_window_and_hash_fail",
+        "test_wanjian_forged_responder_index_window_and_hash_fail"
+      ]
     }
   },
   "sha256": {
-    "docs/ENGINE_STATUS.md": "d6f169a99c53f5c5aaa549c9723fd12bd4ae1a3dfa28a3bba1460cdf84e72514",
-    "docs/IMPLEMENTATION_MATRIX.md": "0ebfbc3771c5517c7d5b685718f10713588132f66db8bfb2e415b762eb069a39",
+    "docs/ENGINE_STATUS.md": "589018bf93be7b8b8bfd7f757bdf038afbca6f3ba8fa21d26e159de353c1908e",
+    "docs/IMPLEMENTATION_MATRIX.md": "cd58946251a6658328c12325b5830393728e7f7f3ac75123f0c83ef265fd2d57",
     "docs/LEGACY_RESULTS_INVALID.md": "267d51329b65b4435ed770b9fe90a0d53148d17cc9b0dae3e6d3406b06c0c0cc",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "c635df39bf3ee913a3aaa37c13e2a9753d54fbb32ad96bb3d680b8f7c089c2b8",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "9ba94951d1cbc000a06a968003857ebf51ccd102a89cdc6bfe9a49fee6dace37",
     "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "23b56a0edf0c85657b332100538013de16be4d71ea6a8214ac862a6708105af6",
     "knowledge/三国杀牌堆数据.csv": "8cb8da4177f11962776ae0f7e0154ed4ce56e293e96ac457874d48650517de18",
     "scripts/sgs_dev_runner.py": "6f88baa78fc9c22106188defda7190cd2a4412325db46f3964d217fd0e61c755",

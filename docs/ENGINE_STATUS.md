@@ -1,7 +1,7 @@
 # 三国杀正式引擎状态
 
 > 更新日期：2026-08-03
-> 状态：已有权威核心 foundation、测试专用最小单挑纵向切片、正式160张牌堆上六种基本牌的生产适配器批次、最小普通锦囊垂直切片（【无中生有】、【无懈可击】），以及目标区域选牌批次（【过河拆桥】6张、【顺手牵羊】5张接入生产适配器），以及伤害型普通锦囊批次（【决斗】3张、【火攻】3张接入生产适配器，2026-08-03已通过独立只读审计AUDIT_PASSED_WITH_NONBLOCKING_ISSUES），以及群体普通锦囊批次（【南蛮入侵】3张、【万箭齐发】1张、【桃园结义】1张接入生产适配器并建立逐目标结算框架，已由用户在外部PowerShell提交（实现提交哈希 `5f2fbf27b7041bbf3010636de37306eea5da6256`），尚未完成独立只读审计）；但正式整局引擎仍未完成，正式入口继续失败关闭。
+> 状态：已有权威核心 foundation、测试专用最小单挑纵向切片、正式160张牌堆上六种基本牌的生产适配器批次、最小普通锦囊垂直切片（【无中生有】、【无懈可击】），以及目标区域选牌批次（【过河拆桥】6张、【顺手牵羊】5张接入生产适配器），以及伤害型普通锦囊批次（【决斗】3张、【火攻】3张接入生产适配器，2026-08-03已通过独立只读审计AUDIT_PASSED_WITH_NONBLOCKING_ISSUES），以及群体普通锦囊批次（【南蛮入侵】3张、【万箭齐发】1张、【桃园结义】1张接入生产适配器并建立逐目标结算框架，已由用户在外部PowerShell提交（实现提交哈希 `5f2fbf27b7041bbf3010636de37306eea5da6256`），2026-08-03 完成独立只读审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED）；但正式整局引擎仍未完成，正式入口继续失败关闭。
 > 本文是运行能力状态页，不得用测试总数或文档完整度替换完整引擎验收。
 
 ## 0. 机器可读状态摘要
@@ -207,6 +207,7 @@ approximation_count=0
 - 群体锦囊造成伤害触发濒死时队列暂停，进入现有桃／酒救援；救援结束后游戏未结束时从正确的下一目标继续（不重结算已完成目标、不跳过未处理目标、不提前丢弃原锦囊、不丢失根锦囊／目标索引／伤害来源），游戏已结束时立即停止；
 - 群体响应动作以绑定“会话＋响应窗口＋当前目标＋根锦囊”的不透明句柄（`gr_` 前缀）暴露，决策负载不携带实体牌ID、牌名、花色或点数；过期、伪造、非当前目标响应、伪造目标索引／根锦囊／窗口、手牌变化后的句柄、原锦囊离开处理区后或游戏结束后的动作一律失败关闭；玩家可见回放不泄露未打出的目标手牌（与既有火攻批次约定一致：从未公开化的手牌实体在导出事件中只允许公共发牌记录，决策材料中不得出现）；
 - 新增 69 项真实生产路径验收测试（`tests/test_sgs_production_group_target_tricks.py`），覆盖注册表绑定、服务器自动目标集合、逐目标推进与独立效果状态、逐目标无懈与双无懈、南蛮／万箭响应与不响应伤害、桃园逐目标回复、濒死救援后队列恢复、牌守恒、隐藏信息隔离、严格回放与篡改失败关闭；当前完整 pytest 为 `1403 passed`（失败0、跳过0）。
+- 2026-08-03 独立只读审计完成：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，首次审计问题修复提交 `ef98245aef32848468c7b2c4a7821ec9ae65146b`（test: close group-target trick audit gaps），把南蛮／万箭伪造负载负向测试拆为逐层独立校验（目标绑定、operation、目标索引、窗口、状态哈希、根锦囊、句柄）并补真实枚举正向对照；最终独立复审在专用复审分支上执行，复审残项（非当前响应者提交）由 `d2e4f49925c0bb285d44092821c3a85c496571ef`（test: complete group-target trick reaudit closure）关闭，最终结论 AUDIT_PASSED；未发现规则、隐藏信息、回放、第二套引擎或虚假测试阻塞问题；里程碑标签待用户提交文档后建立。
 
 本批次只验证双人生产切片：当前正式生产入口原生仅支持双人会话，三人以上目标顺序、中间目标濒死／死亡后的继续位置与来源死亡处理仍未由正式生产入口证明（NOT PROVEN），文档不得写成完整军八、2v2或斗地主群体响应链已完成；不构成普通锦囊批次完成、正式单挑完成或里程碑 B 完成。
 
@@ -345,7 +346,7 @@ AI合法动作枚举完整
 - 里程碑 A 测试专用单挑纵向切片：`455685d6eaa1c297e9ec48a0cfaeb803b81f3406`。
 - 隐藏手牌句柄HMAC安全修复：`1b5e125ad0baa129458b42043aac08b18dcfad96`（fix: secure hidden hand choice handles）。
 - 【决斗】／【火攻】批次（`CP-04G-PRODUCTION-DUEL-FIRE-ATTACK-BATCH`）：已由用户在外部PowerShell提交（实现提交哈希 `b3587912da97825871ae91ea8a88b3e95c39fdde`，feat: implement production duel and fire attack slice）；2026-08-03 独立只读审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，补充两个确定性回归测试；审计收尾真实提交为 `9c2070017fe624295ebd735bf5163f48a6ac2207`（test: close duel and fire attack audit gaps），里程碑标签 `milestone-b2-duel-fire-attack-audited` 已建立；本批基线为 `85ffee7ca4b06470b0dcb3b1b52155093055b219`（milestone-b2-zone-target-tricks-audited）。
-- 群体普通锦囊批次（`CP-04H-PRODUCTION-GROUP-TARGET-TRICK-BATCH`）：【南蛮入侵】3张、【万箭齐发】1张、【桃园结义】1张接入生产适配器并建立逐目标结算框架（见 2.8 节）；已由用户在外部PowerShell提交（实现提交哈希 `5f2fbf27b7041bbf3010636de37306eea5da6256`，feat: implement production group-target trick slice，完整 pytest `1403 passed`），尚未完成独立只读审计，不得视为 audited。
+- 群体普通锦囊批次（`CP-04H-PRODUCTION-GROUP-TARGET-TRICK-BATCH`）：【南蛮入侵】3张、【万箭齐发】1张、【桃园结义】1张接入生产适配器并建立逐目标结算框架（见 2.8 节）；已由用户在外部PowerShell提交（实现提交哈希 `5f2fbf27b7041bbf3010636de37306eea5da6256`，feat: implement production group-target trick slice，完整 pytest `1403 passed`）；基线提交 `7414b0661a5cd7599d392f5ae5b287a7147438ac`，检查点文档提交 `8d68231e336dbe213ffad1c5aaa3101896fe5f2f`；2026-08-03 独立只读审计完成：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES（问题修复提交 `ef98245aef32848468c7b2c4a7821ec9ae65146b`，test: close group-target trick audit gaps），最终独立复审结论 AUDIT_PASSED（复审残项关闭提交 `d2e4f49925c0bb285d44092821c3a85c496571ef`，test: complete group-target trick reaudit closure）；里程碑标签待用户提交文档后建立。
 
 里程碑 A 的提交只证明隔离三牌切片，不证明正式160张牌无技能单挑完成。
 
