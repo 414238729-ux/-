@@ -28,7 +28,9 @@
     "duel_fire_attack_audit_close_note": "伤害型普通锦囊批次（【决斗】、【火攻】）已通过独立只读审计（AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，2026-08-03）；审计收尾真实提交 9c2070017fe624295ebd735bf5163f48a6ac2207（test: close duel and fire attack audit gaps），里程碑标签 milestone-b2-duel-fire-attack-audited 已建立；本文档的最终状态回填由用户提交后移动标签",
     "duel_fire_attack_audit_close_commit": "9c2070017fe624295ebd735bf5163f48a6ac2207",
     "group_target_trick_worktree_branch": "deepseek-group-target-tricks",
-    "group_target_trick_worktree_branch_note": "本批（【南蛮入侵】、【万箭齐发】、【桃园结义】）实现所在分支；本批代码与测试已在当前工作树完成（检查点 CP-04H-PRODUCTION-GROUP-TARGET-TRICK-BATCH），尚未由用户执行真实Git提交，尚未完成独立只读审计；不虚构提交哈希或标签"
+    "group_target_trick_worktree_branch_note": "本批（【南蛮入侵】、【万箭齐发】、【桃园结义】）实现所在分支；该分支上的本批代码已由用户在外部PowerShell提交，实现提交哈希 5f2fbf27b7041bbf3010636de37306eea5da6256（feat: implement production group-target trick slice），当前 HEAD 已为该实现提交",
+    "milestone_b2_group_target_trick_batch_commit": "5f2fbf27b7041bbf3010636de37306eea5da6256",
+    "milestone_b2_group_target_trick_batch_commit_note": "群体普通锦囊批次（【南蛮入侵】、【万箭齐发】、【桃园结义】）已由用户在外部PowerShell提交，实现提交哈希 5f2fbf27b7041bbf3010636de37306eea5da6256（feat: implement production group-target trick slice）"
   },
   "feature_status": {
     "authoritative_core_foundation": true,
@@ -142,9 +144,9 @@
     },
     {
       "id": "CP-04H-PRODUCTION-GROUP-TARGET-TRICK-BATCH",
-      "status": "worktree_complete_pending_user_commit",
-      "commit": null,
-      "commit_note": "本批（【南蛮入侵】、【万箭齐发】、【桃园结义】）代码与测试已在当前工作树完成，尚未由用户执行真实Git提交，尚未完成独立只读审计；不得写成audited，不虚构提交哈希或标签。",
+      "status": "committed_pending_audit",
+      "commit": "5f2fbf27b7041bbf3010636de37306eea5da6256",
+      "commit_note": "本批（【南蛮入侵】、【万箭齐发】、【桃园结义】）已由用户在外部PowerShell提交真实Git提交，提交信息 feat: implement production group-target trick slice，完整提交哈希 5f2fbf27b7041bbf3010636de37306eea5da6256；尚未完成独立只读审计，不得视为 audited",
       "evidence": "scripts/sgs_engine/production_cards.py、scripts/sgs_engine/production_batch.py、scripts/sgs_engine/events.py、scripts/sgs_engine/__init__.py、tests/test_sgs_production_group_target_tricks.py；正式160张牌堆群体普通锦囊批次",
       "scope": "formal；【南蛮入侵】3张、【万箭齐发】1张与【桃园结义】1张接入生产注册表与权威核心；建立群体普通锦囊按行动顺序逐目标结算框架（服务器自动目标序列、逐目标独立【无懈可击】窗口、当前目标响应或受伤／回复、濒死救援期间队列暂停与恢复）；当前正式生产入口仅支持双人会话，三人以上目标顺序未由正式生产入口证明（NOT PROVEN）；不构成普通锦囊批次、多人响应链、正式单挑或里程碑B完成",
       "audit": {
@@ -370,16 +372,16 @@
       "taoyuan_target_template": "all_wounded_characters",
       "multi_player_production_proven": false,
       "multi_player_production_note": "当前正式生产入口原生仅支持双人会话；三人以上目标顺序、中间目标濒死／死亡后的继续位置与来源死亡处理均未由正式生产入口证明（NOT PROVEN）",
-      "worktree_commit_pending": true,
+      "worktree_commit_pending": false,
       "independent_audit_done": false,
       "audit_conclusion": "NOT_AUDITED_YET"
     }
   },
   "sha256": {
-    "docs/ENGINE_STATUS.md": "adb3c719a4da290e00137b9c4a7bfc9f73ec77d7e3a70b14138712dac0fa5c7b",
+    "docs/ENGINE_STATUS.md": "d6f169a99c53f5c5aaa549c9723fd12bd4ae1a3dfa28a3bba1460cdf84e72514",
     "docs/IMPLEMENTATION_MATRIX.md": "0ebfbc3771c5517c7d5b685718f10713588132f66db8bfb2e415b762eb069a39",
     "docs/LEGACY_RESULTS_INVALID.md": "49b4d882e2fdd12f5074a9a9d1aae4377a8ac2c6d334e0a852d81081dfdbb294",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "3a58dfda56fe8b1540a7e5649633f13acca850f10badc65946fc1dfc0e44f7b0",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "c635df39bf3ee913a3aaa37c13e2a9753d54fbb32ad96bb3d680b8f7c089c2b8",
     "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "57093ee848831938eadc821070931b59f4420e04f6babe8ac6f9285f78e8f4af",
     "knowledge/三国杀牌堆数据.csv": "ad643e13ca7fad0905e0efaaf04bf4dff09fad1fd81e1503dab1a83dc67dd4fd",
     "scripts/sgs_dev_runner.py": "bcedeeca6d74fcd5715d5b9797c32bb9d09b70ee0928b3aba94d0ff81415329c",
