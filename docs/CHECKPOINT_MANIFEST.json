@@ -25,7 +25,8 @@
     "duel_fire_attack_worktree_branch_note": "本批（【决斗】、【火攻】）实现所在分支；该分支上的本批代码已由用户在外部PowerShell提交，实现提交哈希 b3587912da97825871ae91ea8a88b3e95c39fdde（feat: implement production duel and fire attack slice），当前 HEAD 已为该实现提交",
     "milestone_b2_duel_fire_attack_batch_commit": "b3587912da97825871ae91ea8a88b3e95c39fdde",
     "milestone_b2_duel_fire_attack_batch_commit_note": "伤害型普通锦囊批次（【决斗】、【火攻】）已由用户在外部PowerShell提交，实现提交哈希 b3587912da97825871ae91ea8a88b3e95c39fdde（feat: implement production duel and fire attack slice）",
-    "duel_fire_attack_audit_close_note": "伤害型普通锦囊批次（【决斗】、【火攻】）已通过独立只读审计（AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，2026-08-03）；审计收尾变更（两个确定性补测与检查点文档更新）在工作树中待用户提交，未虚构审计收尾提交哈希，未打标签"
+    "duel_fire_attack_audit_close_note": "伤害型普通锦囊批次（【决斗】、【火攻】）已通过独立只读审计（AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，2026-08-03）；审计收尾真实提交 9c2070017fe624295ebd735bf5163f48a6ac2207（test: close duel and fire attack audit gaps），里程碑标签 milestone-b2-duel-fire-attack-audited 已建立；本文档的最终状态回填由用户提交后移动标签",
+    "duel_fire_attack_audit_close_commit": "9c2070017fe624295ebd735bf5163f48a6ac2207"
   },
   "feature_status": {
     "authoritative_core_foundation": true,
@@ -117,9 +118,9 @@
     },
     {
       "id": "CP-04G-PRODUCTION-DUEL-FIRE-ATTACK-BATCH",
-      "status": "audited_pending_user_commit",
+      "status": "audited",
       "commit": "b3587912da97825871ae91ea8a88b3e95c39fdde",
-      "commit_note": "本批（【决斗】、【火攻】）已由用户在外部PowerShell提交真实Git提交，实现提交哈希 b3587912da97825871ae91ea8a88b3e95c39fdde（feat: implement production duel and fire attack slice）。2026-08-03 完成独立只读审计，结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES：生产实现未发现规则、隐藏信息、伤害来源、回放或架构阻塞缺陷，未发现第二套引擎与测试虚假通过；审计指出的两个仓库测试缺口（【火攻】目标仅一张手牌、【决斗】来源死亡后已开始决斗不自动取消）已补为确定性回归测试（test_fire_attack_single_hand_target_legal_reveal、test_duel_continues_after_source_death）。审计收尾变更（两个补测与本文档更新）仍在工作树中，待用户提交，尚未创建审计收尾提交哈希，未打标签",
+      "commit_note": "本批（【决斗】、【火攻】）实现提交为 b3587912da97825871ae91ea8a88b3e95c39fdde（feat: implement production duel and fire attack slice）。2026-08-03 完成独立只读审计，结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES：生产实现未发现规则、隐藏信息、伤害来源、回放或架构阻塞缺陷，未发现第二套引擎与测试虚假通过；审计指出的两个仓库测试缺口（【火攻】目标仅一张手牌、【决斗】来源死亡后已开始决斗不自动取消）已补为确定性回归测试（test_fire_attack_single_hand_target_legal_reveal、test_duel_continues_after_source_death）。审计收尾真实提交为 9c2070017fe624295ebd735bf5163f48a6ac2207（test: close duel and fire attack audit gaps），里程碑标签 milestone-b2-duel-fire-attack-audited 已建立；本文档为最终状态回填，文档提交自身哈希由用户提交后确认，不在此虚构",
       "evidence": "scripts/sgs_engine/production_cards.py、scripts/sgs_engine/production_batch.py、scripts/sgs_engine/events.py、tests/test_sgs_production_duel_fire_attack.py；正式160张牌堆伤害型普通锦囊批次",
       "scope": "formal；【决斗】3张与【火攻】3张接入生产注册表与权威核心；交替打出【杀】状态机与打出而非使用事件、无属性／火焰伤害与濒死救援和死亡胜利、目标展示手牌与同花色弃置、HMAC展示句柄与未展示手牌隔离、严格规则重执行与篡改失败关闭；不构成普通锦囊批次、多人响应链、正式单挑或里程碑B完成",
       "audit": {
@@ -130,8 +131,10 @@
           "test_fire_attack_single_hand_target_legal_reveal",
           "test_duel_continues_after_source_death"
         ],
-        "worktree_pending_user_commit": true,
-        "tagged": false
+        "audit_close_commit": "9c2070017fe624295ebd735bf5163f48a6ac2207",
+        "audit_close_commit_message": "test: close duel and fire attack audit gaps",
+        "milestone_tag": "milestone-b2-duel-fire-attack-audited",
+        "final_status": "audited"
       }
     }
   ],
@@ -315,16 +318,15 @@
       "audit_closed_test_gaps": [
         "test_fire_attack_single_hand_target_legal_reveal",
         "test_duel_continues_after_source_death"
-      ],
-      "audit_close_worktree_pending": true
+      ]
     }
   },
   "sha256": {
     "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "57093ee848831938eadc821070931b59f4420e04f6babe8ac6f9285f78e8f4af",
     "docs/LEGACY_RESULTS_INVALID.md": "49b4d882e2fdd12f5074a9a9d1aae4377a8ac2c6d334e0a852d81081dfdbb294",
-    "docs/ENGINE_STATUS.md": "0c03e061a34f989a9c01d365a30ff99860af0b8dd7f40602fb238010c95dc6f9",
-    "docs/IMPLEMENTATION_MATRIX.md": "a4d01e57d03e412fedea3ccb3f57485d51bd8a97a5b888a839a62dcec2b78c2f",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "ea8a47a93390f285346c1f5fa449b7ea0c8157ef75a34f2b1b5acd359c5bac6e",
+    "docs/ENGINE_STATUS.md": "9f944b56a953fb6f46210ca8c6df77bd14d8559165b24a96eae2c6918f60c88b",
+    "docs/IMPLEMENTATION_MATRIX.md": "e83d51c970491bdd6a9cf34b4f022a51fc9a882e6b1ab64142c85857b2429932",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "f8ab13cc0a41d56e9f18e12ea463091701847bc5be5312418d9f91f5feaf6fd9",
     "scripts/sgs_engine_gate.py": "c2f1384f0607588907f4721ec7be5edde1142afc89ed3d1b473fa627a631bc04",
     "scripts/sgs_formal_runner.py": "d139ef9b172c8840245fd659cc570f462f3590febe622a48f7863446bb8a6e00",
     "scripts/sgs_source_integrity_audit.py": "927ace5500cd11d066b7cef65213d087cc3fb5a19b3d7b5e4e0a22371c59836c",
@@ -347,6 +349,6 @@
     "tests/test_sgs_production_single_target_tricks.py": "a661afc9d7e848a9fafd66c28533185e27d8fa1c8490f2a2a94213a3e3ffde69",
     "tests/test_sgs_production_zone_target_tricks.py": "8a32c6ea26bfdfc104a9bbed44c91ca378eee491d188b61ffc941163dc31f056",
     "tests/test_sgs_production_hidden_handle_security.py": "fc6090c9c16572f44bfcb6721289e18f7f08f2dd69889a8603d7f93fd40f6898",
-    "tests/test_sgs_production_duel_fire_attack.py": "6081ab886b5d96f2d23a7e9eda675fff1ae81c9edaf0bca498fbd253e77f018b"
+    "tests/test_sgs_production_duel_fire_attack.py": "91f0e31c023b9dfad9299cb15b261c3e0cde1acf36e41549a0cedf9e34bc84e2"
   }
 }

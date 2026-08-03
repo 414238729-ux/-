@@ -181,7 +181,7 @@ approximation_count=0
 - 展示完成后由【火攻】使用者选择弃置一张与展示牌花色相同的手牌或不弃置；即使有同花色牌也必须保留“不弃置”候选；只能选择当前仍在使用者手牌中的真实实体牌，原【火攻】已在处理区不得再次作为弃置材料；弃置产生 `CARD_MOVED`、`CARD_LOST`、`CARD_DISCARDED`，不产生普通 `card_used`／`card_played`，不先获得再弃置，并记录弃置原因、根【火攻】实体、展示牌及其花色；
 - 成功弃置同花色手牌后【火攻】使用者对目标造成1点火焰伤害（伤害关联牌为原【火攻】）；不弃置、无同花色牌或来源无法继续结算时不造成伤害；结算到展示步骤时目标已无手牌则本次【火攻】无效果完成（不追溯使用非法、不凭空展示、不造成伤害，产生 `fire_attack_effect_resolved_no_legal_reveal_card` 可审计结果）；
 - 目标选择展示牌使用仅绑定“会话＋展示窗口＋目标手牌”的HMAC-SHA256不透明句柄（会话级256位随机秘密，消息含会话标识、窗口ID、目标角色、区域与实体牌ID，输出128位）；与“由其他角色选择隐藏手牌”的句柄语义不同，展示选择是手牌所有者本人选择自己的牌；句柄只在当前选择窗口内有效，过期／伪造／跨窗口／手牌变化后的句柄失败关闭；权威引擎解析句柄后公开真实展示牌，玩家可见回放只公开已展示牌、不泄露其余手牌；
-- 新增 51 项真实生产路径验收测试（`tests/test_sgs_production_duel_fire_attack.py`），覆盖注册表绑定、使用合法性、无懈链、交替出【杀】、打出与使用的语义区分、伤害来源、死亡响应者边界、目标展示手牌、同花色弃置、隐藏信息隔离、严格回放与失败关闭；2026-08-03 独立只读审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，未发现规则、隐藏信息、伤害来源、回放、第二套引擎或虚假测试阻塞问题，并补充两个确定性回归测试（目标仅一张手牌的【火攻】展示、来源死亡后已开始的【决斗】不自动取消）；当前完整 pytest 为 `1334 passed`（失败0、跳过0）。审计收尾变更在工作树中待用户提交，未打标签。
+- 新增 51 项真实生产路径验收测试（`tests/test_sgs_production_duel_fire_attack.py`），覆盖注册表绑定、使用合法性、无懈链、交替出【杀】、打出与使用的语义区分、伤害来源、死亡响应者边界、目标展示手牌、同花色弃置、隐藏信息隔离、严格回放与失败关闭；2026-08-03 独立只读审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，未发现规则、隐藏信息、伤害来源、回放、第二套引擎或虚假测试阻塞问题，并补充两个确定性回归测试（目标仅一张手牌的【火攻】展示、来源死亡后已开始的【决斗】不自动取消）；当前完整 pytest 为 `1334 passed`（失败0、跳过0）。审计收尾真实提交为 `9c2070017fe624295ebd735bf5163f48a6ac2207`（test: close duel and fire attack audit gaps），里程碑标签 `milestone-b2-duel-fire-attack-audited` 已建立。
 
 本批次只验证双人生产切片，不构成普通锦囊批次完成、多人响应链完成、正式单挑完成或里程碑 B 完成；实现【决斗】不等于正式无技能单挑已完成。
 
@@ -318,7 +318,7 @@ AI合法动作枚举完整
 - 审计基线文档：`5eac686`；
 - 里程碑 A 测试专用单挑纵向切片：`455685d6eaa1c297e9ec48a0cfaeb803b81f3406`。
 - 隐藏手牌句柄HMAC安全修复：`1b5e125ad0baa129458b42043aac08b18dcfad96`（fix: secure hidden hand choice handles）。
-- 【决斗】／【火攻】批次（`CP-04G-PRODUCTION-DUEL-FIRE-ATTACK-BATCH`）：已由用户在外部PowerShell提交（实现提交哈希 `b3587912da97825871ae91ea8a88b3e95c39fdde`，feat: implement production duel and fire attack slice）；2026-08-03 独立只读审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，补充两个确定性回归测试，审计收尾变更在工作树中待用户提交（未打标签）；本批基线为 `85ffee7ca4b06470b0dcb3b1b52155093055b219`（milestone-b2-zone-target-tricks-audited）。
+- 【决斗】／【火攻】批次（`CP-04G-PRODUCTION-DUEL-FIRE-ATTACK-BATCH`）：已由用户在外部PowerShell提交（实现提交哈希 `b3587912da97825871ae91ea8a88b3e95c39fdde`，feat: implement production duel and fire attack slice）；2026-08-03 独立只读审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，补充两个确定性回归测试；审计收尾真实提交为 `9c2070017fe624295ebd735bf5163f48a6ac2207`（test: close duel and fire attack audit gaps），里程碑标签 `milestone-b2-duel-fire-attack-audited` 已建立；本批基线为 `85ffee7ca4b06470b0dcb3b1b52155093055b219`（milestone-b2-zone-target-tricks-audited）。
 
 里程碑 A 的提交只证明隔离三牌切片，不证明正式160张牌无技能单挑完成。
 
