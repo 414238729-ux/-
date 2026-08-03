@@ -5,9 +5,11 @@
 【无懈可击】窗口、逐目标推进与完成时进入弃牌堆、南蛮/万箭逐目标
 响应（打出【杀】/【闪】）与不响应伤害、桃园逐目标回复、濒死救援
 期间队列暂停与恢复、玩家可见回放不泄露未打出手牌、严格重执行与
-篡改失败关闭。所有动作均经过真实 enumerate -> validate -> apply
-路径；夹具只通过不可变 GameState 与权威状态转换助手构造前置状态，
-不代表装备、延时锦囊或武将技能已实现。
+篡改失败关闭。正向流程与正常动作均经过真实 enumerate -> validate
+-> apply 路径；定向伪造负向测试允许直接调用生产适配器入口，用于
+验证生产层失败关闭；不使用 mock 或替代结算器。夹具只通过不可变
+GameState 与权威状态转换助手构造前置状态，不代表装备、延时锦囊或
+武将技能已实现。
 """
 from __future__ import annotations
 
@@ -24,6 +26,7 @@ from scripts.sgs_engine.actions import (
     UnsupportedRuleError,
     validate_action,
 )
+from scripts.sgs_engine.engine import canonical_state_snapshot
 from scripts.sgs_engine.events import EventType
 from scripts.sgs_engine.model import (
     DISCARD_PILE,
@@ -53,6 +56,7 @@ from scripts.sgs_engine.production_replay import (
     record_reference_production_batch,
     reexecute_production_replay,
 )
+from scripts.sgs_engine.replay import state_sha256
 
 NANMAN = "sgs_trick_nanmanruqin"
 WANJIAN = "sgs_trick_wanjianqifa"
@@ -949,7 +953,18 @@ def test_nanman_forged_responder_index_window_and_hash_fail() -> None:
     handle = _group_handle_for(game, sha_id)
     context = game._context()
     adapter = game.formal_registry.adapter_for(NANMAN)
-    window_id = game.runtime.response_window_id or ""
+    group = game.runtime.pending_group_trick
+    window_id = (
+        f"{group.trick_key}:{game.runtime.turn_number}:"
+        f"{group.trick_instance_id}:gt{group.current_target_index}"
+    )
+    legal_state_hash = state_sha256(canonical_state_snapshot(game.state))
+    real_action = next(
+        action
+        for action in game.legal_actions()
+        if action.payload.get("operation") == "play_slash_for_nanman"
+        and action.payload.get("handle") == handle
+    )
 
     def forge(**overrides: object) -> LegalAction:
         payload: dict[str, object] = {
@@ -959,7 +974,7 @@ def test_nanman_forged_responder_index_window_and_hash_fail() -> None:
             "target_id": "p2",
             "target_index": 0,
             "window_id": window_id,
-            "state_hash": game.execution_hash,
+            "state_hash": legal_state_hash,
             "handle": handle,
         }
         payload.update(overrides)
@@ -971,9 +986,13 @@ def test_nanman_forged_responder_index_window_and_hash_fail() -> None:
             action_id="act_forged_nanman",
         )
 
-    # 非响应者提交
+    # 正向对照：forge() 基线负载与真实枚举负载逐字段一致
+    assert forge().payload == real_action.payload
+    # 非响应者提交（enumerate -> validate 入口）
     other = forge()
-    with pytest.raises(InvalidActionError):
+    with pytest.raises(
+        InvalidActionError, match="动作角色与当前行动上下文不一致"
+    ):
         validate_action(
             game.state,
             context,
@@ -986,29 +1005,48 @@ def test_nanman_forged_responder_index_window_and_hash_fail() -> None:
             ),
             game.registry,
         )
-    # 伪造目标索引
-    with pytest.raises(InvalidActionError):
+    # 仅伪造 target_id：命中目标绑定校验
+    with pytest.raises(
+        InvalidActionError, match="绑定的目标不是当前目标"
+    ):
+        adapter.apply_action(game.state, context, forge(target_id="p1"))
+    # 仅伪造 operation：命中动作负载校验
+    with pytest.raises(
+        InvalidActionError, match="响应动作负载无效"
+    ):
+        adapter.apply_action(
+            game.state, context, forge(operation="play_jink_for_wanjian")
+        )
+    # 仅伪造目标索引：命中索引校验
+    with pytest.raises(InvalidActionError, match="目标索引已过期"):
         adapter.apply_action(game.state, context, forge(target_index=7))
-    # 伪造窗口
-    with pytest.raises(InvalidActionError):
+    # 仅伪造窗口：命中窗口校验
+    with pytest.raises(InvalidActionError, match="响应窗口已过期"):
         adapter.apply_action(
             game.state, context, forge(window_id="stale_window")
         )
-    # 伪造状态哈希
-    with pytest.raises(InvalidActionError):
+    # 仅伪造状态哈希：命中状态哈希校验
+    with pytest.raises(
+        InvalidActionError, match="状态哈希与当前状态不一致"
+    ):
         adapter.apply_action(
             game.state, context, forge(state_hash="0" * 64)
         )
-    # 伪造根锦囊
-    with pytest.raises(InvalidActionError):
+    # 仅伪造根锦囊：命中根锦囊校验
+    with pytest.raises(
+        InvalidActionError, match="根锦囊与当前结算不一致"
+    ):
         adapter.apply_action(
             game.state, context, forge(root_trick_instance_id="forged_root")
         )
-    # 伪造句柄（未在窗口快照中）
-    with pytest.raises(InvalidActionError):
-        adapter.apply_action(
-            game.state, context, forge(handle="gr_" + "f" * 32)
-        )
+    # 仅伪造句柄：命中句柄校验（其他字段与真实枚举负载完全一致）
+    forged_handle = "gr_" + "f" * 32
+    only_handle = forge(handle=forged_handle)
+    assert only_handle.payload == {**real_action.payload, "handle": forged_handle}
+    with pytest.raises(
+        InvalidActionError, match="句柄无效、伪造或已过期"
+    ):
+        adapter.apply_action(game.state, context, only_handle)
 
 
 # ---------------------------------------------------------------------
@@ -1190,7 +1228,18 @@ def test_wanjian_forged_responder_index_window_and_hash_fail() -> None:
     handle = _group_handle_for(game, jink_id)
     context = game._context()
     adapter = game.formal_registry.adapter_for(WANJIAN)
-    window_id = game.runtime.response_window_id or ""
+    group = game.runtime.pending_group_trick
+    window_id = (
+        f"{group.trick_key}:{game.runtime.turn_number}:"
+        f"{group.trick_instance_id}:gt{group.current_target_index}"
+    )
+    legal_state_hash = state_sha256(canonical_state_snapshot(game.state))
+    real_action = next(
+        action
+        for action in game.legal_actions()
+        if action.payload.get("operation") == "play_jink_for_wanjian"
+        and action.payload.get("handle") == handle
+    )
 
     def forge(**overrides: object) -> LegalAction:
         payload: dict[str, object] = {
@@ -1200,7 +1249,7 @@ def test_wanjian_forged_responder_index_window_and_hash_fail() -> None:
             "target_id": "p2",
             "target_index": 0,
             "window_id": window_id,
-            "state_hash": game.execution_hash,
+            "state_hash": legal_state_hash,
             "handle": handle,
         }
         payload.update(overrides)
@@ -1212,26 +1261,51 @@ def test_wanjian_forged_responder_index_window_and_hash_fail() -> None:
             action_id="act_forged_wanjian",
         )
 
-    with pytest.raises(InvalidActionError):
-        adapter.apply_action(game.state, context, forge(target_index=3))
-    with pytest.raises(InvalidActionError):
-        adapter.apply_action(game.state, context, forge(window_id="old_window"))
-    with pytest.raises(InvalidActionError):
-        adapter.apply_action(game.state, context, forge(state_hash="0" * 64))
-    with pytest.raises(InvalidActionError):
-        adapter.apply_action(
-            game.state, context, forge(root_trick_instance_id="forged")
-        )
-    with pytest.raises(InvalidActionError):
-        adapter.apply_action(game.state, context, forge(handle="gr_" + "a" * 32))
-    with pytest.raises(InvalidActionError):
+    # 正向对照：forge() 基线负载与真实枚举负载逐字段一致
+    assert forge().payload == real_action.payload
+    # 独立用例一：其他字段合法，仅 target_id 错误
+    with pytest.raises(
+        InvalidActionError, match="绑定的目标不是当前目标"
+    ):
+        adapter.apply_action(game.state, context, forge(target_id="p1"))
+    # 独立用例二：其他字段合法，仅 operation 错误
+    with pytest.raises(
+        InvalidActionError, match="响应动作负载无效"
+    ):
         adapter.apply_action(
             game.state,
             context,
-            forge(
-                target_id="p1",
-                operation="play_slash_for_nanman",
-            ),
+            forge(operation="play_slash_for_nanman"),
+        )
+    # 独立用例三：其他字段合法，仅 handle 错误
+    forged_handle = "gr_" + "a" * 32
+    only_handle = forge(handle=forged_handle)
+    assert only_handle.payload == {**real_action.payload, "handle": forged_handle}
+    with pytest.raises(
+        InvalidActionError, match="句柄无效、伪造或已过期"
+    ):
+        adapter.apply_action(game.state, context, only_handle)
+    # 仅伪造目标索引：命中索引校验
+    with pytest.raises(InvalidActionError, match="目标索引已过期"):
+        adapter.apply_action(game.state, context, forge(target_index=3))
+    # 仅伪造窗口：命中窗口校验
+    with pytest.raises(InvalidActionError, match="响应窗口已过期"):
+        adapter.apply_action(
+            game.state, context, forge(window_id="old_window")
+        )
+    # 仅伪造状态哈希：命中状态哈希校验
+    with pytest.raises(
+        InvalidActionError, match="状态哈希与当前状态不一致"
+    ):
+        adapter.apply_action(
+            game.state, context, forge(state_hash="0" * 64)
+        )
+    # 仅伪造根锦囊：命中根锦囊校验
+    with pytest.raises(
+        InvalidActionError, match="根锦囊与当前结算不一致"
+    ):
+        adapter.apply_action(
+            game.state, context, forge(root_trick_instance_id="forged")
         )
 # ---------------------------------------------------------------------
 # F. 【桃园结义】
