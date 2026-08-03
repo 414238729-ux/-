@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import copy
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -1285,6 +1286,16 @@ def test_wanjian_forged_responder_index_window_and_hash_fail() -> None:
         InvalidActionError, match="句柄无效、伪造或已过期"
     ):
         adapter.apply_action(game.state, context, only_handle)
+    # 独立用例四：非当前响应者提交（负载全部合法，仅 context.actor_id
+    # 改为非当前响应者 p1）。经生产适配器入口（wanjian_response 阶段
+    # 分派到 apply_group_response_play），该校验顺序中响应者检查先于
+    # operation/target/window/state_hash/handle 等负载校验，故命中
+    # “只有当前响应目标可以打出响应牌”这一层。
+    non_responder_context = replace(context, actor_id="p1")
+    with pytest.raises(
+        InvalidActionError, match="只有当前响应目标可以打出响应牌"
+    ):
+        adapter.apply_action(game.state, non_responder_context, forge())
     # 仅伪造目标索引：命中索引校验
     with pytest.raises(InvalidActionError, match="目标索引已过期"):
         adapter.apply_action(game.state, context, forge(target_index=3))
