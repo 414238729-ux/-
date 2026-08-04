@@ -36,7 +36,9 @@
     "remaining_ordinary_tricks_worktree_branch": "deepseek-remaining-ordinary-tricks",
     "remaining_ordinary_tricks_worktree_branch_note": "本批（【五谷丰登】完整生产语义＋【铁索连环】牌本体）实现所在分支；基线提交 6af30432993d908546d7cec114fd78ae62798ad5（docs: finalize group-target trick audit milestone，里程碑标签 milestone-b2-group-target-tricks-audited 为该提交的注解标签）；实现与文档提交由用户在外部提交后回填，不在此虚构提交哈希",
     "remaining_ordinary_tricks_implement_commit": "20cb1b1f766529a88aa5f3346a4761b77eca66b7",
-    "remaining_ordinary_tricks_implement_commit_note": "剩余普通锦囊批次（CP-04I：【五谷丰登】完整生产语义＋【铁索连环】牌本体）已由用户在外部PowerShell提交，提交信息为 feat: implement wugu and tiesuo card-body slice，完整提交哈希为 20cb1b1f766529a88aa5f3346a4761b77eca66b7；2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED；审计问题关闭提交 5b1c2c15b6a8e21563aab02d8a5c181c553e4967，最终措辞修正提交 b2d4ffca18092938437d15826efdaddba8a0a689；里程碑标签 milestone-b2-wugu-tiesuo-card-body-audited 由用户在本次最终文档提交后立即建立（本轮未执行 git tag、未验证标签已存在）；remaining_ordinary_tricks_worktree_branch 保留原含义，指工作树实现验证所基于的分支"
+    "remaining_ordinary_tricks_implement_commit_note": "剩余普通锦囊批次（CP-04I：【五谷丰登】完整生产语义＋【铁索连环】牌本体）已由用户在外部PowerShell提交，提交信息为 feat: implement wugu and tiesuo card-body slice，完整提交哈希为 20cb1b1f766529a88aa5f3346a4761b77eca66b7；2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED；审计问题关闭提交 5b1c2c15b6a8e21563aab02d8a5c181c553e4967，最终措辞修正提交 b2d4ffca18092938437d15826efdaddba8a0a689；里程碑标签 milestone-b2-wugu-tiesuo-card-body-audited 由用户在本次最终文档提交后立即建立（本轮未执行 git tag、未验证标签已存在）；remaining_ordinary_tricks_worktree_branch 保留原含义，指工作树实现验证所基于的分支",
+    "chain_damage_infrastructure_implement_commit": "c094bff5dab127917e8d0b9a2d3422e3ab736783",
+    "chain_damage_infrastructure_implement_commit_note": "属性伤害传导生产基础设施（CP-04J）已由用户在外部PowerShell创建真实实现提交：提交信息为 feat: implement production chain damage infrastructure，完整提交哈希为 c094bff5dab127917e8d0b9a2d3422e3ab736783；当前尚未完成独立审计（independent_audit_done=false，audit_conclusion=NOT_AUDITED_YET），不得视为 audited"
   },
   "feature_status": {
     "authoritative_core_foundation": true,
@@ -195,9 +197,9 @@
     },
     {
       "id": "CP-04J-PRODUCTION-CHAIN-DAMAGE-INFRASTRUCTURE",
-      "status": "worktree_complete_pending_user_commit",
-      "commit": null,
-      "commit_note": "本批（横置角色火／雷属性伤害传导生产基础设施）工作树实现已完成但尚未由用户在外部提交：commit=null，不虚构提交哈希；统一传导入口已接通火杀、雷杀、火攻与通用伤害管线，CP-04I 临时属性伤害失败关闭门禁已移除；铁索连环完整语义完成（tiesuo_card_body_implemented=true、tiesuo_chain_damage_implemented=true、tiesuo_full_semantics_complete=true）；完整 pytest 1503 passed（失败0、跳过0），compileall 通过，源码完整性审计 scanned_file_count=116、defect_count=0、audit_item_count=55；独立审计尚未开始（independent_audit_done=false，audit_conclusion=NOT_AUDITED_YET），里程碑标签为 null，不得视为 audited。",
+      "status": "committed_pending_audit",
+      "commit": "c094bff5dab127917e8d0b9a2d3422e3ab736783",
+      "commit_note": "本批（横置角色火／雷属性伤害传导生产基础设施）已由用户在外部PowerShell创建真实实现提交：提交信息为 feat: implement production chain damage infrastructure，完整提交哈希为 c094bff5dab127917e8d0b9a2d3422e3ab736783；统一传导入口已接通火杀、雷杀、火攻与通用伤害管线，CP-04I 临时属性伤害失败关闭门禁已移除；铁索连环完整语义完成（tiesuo_card_body_implemented=true、tiesuo_chain_damage_implemented=true、tiesuo_full_semantics_complete=true）；完整 pytest 1503 passed（失败0、跳过0），compileall 通过，源码完整性审计 scanned_file_count=116、defect_count=0、audit_item_count=55；当前尚未完成独立审计（independent_audit_done=false，audit_conclusion=NOT_AUDITED_YET），里程碑标签为 null，该提交不得视为 audited。",
       "evidence": "scripts/sgs_engine/production_batch.py、scripts/sgs_engine/events.py、scripts/sgs_engine/production_cards.py、tests/test_sgs_production_chain_damage.py；正式160张牌堆双人生产入口传导基础设施",
       "scope": "formal；横置角色实际受到大于0点火／雷属性伤害后解除横置并按当前回合角色为锚点的座次递增顺序确定性传导；传导伤害继承原始来源、实体牌、伤害属性与使用记录；每名候选以根基数独立结算并完整处理伤害、濒死、救援与死亡；濒死期间挂起并在救援后恢复准确索引；胜利成立时确定性清理未开始目标；严格回放事件链与执行哈希接入；不包含新卡牌适配器、借刀杀人（CP-04K）、装备武器、延时锦囊、防具坐骑宝物、武将技能与三人以上正式生产入口（multi_player_production_proven=false）",
       "audit": {
@@ -483,8 +485,8 @@
     "production_chain_damage_infrastructure": {
       "implemented": true,
       "tested": true,
-      "worktree_commit_pending": true,
-      "worktree_commit_pending_note": "CP-04J 工作树实现完成但尚未由用户在外部提交：commit=null，不得虚构提交哈希；当前待用户在外部提交后回填",
+      "worktree_commit_pending": false,
+      "worktree_commit_pending_note": "实现提交 c094bff5dab127917e8d0b9a2d3422e3ab736783 已存在；当前待完成的是独立审计及审计收尾（independent_audit_done=false，audit_conclusion=NOT_AUDITED_YET），不是待用户提交工作树",
       "independent_audit_done": false,
       "audit_conclusion": "NOT_AUDITED_YET",
       "milestone_tag": null,
@@ -497,10 +499,10 @@
     }
   },
   "sha256": {
-    "docs/ENGINE_STATUS.md": "c71809d4efd594280136dab30502faa66d5c98fd50868e34ee5f623a14484635",
+    "docs/ENGINE_STATUS.md": "fdda08324a3681fea2147f75bd6be9974d8d64e2d2fe5386ccdcb7fde49709af",
     "docs/IMPLEMENTATION_MATRIX.md": "4144eef01dcabb1032b7ababb337d02c4b3aa0246a816f4c79d8c38a72592fce",
     "docs/LEGACY_RESULTS_INVALID.md": "267d51329b65b4435ed770b9fe90a0d53148d17cc9b0dae3e6d3406b06c0c0cc",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "a012f5694c47822085a5d11610c8a507d42a1e3fb2bef5f5b8e5c9c437d9699b",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "1a7cf7b2a2a83c4a11025075cbf02283b23e9865e1afff4c24fd155863ab560d",
     "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "23b56a0edf0c85657b332100538013de16be4d71ea6a8214ac862a6708105af6",
     "knowledge/三国杀牌堆数据.csv": "8cb8da4177f11962776ae0f7e0154ed4ce56e293e96ac457874d48650517de18",
     "scripts/sgs_dev_runner.py": "6f88baa78fc9c22106188defda7190cd2a4412325db46f3964d217fd0e61c755",

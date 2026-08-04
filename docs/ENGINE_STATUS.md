@@ -246,7 +246,7 @@ approximation_count=0
 
 ### 2.10 属性伤害传导生产基础设施（CP-04J）
 
-CP-04J 在双人生产入口上接通统一属性伤害传导管线（工作树完成，待用户在外部提交，commit=null，独立审计未开始）：
+CP-04J 在双人生产入口上接通统一属性伤害传导管线（实现提交 `c094bff5dab127917e8d0b9a2d3422e3ab736783` 已由用户在外部PowerShell创建，提交信息 feat: implement production chain damage infrastructure；当前等待独立审计，独立审计未开始）：
 
 - 触发条件：伤害类型为火属性或雷属性、原始受伤角色在本次伤害结算时 `chained=true`、最终实际伤害大于0、非传导派生伤害、游戏未结束；无属性伤害、实际伤害0、未横置角色、伤害被防止、已标记为 chain-transmitted 的派生伤害与胜利成立均不触发；
 - 原始角色结算顺序：计算并提交原始伤害→得到最终实际伤害→实际伤害大于0且横置时解除横置并产生 `chained_state`→建立传导根（`chain_damage_started`）→完整处理原始角色的伤害、濒死、救援、死亡与已有后续→全部结束且游戏未结束时才开始下一名传导目标；不得在濒死救援窗口提前扣除下一名角色体力；
@@ -400,7 +400,7 @@ AI合法动作枚举完整
 
 里程碑 A 的提交只证明隔离三牌切片，不证明正式160张牌无技能单挑完成。
 - 剩余普通锦囊批次（`CP-04I-PRODUCTION-REMAINING-ORDINARY-TRICK-BATCH`）：【五谷丰登】2张完整生产语义＋【铁索连环】6张牌本体接入生产适配器（见 2.9 节）；已由用户在外部PowerShell提交实现（实现提交哈希 `20cb1b1f766529a88aa5f3346a4761b77eca66b7`，提交信息 feat: implement wugu and tiesuo card-body slice）；基线提交 `6af30432993d908546d7cec114fd78ae62798ad5`（里程碑标签 `milestone-b2-group-target-tricks-audited` 指向该提交）；2026-08-04 独立审计完成：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES（审计问题关闭提交 `5b1c2c15b6a8e21563aab02d8a5c181c553e4967`），最终独立复审结论 AUDIT_PASSED（最终措辞修正提交 `b2d4ffca18092938437d15826efdaddba8a0a689`）；里程碑标签 `milestone-b2-wugu-tiesuo-card-body-audited` 由用户在本次最终文档提交后立即建立（本轮未执行 git tag）。
-- 属性伤害传导基础设施（`CP-04J-PRODUCTION-CHAIN-DAMAGE-INFRASTRUCTURE`）：横置角色受火／雷属性伤害后按统一生产管线确定性传导（见 2.10 节）；工作树实现完成，尚未由用户在外部提交（commit=null，不得虚构提交哈希）；独立审计未开始（independent_audit_done=false，audit_conclusion=NOT_AUDITED_YET），里程碑标签为 null，不得视为 audited。
+- 属性伤害传导基础设施（`CP-04J-PRODUCTION-CHAIN-DAMAGE-INFRASTRUCTURE`）：横置角色受火／雷属性伤害后按统一生产管线确定性传导（见 2.10 节）；已由用户在外部PowerShell提交实现（实现提交哈希 `c094bff5dab127917e8d0b9a2d3422e3ab736783`，提交信息 feat: implement production chain damage infrastructure）；尚未完成独立审计（independent_audit_done=false，audit_conclusion=NOT_AUDITED_YET），里程碑标签为 null，不得视为 audited。
 
 ## 9. 下一可验收版本
 
