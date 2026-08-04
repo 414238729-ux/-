@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import json
+from pathlib import Path
 
 import pytest
 
@@ -19,6 +20,7 @@ from scripts.sgs_engine.actions import (
     ActionType,
     InvalidActionError,
     LegalAction,
+    UnsupportedRuleError,
     validate_action,
 )
 from scripts.sgs_engine.engine import canonical_state_snapshot
@@ -46,7 +48,7 @@ from scripts.sgs_engine.production_replay import (
     record_reference_production_batch,
     reexecute_production_replay,
 )
-from scripts.sgs_engine.replay import state_sha256
+from scripts.sgs_engine.replay import sha256_value, state_sha256
 
 WUGU = "sgs_trick_wugufengdeng"
 TIESUO = "sgs_trick_tiesuolianhuan"
@@ -209,6 +211,66 @@ def _hand_keys(game: ProductionBasicCardBatch, player_id: str) -> tuple[str, ...
         game.state.cards_by_id[instance_id].card_key
         for instance_id in game.state.card_ids_in(ZoneRef.hand(player_id))
     )
+
+
+def _stock_card_key_to_hand(
+    game: ProductionBasicCardBatch, card_key: str, player_id: str
+) -> str:
+    """把牌堆中的一张指定卡牌实体确定性移入目标手牌（测试布置）。"""
+
+    for instance_id in game.state.card_ids_in(DRAW_PILE):
+        if game.state.cards_by_id[instance_id].card_key == card_key:
+            _move_to_hand(game, instance_id, player_id)
+            return instance_id
+    raise AssertionError(f"牌堆中找不到{card_key}实体用于测试布置")
+
+
+def _capture_step(game: ProductionBasicCardBatch) -> dict[str, object]:
+    """捕获失败关闭原子性断言所需的动作前完整快照指纹。"""
+
+    return {
+        "state_hash": state_sha256(canonical_state_snapshot(game.state)),
+        "execution_hash": game.execution_hash,
+        "event_count": len(game.events),
+        "events": [event.to_replay_dict() for event in game.events],
+        "rng_count": len(game.rng_calls),
+        "rng_calls": [call.to_dict() for call in game.rng_calls],
+        "step_count": game.step_count,
+        "runtime_hash": sha256_value(game.runtime.audit_value()),
+        "phase": game.phase,
+        "current_actor_id": game.current_actor_id,
+    }
+
+
+def _assert_step_unchanged(
+    game: ProductionBasicCardBatch, before: dict[str, object]
+) -> None:
+    """断言失败关闭后本步动作从未提交（哈希与首项差异摘要，不直接比大JSON）。"""
+
+    assert state_sha256(canonical_state_snapshot(game.state)) == before["state_hash"]
+    assert game.execution_hash == before["execution_hash"]
+    assert len(game.events) == before["event_count"]
+    assert len(game.rng_calls) == before["rng_count"]
+    assert game.step_count == before["step_count"]
+    assert sha256_value(game.runtime.audit_value()) == before["runtime_hash"]
+    assert game.phase is before["phase"]
+    assert game.current_actor_id == before["current_actor_id"]
+    after_events = [event.to_replay_dict() for event in game.events]
+    for index, (expected, actual) in enumerate(
+        zip(before["events"], after_events)
+    ):
+        if expected != actual:
+            raise AssertionError(
+                f"失败关闭后事件序列第{index}项发生改变："
+                f"{json.dumps(actual, ensure_ascii=False)[:200]}"
+            )
+    after_rng = [call.to_dict() for call in game.rng_calls]
+    for index, (expected, actual) in enumerate(zip(before["rng_calls"], after_rng)):
+        if expected != actual:
+            raise AssertionError(
+                f"失败关闭后RNG调用第{index}项发生改变："
+                f"{json.dumps(actual)[:200]}"
+            )
 
 
 class _TrickReplayController(ScriptedBatchController):
@@ -548,7 +610,7 @@ def test_wugu_deck_insufficient_reshuffles_and_reveals() -> None:
     game.state.assert_card_conservation()
 
 
-def test_wugu_deck_insufficient_fails_closed() -> None:
+def test_wugu_deck_insufficient_fails_closed_atomic() -> None:
     game = _fresh(3)
     _stock_tricks(game)
     draw_ids = game.state.card_ids_in(DRAW_PILE)
@@ -560,8 +622,10 @@ def test_wugu_deck_insufficient_fails_closed() -> None:
     )
     assert not game.state.card_ids_in(DRAW_PILE)
     assert not game.state.card_ids_in(DISCARD_PILE)
+    before = _capture_step(game)
     with pytest.raises(ProductionBatchDeckExhaustedError):
         _use_wugu(game)
+    _assert_step_unchanged(game, before)
 
 
 # ----------------------------------------------------------------------
@@ -1205,6 +1269,123 @@ def test_tiesuo_recast_opens_no_wuxie_window() -> None:
     assert game.runtime.pending_trick is None
 
 
+def test_tiesuo_recast_succeeds_when_draw_and_discard_empty() -> None:
+    game = _fresh(3)
+    _stock_tricks(game)
+    draw_ids = game.state.card_ids_in(DRAW_PILE)
+    game._state = game.state.move_cards(
+        {
+            instance_id: ZoneRef.hand(_other(game))
+            for instance_id in draw_ids
+        }
+    )
+    assert not game.state.card_ids_in(DRAW_PILE)
+    assert not game.state.card_ids_in(DISCARD_PILE)
+    recast = _action(game, "recast_tiesuo", card_key=TIESUO)
+    assert recast is not None and recast.card_instance_id is not None
+    recast_id = recast.card_instance_id
+    hand_before = len(game.state.card_ids_in(ZoneRef.hand(_me(game))))
+    rng_before = len(game.rng_calls)
+    # 正式语义：重铸铁索先进入弃牌堆，即使动作前牌堆与弃牌堆均为空，
+    # 该铁索自身也可被洗回牌堆并摸回；不存在真实可达的牌量不足路径。
+    _step(game, recast)
+    assert game.state.location_of(recast_id) == ZoneRef.hand(_me(game))
+    assert len(game.state.card_ids_in(ZoneRef.hand(_me(game)))) == hand_before
+    assert len(game.state.card_ids_in(DRAW_PILE)) == 0
+    assert len(game.state.card_ids_in(DISCARD_PILE)) == 0
+    recasts = _events_of(game, EventType.CARD_RECAST)
+    assert len(recasts) == 1
+    assert recasts[0].card_instance_id == recast_id
+    assert recasts[0].payload["reason"] == "recast"
+    assert recasts[0].payload["source"]["kind"] == "hand"
+    assert recasts[0].payload["destination"]["kind"] == "discard_pile"
+    reshuffles = [
+        event
+        for event in game.events
+        if event.payload.get("reason") == "reshuffle"
+    ]
+    assert len(reshuffles) == 1
+    draw_moves = [
+        event
+        for event in game.events
+        if event.event_type is EventType.CARD_MOVED
+        and event.payload.get("reason") == "tiesuo_recast"
+    ]
+    assert len(draw_moves) == 1
+    gained = _events_of(game, EventType.CARD_GAINED)
+    assert gained[-1].card_instance_id == recast_id
+    assert gained[-1].payload["reason"] == "tiesuo_recast"
+    assert _events_of(game, EventType.CARD_USED) == []
+    assert _events_of(game, EventType.CARD_PLAYED) == []
+    # 事件顺序：card_recast → card_moved(reshuffle) → card_moved(draw) → card_gained
+    assert recasts[0].sequence < reshuffles[0].sequence
+    assert reshuffles[0].sequence < draw_moves[0].sequence
+    assert draw_moves[0].sequence < gained[-1].sequence
+    # RNG 消费与正式重洗路径一致：仅一次 shuffle 调用
+    assert len(game.rng_calls) == rng_before + 1
+
+
+def test_tiesuo_recast_reshuffles_when_draw_pile_empty() -> None:
+    game = _fresh(3)
+    _stock_tricks(game)
+    draw_ids = tuple(game.state.card_ids_in(DRAW_PILE))
+    game._state = game.state.move_cards(
+        {instance_id: DISCARD_PILE for instance_id in draw_ids}
+    )
+    assert not game.state.card_ids_in(DRAW_PILE)
+    discard_before = len(game.state.card_ids_in(DISCARD_PILE))
+    recast = _action(game, "recast_tiesuo", card_key=TIESUO)
+    assert recast is not None and recast.card_instance_id is not None
+    recast_id = recast.card_instance_id
+    _step(game, recast)
+    # 重铸牌进入弃牌堆后参与正式重洗：全部弃牌堆洗入牌堆后摸1张，
+    # 牌堆=原弃牌堆，弃牌堆为0；重铸铁索未被排除，可能被洗回牌堆或直接摸回。
+    assert len(game.state.card_ids_in(DRAW_PILE)) == discard_before
+    assert len(game.state.card_ids_in(DISCARD_PILE)) == 0
+    assert game.state.location_of(recast_id) != PROCESSING_ZONE
+    assert (
+        recast_id in game.state.card_ids_in(DRAW_PILE)
+        or game.state.location_of(recast_id) == ZoneRef.hand(_me(game))
+    )
+    game.state.assert_card_conservation()
+    gained = _events_of(game, EventType.CARD_GAINED)
+    assert gained[-1].payload["reason"] == "tiesuo_recast"
+    reshuffles = [
+        event
+        for event in game.events
+        if event.payload.get("reason") == "reshuffle"
+    ]
+    # 重洗候选总数 = 原弃牌堆 + 刚进入弃牌堆的重铸铁索
+    assert len(reshuffles) == discard_before + 1
+    assert all(
+        event.payload["destination"]["kind"] == "draw_pile"
+        for event in reshuffles
+    )
+
+
+def test_checkpoint_manifest_worktree_commit_pending_false() -> None:
+    manifest_path = (
+        Path(__file__).resolve().parents[1]
+        / "docs"
+        / "CHECKPOINT_MANIFEST.json"
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    batch = manifest["final_verification"][
+        "production_remaining_ordinary_trick_batch"
+    ]
+    assert batch["worktree_commit_pending"] is False
+    assert "worktree_commit_pending_note" in batch
+    checkpoint = next(
+        item
+        for item in manifest["checkpoints"]
+        if item["id"] == "CP-04I-PRODUCTION-REMAINING-ORDINARY-TRICK-BATCH"
+    )
+    assert checkpoint["status"] == "committed_pending_audit"
+    assert checkpoint["audit"]["independent_audit_done"] is False
+    assert checkpoint["audit"]["audit_conclusion"] == "NOT_AUDITED_YET"
+    assert checkpoint["audit"]["milestone_tag"] is None
+
+
 # ----------------------------------------------------------------------
 # E. 状态哈希、未实现传导与终局不变量
 # ----------------------------------------------------------------------
@@ -1236,10 +1417,11 @@ def test_chained_enters_state_snapshot_and_hash() -> None:
     assert chained_by_id[_other(game)] is True
 
 
-def test_property_damage_does_not_conduct_in_this_batch() -> None:
+def test_chained_property_damage_fails_closed_not_silent() -> None:
     game = _fresh(3)
     _stock_tricks(game)
-    # 横置一名角色后，属性杀造成伤害不得触发任何传导事件
+    _stock_card_key_to_hand(game, "sgs_basic_leisha", _me(game))
+    # 横置对手后，雷杀伤害必须失败关闭，不允许生成静默未传导的正式结果
     _step(
         game,
         _action(
@@ -1251,19 +1433,174 @@ def test_property_damage_does_not_conduct_in_this_batch() -> None:
     )
     _close_trick_window(game)
     assert game.state.players_by_id[_other(game)].chained is True
-    slash = _action(game, "use_slash")
-    if slash is not None:
-        _step(game, slash)
-        # 杀响应窗口：唯一响应者放弃出闪即关闭
-        pass_action = _action(game, "pass_slash_response")
-        assert pass_action is not None
+    slash = _action(game, "use_slash", card_key="sgs_basic_leisha")
+    assert slash is not None
+    _step(game, slash)
+    before = _capture_step(game)
+    pass_action = _action(game, "pass_slash_response")
+    assert pass_action is not None
+    with pytest.raises(UnsupportedRuleError, match="CP-04J"):
         _step(game, pass_action)
-    # 传导基础设施未实现：只有铁索切换的横置状态事件，属性伤害不触发传导
-    assert len(_events_of(game, EventType.CHAINED_STATE)) == 1
-    assert len(_events_of(game, EventType.DAMAGE)) <= 1
+    _assert_step_unchanged(game, before)
+    assert _events_of(game, EventType.DAMAGE) == []
     spec = game.formal_registry.rule_spec_for(TIESUO)
     assert spec["chain_damage_implemented"] is False
     assert spec["full_semantics_complete"] is False
+
+
+def test_chained_fire_slash_damage_fails_closed_atomic() -> None:
+    game = _fresh(3)
+    _stock_tricks(game)
+    _stock_card_key_to_hand(game, "sgs_basic_huosha", _me(game))
+    _step(
+        game,
+        _action(
+            game,
+            "use_tiesuo",
+            card_key=TIESUO,
+            targets=(_other(game),),
+        ),
+    )
+    _close_trick_window(game)
+    slash = _action(game, "use_slash", card_key="sgs_basic_huosha")
+    assert slash is not None
+    _step(game, slash)
+    before = _capture_step(game)
+    pass_action = _action(game, "pass_slash_response")
+    assert pass_action is not None
+    with pytest.raises(UnsupportedRuleError, match="火属性|CP-04J"):
+        _step(game, pass_action)
+    _assert_step_unchanged(game, before)
+
+
+def test_chained_lightning_slash_damage_fails_closed_atomic() -> None:
+    game = _fresh(3)
+    _stock_tricks(game)
+    _stock_card_key_to_hand(game, "sgs_basic_leisha", _me(game))
+    _step(
+        game,
+        _action(
+            game,
+            "use_tiesuo",
+            card_key=TIESUO,
+            targets=(_other(game),),
+        ),
+    )
+    _close_trick_window(game)
+    slash = _action(game, "use_slash", card_key="sgs_basic_leisha")
+    assert slash is not None
+    _step(game, slash)
+    before = _capture_step(game)
+    pass_action = _action(game, "pass_slash_response")
+    assert pass_action is not None
+    with pytest.raises(UnsupportedRuleError, match="雷属性|CP-04J"):
+        _step(game, pass_action)
+    _assert_step_unchanged(game, before)
+
+
+def test_chained_fire_attack_damage_fails_closed_atomic() -> None:
+    game = _fresh(3)
+    _stock_tricks(game)
+    _stock_card_key_to_hand(game, "sgs_trick_huogong", _me(game))
+    _step(
+        game,
+        _action(
+            game,
+            "use_tiesuo",
+            card_key=TIESUO,
+            targets=(_other(game),),
+        ),
+    )
+    _close_trick_window(game)
+    fire = _action(
+        game,
+        "use_fire_attack",
+        card_key="sgs_trick_huogong",
+        targets=(_other(game),),
+    )
+    assert fire is not None
+    _step(game, fire)
+    _close_trick_window(game)
+    reveal = _action(game, "reveal_card_for_fire_attack")
+    assert reveal is not None
+    _step(game, reveal)
+    fire = game.runtime.pending_fire_attack
+    assert fire is not None and fire.revealed_suit is not None
+    same_suit = next(
+        (
+            instance_id
+            for instance_id in game.state.card_ids_in(DRAW_PILE)
+            if game.state.cards_by_id[instance_id].suit == fire.revealed_suit
+        ),
+        None,
+    )
+    if same_suit is not None:
+        _move_to_hand(game, same_suit, _me(game))
+    discard = _action(game, "discard_same_suit_for_fire_attack")
+    assert discard is not None
+    before = _capture_step(game)
+    with pytest.raises(UnsupportedRuleError, match="火属性|CP-04J"):
+        _step(game, discard)
+    _assert_step_unchanged(game, before)
+
+
+def test_chained_no_attribute_damage_resolves_normally() -> None:
+    game = _fresh(3)
+    _stock_tricks(game)
+    _stock_card_key_to_hand(game, "sgs_basic_sha", _me(game))
+    _step(
+        game,
+        _action(
+            game,
+            "use_tiesuo",
+            card_key=TIESUO,
+            targets=(_other(game),),
+        ),
+    )
+    _close_trick_window(game)
+    slash = _action(game, "use_slash", card_key="sgs_basic_sha")
+    assert slash is not None
+    _step(game, slash)
+    pass_action = _action(game, "pass_slash_response")
+    assert pass_action is not None
+    _step(game, pass_action)
+    assert game.phase is ProductionPhase.PLAY
+    damage = _events_of(game, EventType.DAMAGE)
+    assert len(damage) == 1
+    assert damage[0].damage_type == "无属性"
+    assert game.state.players_by_id[_other(game)].chained is True
+
+
+def test_unchained_fire_slash_damage_resolves_normally() -> None:
+    game = _fresh(3)
+    _stock_tricks(game)
+    _stock_card_key_to_hand(game, "sgs_basic_huosha", _me(game))
+    slash = _action(game, "use_slash", card_key="sgs_basic_huosha")
+    assert slash is not None
+    _step(game, slash)
+    pass_action = _action(game, "pass_slash_response")
+    assert pass_action is not None
+    _step(game, pass_action)
+    assert game.phase is ProductionPhase.PLAY
+    damage = _events_of(game, EventType.DAMAGE)
+    assert len(damage) == 1
+    assert damage[0].damage_type == "火属性"
+
+
+def test_unchained_lightning_slash_damage_resolves_normally() -> None:
+    game = _fresh(3)
+    _stock_tricks(game)
+    _stock_card_key_to_hand(game, "sgs_basic_leisha", _me(game))
+    slash = _action(game, "use_slash", card_key="sgs_basic_leisha")
+    assert slash is not None
+    _step(game, slash)
+    pass_action = _action(game, "pass_slash_response")
+    assert pass_action is not None
+    _step(game, pass_action)
+    assert game.phase is ProductionPhase.PLAY
+    damage = _events_of(game, EventType.DAMAGE)
+    assert len(damage) == 1
+    assert damage[0].damage_type == "雷属性"
 
 
 def test_finished_state_has_no_temporary_zone_leftovers() -> None:
@@ -1309,6 +1646,18 @@ _TIESUO_REPLAY_SPECS = [
     {"operation": "pass_trick_response"},
     {"operation": "pass_trick_response"},
     {"operation": "pass_trick_response"},
+    # 第二次使用铁索把两名角色解除横置：CP-04J 门禁前回放尾段不得保留
+    # 横置角色，否则参考控制器后续打出火／雷【杀】会触发失败关闭。
+    {
+        "operation": "use_tiesuo",
+        "card_key": TIESUO,
+        "target_count": 2,
+        "include_self": True,
+    },
+    {"operation": "pass_trick_response"},
+    {"operation": "pass_trick_response"},
+    {"operation": "pass_trick_response"},
+    {"operation": "pass_trick_response"},
     {"operation": "recast_tiesuo", "card_key": TIESUO},
 ]
 
@@ -1325,8 +1674,8 @@ def wugu_replay_record() -> ProductionReexecutionReplay:
 @pytest.fixture(scope="module")
 def tiesuo_replay_record() -> ProductionReexecutionReplay:
     return record_reference_production_batch(
-        seed=153,
-        initial_hand_count=6,
+        seed=273,
+        initial_hand_count=8,
         controller=_TrickReplayController(list(_TIESUO_REPLAY_SPECS)),
     )
 
@@ -1358,9 +1707,10 @@ def test_tiesuo_replay_reexecutes(
     result = reexecute_production_replay(record)
     assert result.verified is True
     chained_events = _events_with_type(record.events, "chained_state")
-    assert len(chained_events) == 2
+    assert len(chained_events) == 4
     assert chained_events[0]["payload"]["old_value"] is False
     assert chained_events[0]["payload"]["new_value"] is True
+    assert chained_events[-1]["payload"]["new_value"] is False
     recast = _events_with_type(record.events, "card_recast")
     assert len(recast) == 1
     assert recast[0]["payload"]["reason"] == "recast"

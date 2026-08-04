@@ -815,6 +815,50 @@ def _replace_player(
         raise ProductionBatchError(f"找不到玩家{player_id!r}")
     return replace(state, players=tuple(players), revision=state.revision + 1)
 
+
+def _assert_deck_available(
+    state: GameState, count: int, label: str
+) -> None:
+    """统一牌量可用性预检：牌堆与可重洗弃牌堆合计不足即失败关闭。
+
+    必须在任何事件、状态、RNG 或运行时提交前调用，保证失败动作整体表现为
+    从未提交（原子不可见），不产生“事件已登记但状态未提交”的中间态。
+    """
+
+    if (
+        len(state.card_ids_in(DRAW_PILE))
+        + len(state.card_ids_in(DISCARD_PILE))
+        < count
+    ):
+        raise ProductionBatchDeckExhaustedError(
+            f"{label}需要{count}张牌，但牌堆与可重洗弃牌堆合计不足；"
+            "生产批处理会话失败关闭且当前动作未被提交"
+        )
+
+
+def _assert_chain_damage_gate(
+    state: GameState, victim_id: str, damage_type: str
+) -> None:
+    """CP-04J 前的统一临时失败关闭门禁：横置角色受火／雷属性伤害一律拒绝。
+
+    属性伤害传导尚未实现（tiesuo_chain_damage_implemented=false）。本门禁在
+    任何生命值、事件、挂起状态、RNG 或执行哈希变化前抛出
+    :class:`UnsupportedRuleError`，不允许生成“未传导但看似完整”的正式结果；
+    无属性伤害与未横置目标不受影响。CP-04J 实现传导后应移除本门禁。
+    """
+
+    if damage_type not in ("火属性", "雷属性"):
+        return
+    victim = state.players_by_id[victim_id]
+    if not victim.chained:
+        return
+    raise UnsupportedRuleError(
+        f"角色{victim_id}处于横置状态且将受到{damage_type}伤害；"
+        "属性伤害传导尚未实现（铁索连环完整语义等待 CP-04J），"
+        "当前动作未被提交，生产入口失败关闭"
+    )
+
+
 class BatchActionIdController:
     """只从当前真实合法集合中返回指定ID，用于测试与规则重执行。"""
 
@@ -2019,14 +2063,19 @@ class ProductionBasicCardBatch:
             raise InvalidActionError("当前没有待结算的【杀】")
         if context.actor_id != runtime.pending_slash.target_id:
             raise InvalidActionError("只有【杀】目标可以放弃响应")
-        window = self._build_window(runtime)
-        window.pass_response(context.actor_id)
 
         pending = runtime.pending_slash
         slash = state.cards_by_id[pending.slash_instance_id]
         adapter = self._formal_registry.adapter_for(slash.card_key)
         if not isinstance(adapter, SlashAdapter):
             raise InvalidActionError("【杀】伤害结算必须使用【杀】生产适配器")
+        # 统一属性伤害门禁：横置目标受火／雷属性伤害时在任何变化前失败关闭。
+        _assert_chain_damage_gate(
+            state, pending.target_id, adapter.damage_nature
+        )
+        window = self._build_window(runtime)
+        window.pass_response(context.actor_id)
+
         amount = 2 if pending.boosted else 1
         victim = state.players_by_id[pending.target_id]
         next_state = _replace_player(
@@ -3473,6 +3522,9 @@ class ProductionBasicCardBatch:
             raise InvalidActionError("只有【火攻】使用者可以选择弃置")
         if fire.revealed_suit is None or fire.revealed_instance_id is None:
             raise InvalidActionError("【火攻】弃牌阶段缺少已展示牌信息")
+        # 统一属性伤害门禁：横置目标受火属性伤害时，在同花色弃置等任何
+        # 事件与状态变化前失败关闭。
+        _assert_chain_damage_gate(state, fire.target_id, "火属性")
         payload = action.payload
         if str(payload.get("operation", "")) != "discard_same_suit_for_fire_attack":
             raise InvalidActionError("【火攻】弃置动作负载无效")
@@ -4170,15 +4222,7 @@ class ProductionBasicCardBatch:
         逻辑。
         """
 
-        if (
-            len(state.card_ids_in(DRAW_PILE))
-            + len(state.card_ids_in(DISCARD_PILE))
-            < count
-        ):
-            raise ProductionBatchDeckExhaustedError(
-                f"仍需展示{count}张牌，但牌堆与可重洗弃牌堆合计不足；"
-                "生产批处理会话失败关闭"
-            )
+        _assert_deck_available(state, count, f"展示{count}张牌")
         next_state = state
         events: list[GameEvent] = []
         for pool_index in range(count):
@@ -4288,6 +4332,11 @@ class ProductionBasicCardBatch:
             raise InvalidActionError(
                 "【五谷丰登】当前没有合法目标，不能使用"
             )
+
+        # 原子性预检：展示牌量不足必须在任何事件登记前失败关闭。
+        _assert_deck_available(
+            state, len(sequence), f"五谷丰登展示{len(sequence)}张牌"
+        )
 
         next_state, move_event = self._move_to_processing(
             state,
@@ -4712,6 +4761,11 @@ class ProductionBasicCardBatch:
             raise InvalidActionError("只能重铸自己手牌中的【铁索连环】")
 
         source = state.location_of(action.card_instance_id)
+        # 原子实现（局部不可变状态完成后一次性提交事件）：先在局部状态上
+        # 完成“重铸铁索进入弃牌堆→正式摸1张”，全部成功后统一登记事件。
+        # 不按动作前旧牌量预检：重铸牌自身先进入弃牌堆，即构成至少1张可
+        # 重洗实体；因此正式语义下重铸摸1张不存在真实可达的牌量不足路径
+        # （牌堆与弃牌堆在动作前均为空时，该铁索也会被洗回牌堆并摸回）。
         next_state = state.move_card(action.card_instance_id, DISCARD_PILE)
         recast_event = GameEvent(
             event_type=EventType.CARD_RECAST,
@@ -4725,11 +4779,10 @@ class ProductionBasicCardBatch:
                 "recast_by": context.actor_id,
             },
         )
-        self._events.extend((recast_event,))
         next_state, draw_events = self._draw_cards(
             next_state, context.actor_id, 1, reason="tiesuo_recast"
         )
-        self._events.extend(draw_events)
+        self._events.extend((recast_event, *draw_events))
         return next_state
 
     def _apply_group_trick_damage(
@@ -4750,6 +4803,8 @@ class ProductionBasicCardBatch:
         current = group.target_sequence[group.current_target_index]
         if current != victim_id:
             raise ProductionBatchError("群体锦囊伤害目标不是当前目标")
+        # 统一属性伤害门禁（当前群体锦囊均为无属性伤害，保持统一入口）。
+        _assert_chain_damage_gate(state, victim_id, "无属性")
         victim = state.players_by_id[victim_id]
         next_state = _replace_player(state, victim_id, hp=victim.hp - 1)
         damage_event = DamageEvent(
@@ -5098,6 +5153,8 @@ class ProductionBasicCardBatch:
         通用伤害来源字段，救援完成或死亡时由救援流程完成原锦囊结算。
         """
         runtime = self._runtime
+        # 统一属性伤害门禁：在生命值、事件、RNG 与运行时变化前失败关闭。
+        _assert_chain_damage_gate(state, victim_id, damage_type)
         victim = state.players_by_id[victim_id]
         next_state = _replace_player(state, victim_id, hp=victim.hp - 1)
         damage_event = DamageEvent(
@@ -5720,15 +5777,7 @@ class ProductionBasicCardBatch:
         *,
         reason: str = "draw_phase",
     ) -> tuple[GameState, tuple[GameEvent, ...]]:
-        if (
-            len(state.card_ids_in(DRAW_PILE))
-            + len(state.card_ids_in(DISCARD_PILE))
-            < count
-        ):
-            raise ProductionBatchDeckExhaustedError(
-                f"仍需摸{count}张牌，但牌堆与可重洗弃牌堆合计不足；"
-                "生产批处理会话失败关闭"
-            )
+        _assert_deck_available(state, count, f"摸{count}张牌")
         next_state = state
         events: list[GameEvent] = []
         for _ in range(count):

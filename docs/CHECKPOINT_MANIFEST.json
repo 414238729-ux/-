@@ -188,9 +188,10 @@
   "final_verification": {
     "pytest": {
       "command": ".\\\\.venv\\\\Scripts\\\\python.exe -m pytest -q -p no:cacheprovider",
-      "passed": 1454,
+      "passed": 1463,
       "failed": 0,
-      "skipped": 0
+      "skipped": 0,
+      "note": "1463=1454+9：CP-04I 审计三个非阻塞问题关闭新增的回归测试（清单状态、横置角色火／雷／火攻失败关闭原子性、无属性与未横置正常结算、五谷牌量不足原子性、铁索重铸空牌堆空弃牌堆成功重洗摸回、重铸牌参与重洗候选池）"
     },
     "compileall": {
       "command": ".\\\\.venv\\\\Scripts\\\\python.exe -m compileall -q scripts tests",
@@ -446,7 +447,11 @@
       "formal_duel_no_skill_ready": false,
       "multi_player_production_proven": false,
       "multi_player_production_note": "当前正式生产入口原生仅支持双人会话；三人以上五谷展示数量与完整选择顺序、铁索目标顺序与多人属性伤害传导均未由正式生产入口证明（NOT PROVEN）",
-      "worktree_commit_pending": true,
+      "worktree_commit_pending": false,
+      "worktree_commit_pending_note": "实现提交 20cb1b1f766529a88aa5f3346a4761b77eca66b7 已存在；当前待完成的是独立审计及审计收尾（independent_audit_done=false，audit_conclusion=NOT_AUDITED_YET），不是待用户提交工作树",
+      "chain_damage_runtime_gate": "unsupported_rule_error",
+      "chain_damage_runtime_gate_note": "CP-04J 前，横置角色受到火／雷属性伤害时，统一伤害前置校验在生产入口抛 UnsupportedRuleError 且当前动作未被提交（CP-04I 审计问题2关闭）；CP-04J 实现属性伤害传导后移除该临时门禁",
+      "tiesuo_recast_deck_insufficient_note": "正式语义下不可达：重铸铁索先进入弃牌堆，自身即构成至少1张可重洗实体；不按动作前旧牌量预检（避免错误排除重铸牌自身），也不声明铁索重铸牌量不足失败关闭能力",
       "independent_audit_done": false,
       "audit_conclusion": "NOT_AUDITED_YET",
       "adapter_implemented_card_kinds": 17,
@@ -454,10 +459,10 @@
     }
   },
   "sha256": {
-    "docs/ENGINE_STATUS.md": "c4f321d402e2d8d77a15caa3196e3a11918191f59c2e1efd78f0d8a7623bb0bc",
-    "docs/IMPLEMENTATION_MATRIX.md": "8ac727a80d18d4dd0a9ede74cd83590859b6f96159949934920e173793480888",
+    "docs/ENGINE_STATUS.md": "cdb6ce69e635b1e16ea70907669be7115e8bb6b14e4223f7526b518b3e1d1705",
+    "docs/IMPLEMENTATION_MATRIX.md": "adc0aa774f7975f3dd1dd65c0b62abe3468e6e6b9be11f2b75a8a25ba6e89e1d",
     "docs/LEGACY_RESULTS_INVALID.md": "267d51329b65b4435ed770b9fe90a0d53148d17cc9b0dae3e6d3406b06c0c0cc",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "30b5343d1ac42f42d5812883e17a68526c5f208f472f0d94179c7c676a9ec6e8",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "12c614a71aca6d0b46b7b292948f78a569748474d7bc6c498ccea890de7c15e3",
     "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "23b56a0edf0c85657b332100538013de16be4d71ea6a8214ac862a6708105af6",
     "knowledge/三国杀牌堆数据.csv": "8cb8da4177f11962776ae0f7e0154ed4ce56e293e96ac457874d48650517de18",
     "scripts/sgs_dev_runner.py": "6f88baa78fc9c22106188defda7190cd2a4412325db46f3964d217fd0e61c755",
@@ -468,7 +473,7 @@
     "scripts/sgs_engine/engine.py": "1a983ef03cc607644d27ac1902c961e687f1eab254679c81a6ab2e5235d824c7",
     "scripts/sgs_engine/events.py": "6e14c278f5c93b2eeaaf679acf6c03ed011c83710d5709cc629d3aca38483090",
     "scripts/sgs_engine/model.py": "54e9ddaacbd57bed216e5a98cbfded9ce1b89fe5a94b8141e6d77c46d3d9f014",
-    "scripts/sgs_engine/production_batch.py": "1f8f2db142dd3411e41a5b4379f7de43c2d85814a8946b329c77c313e610ab9d",
+    "scripts/sgs_engine/production_batch.py": "85eab603670f13c459dc611e59f03317a62758332dce1e6f9f463e816ae08aea",
     "scripts/sgs_engine/production_cards.py": "82d4240c44fb8312f3bd732733ff38c88279db0065f3da4b19325a185a0edc83",
     "scripts/sgs_engine/production_replay.py": "ddafa7ddfb26cd097140d252ec3281cc5c4a04d77f5c271ac9827e78e5b45459",
     "scripts/sgs_engine/replay.py": "27cd09a98e9ea09d03a6de3542d13abc94341fde4d33a5fdc5e8bdc5497580b1",
@@ -483,7 +488,7 @@
     "tests/test_sgs_production_single_target_tricks.py": "741db6fcd08db02de258215043c55aa7cc73248bdbca51e7ad827c54af5d2444",
     "tests/test_sgs_production_zone_target_tricks.py": "5be49acce056f9cd5d52fd06776523cab8ffa4b5979c6f954de3db0ffccfba37",
     "hash_note": "本表以Git跟踪内容的规范化blob字节为权威（UTF-8无BOM）；不以不同平台检出的CRLF/LF工作树原始字节为权威；Windows core.autocrlf导致的行尾差异不视为内容漂移；CHECKPOINT_MANIFEST.json不包含自身哈希；仅作状态记录，不参与门禁校验",
-    "tests/test_sgs_production_remaining_ordinary_tricks.py": "7ea14321d7e9a92b78f32c0f1993ecc460406d1145e94c879e623ca24e625e3b",
+    "tests/test_sgs_production_remaining_ordinary_tricks.py": "360f52c983d7c7d62e20072aad8f91b077326bf7f00545cd212171003a70e006",
     "knowledge/三国杀卡牌效果.md": "82399ca142cf3ccf9c0311b90b53938b864c79c3a0b2f8bc6578adb3545bdb60"
   }
 }
