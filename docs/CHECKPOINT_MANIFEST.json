@@ -43,7 +43,9 @@
     "chain_damage_infrastructure_audit_close_commit": "68e419b79e379184c1f1cc7ad650039771530f89",
     "chain_damage_infrastructure_audit_close_note": "CP-04J 最终独立复审结论 AUDIT_PASSED（2026-08-04）；初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES；审计残项 N1-N4 已由提交 68e419b79e379184c1f1cc7ad650039771530f89（fix: close chain damage audit gaps）正式关闭；里程碑标签 milestone-b2-chain-damage-infrastructure-audited 为本次最终文档提交后由用户立即建立的标签名称（本轮未执行 git tag、未验证标签已存在）",
     "cp04k_worktree_branch": "deepseek-borrowed-sword-weapon-system",
-    "cp04k_worktree_branch_note": "本批（【借刀杀人】＋11种武器牌本体，CP-04K）实现所在工作树分支；该分支上的本批代码尚未由用户提交，当前 HEAD 仍为基线 3ea01f4e8603dd96698a2e5deee09c1e9b3fccef"
+    "cp04k_worktree_branch_note": "本批（【借刀杀人】＋11种武器牌本体，CP-04K）实现所在分支；该分支上的本批代码已由用户在外部PowerShell提交，最终实现提交 75c596b12f34a6222d972b2190148386bb670653（feat: implement borrowed sword and weapon card-body system，amend替代旧提交 7456377f5fdc94588f6e872be6505b4e0159c803），当前 HEAD 已为该实现提交",
+    "milestone_b2_borrowed_sword_weapon_system_commit": "75c596b12f34a6222d972b2190148386bb670653",
+    "milestone_b2_borrowed_sword_weapon_system_commit_note": "【借刀杀人】＋11种武器牌本体批次（CP-04K）已由用户在外部PowerShell提交，最终实现提交哈希 75c596b12f34a6222d972b2190148386bb670653（feat: implement borrowed sword and weapon card-body system）；旧提交 7456377f5fdc94588f6e872be6505b4e0159c803 已被amend替代"
   },
   "feature_status": {
     "authoritative_core_foundation": true,
@@ -229,14 +231,17 @@
     },
     {
       "id": "CP-04K-PRODUCTION-BORROWED-SWORD-WEAPON-SYSTEM",
-      "status": "worktree_complete_pending_user_commit",
-      "commit": null,
-      "commit_note": "代码与测试已在当前工作树完成，尚未由用户在外部PowerShell提交真实Git提交；未进行独立只读审计",
+      "status": "committed_pending_audit",
+      "commit": "75c596b12f34a6222d972b2190148386bb670653",
+      "commit_note": "本批（【借刀杀人】＋11种武器牌本体，CP-04K）已由用户在外部PowerShell创建真实实现提交；amend后的最终实现提交为 75c596b12f34a6222d972b2190148386bb670653（feat: implement borrowed sword and weapon card-body system），父提交为基线 3ea01f4e8603dd96698a2e5deee09c1e9b3fccef；旧提交 7456377f5fdc94588f6e872be6505b4e0159c803 已被amend替代，不再作为实现提交；测试文件末尾多余空行已在amend前修正；当前等待独立审计，不得视为audited",
       "independent_audit_done": false,
       "audit_conclusion": "NOT_AUDITED_YET",
       "milestone_tag": null,
       "evidence": "scripts/sgs_engine/production_cards.py、scripts/sgs_engine/production_batch.py、scripts/sgs_engine/events.py、scripts/sgs_engine/production_replay.py、tests/test_sgs_production_borrowed_sword_weapon_system.py、tests/test_sgs_engine_events.py；正式160张牌堆【借刀杀人】＋11种武器牌本体批次",
-      "scope": "formal；【借刀杀人】2张完整双人生产语义与11种武器12张牌本体接入生产注册表与权威核心；两次目标检测、强制使用【杀】与按角色出杀计数、武器直接进入使用者手牌、装备三事件、挂起与终局清理、武器专属技能集中式失败关闭门禁；不构成武器技能完成、装备全部完成、多人借刀完成、正式单挑完成或里程碑B完成"
+      "scope": "formal；【借刀杀人】2张完整双人生产语义与11种武器12张牌本体接入生产注册表与权威核心；两次目标检测、强制使用【杀】与按角色出杀计数、武器直接进入使用者手牌、装备三事件、挂起与终局清理、武器专属技能集中式失败关闭门禁；不构成武器技能完成、装备全部完成、多人借刀完成、正式单挑完成或里程碑B完成",
+      "implementation_commit": "75c596b12f34a6222d972b2190148386bb670653",
+      "implementation_commit_message": "feat: implement borrowed sword and weapon card-body system",
+      "implementation_parent": "3ea01f4e8603dd96698a2e5deee09c1e9b3fccef"
     }
   ],
   "final_verification": {
@@ -570,17 +575,20 @@
       "formal_run_ready": false,
       "formal_duel_no_skill_ready": false,
       "multi_player_production_proven": false,
-      "worktree_commit_pending": true,
+      "worktree_commit_pending": false,
       "independent_audit_done": false,
       "audit_conclusion": "NOT_AUDITED_YET",
-      "milestone_tag": null
+      "milestone_tag": null,
+      "implementation_commit": "75c596b12f34a6222d972b2190148386bb670653",
+      "implementation_commit_message": "feat: implement borrowed sword and weapon card-body system",
+      "implementation_parent": "3ea01f4e8603dd96698a2e5deee09c1e9b3fccef"
     }
   },
   "sha256": {
-    "docs/ENGINE_STATUS.md": "d68a7d3c66f82e418805ddb6939d330dac195eae865307bf3ebb63b1cbd3ef3f",
+    "docs/ENGINE_STATUS.md": "a9f6403b37acc9bc52739a3377b7891eb85a205127efa212fdf8b1f078da0ad9",
     "docs/IMPLEMENTATION_MATRIX.md": "2c1ede491162a1169ca82486abefc542b137f6e88e69802bd76a33343fc9b2e0",
     "docs/LEGACY_RESULTS_INVALID.md": "267d51329b65b4435ed770b9fe90a0d53148d17cc9b0dae3e6d3406b06c0c0cc",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "34945a235600843fe39b8e73939927c0e0d6b899b96c46ba53219176ceb87e26",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "d031350bce2f249adce5ad5b9d9dd517c88f5eca74ef0df20d06dc3d77c93580",
     "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "23b56a0edf0c85657b332100538013de16be4d71ea6a8214ac862a6708105af6",
     "knowledge/三国杀牌堆数据.csv": "8cb8da4177f11962776ae0f7e0154ed4ce56e293e96ac457874d48650517de18",
     "scripts/sgs_dev_runner.py": "6f88baa78fc9c22106188defda7190cd2a4412325db46f3964d217fd0e61c755",
@@ -610,6 +618,6 @@
     "tests/test_sgs_production_remaining_ordinary_tricks.py": "fe1650350a56c228ed5e9cef41c4f294356d63e1fe898a71e2e4eb16470a6cdd",
     "knowledge/三国杀卡牌效果.md": "e8c78df783d95ff5969903aa0a34ad3ea685ca3bc720f196db56b30ce5fe6442",
     "tests/test_sgs_engine_events.py": "ad44b796857fec4a6a81ba4a574dbb6f0b5424193de8d76389294095e624cfaf",
-    "tests/test_sgs_production_borrowed_sword_weapon_system.py": "f03cba924662d9f48bb6ff835d655a49d6792c141b72c33476e9b4c8b977458a"
+    "tests/test_sgs_production_borrowed_sword_weapon_system.py": "9bef61e3861eaf1f18a3a89c7952d820ef8058d09d94a820ca0630fe1fa947ad"
   }
 }
