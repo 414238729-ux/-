@@ -37,6 +37,7 @@ from scripts.sgs_engine.production_batch import (
 from scripts.sgs_engine.production_cards import (
     PRODUCTION_BASIC_CARD_KEYS,
     PRODUCTION_TRICK_KEYS,
+    PRODUCTION_WEAPON_KEYS,
     BasicCardAdapter,
     FormalCardRegistry,
     attack_range_of,
@@ -99,7 +100,7 @@ def test_formal_160_deck_production_card_keys_map_to_production_adapters() -> No
 
     assert registry.card_count == 160
     assert len(registry.instance_ids) == len(set(registry.instance_ids)) == 160
-    assert set(registry.implemented_card_keys) == set(PRODUCTION_BASIC_CARD_KEYS) | set(PRODUCTION_TRICK_KEYS)
+    assert set(registry.implemented_card_keys) == set(PRODUCTION_BASIC_CARD_KEYS) | set(PRODUCTION_TRICK_KEYS) | set(PRODUCTION_WEAPON_KEYS)
     for key in PRODUCTION_BASIC_CARD_KEYS:
         adapter = registry.adapter_for(key)
         assert isinstance(adapter, BasicCardAdapter)
@@ -300,7 +301,7 @@ def test_plain_slash_respects_one_per_play_phase() -> None:
 
     _step(game, _action(game, "use_slash", card_key="sgs_basic_sha"))
     _step(game, _action(game, "pass_slash_response"))
-    assert game.runtime.slash_used is True
+    assert game.runtime.slash_used_counts.get("p1", 0) == 1
     assert all(
         a.payload.get("operation") != "use_slash"
         for a in game.legal_actions()
@@ -308,7 +309,10 @@ def test_plain_slash_respects_one_per_play_phase() -> None:
 
     _step(game, _action(game, "end_play_phase"))
     _step(game, _action(game, "end_turn"))
-    assert game.runtime.slash_used is False
+    # CP-04K：出杀次数按角色记录；回合结束时只重置新回合角色的计数，
+    # p1 在本回合的出杀计数保留到其自身下一个出牌阶段开始时才清零。
+    assert game.runtime.slash_used_counts.get("p1", 0) == 1
+    assert game.runtime.slash_used_counts.get("p2", 0) == 0
     assert game.runtime.current_player_id == "p2"
 
 
@@ -744,13 +748,13 @@ def test_actions_must_pass_enumerate_validate_apply_pipeline() -> None:
 def test_unimplemented_trick_cards_fail_closed_without_fallback() -> None:
     game = ProductionBasicCardBatch(seed=49)
     registry = game.formal_registry
-    assert "sgs_trick_jiedaosharen" in registry.unimplemented_card_keys
+    assert "sgs_delayed_lebusi" in registry.unimplemented_card_keys
     with pytest.raises(UnsupportedRuleError):
-        registry.adapter_for("sgs_trick_jiedaosharen")
+        registry.adapter_for("sgs_delayed_lebusi")
     with pytest.raises(UnsupportedRuleError):
         registry.adapter_for("sgs_delayed_shandian")
     with pytest.raises(UnsupportedRuleError):
-        registry.rule_spec_for("sgs_trick_jiedaosharen")
+        registry.rule_spec_for("sgs_delayed_lebusi")
     with pytest.raises(UnsupportedRuleError):
         registry.assert_no_unimplemented_fallback()
 
@@ -786,13 +790,12 @@ def test_unimplemented_trick_cards_fail_closed_without_fallback() -> None:
 def test_unimplemented_equipment_fails_closed_including_range() -> None:
     game = ProductionBasicCardBatch(seed=49)
     registry = game.formal_registry
-    assert "sgs_weapon_qinggangjian" in registry.unimplemented_card_keys
-    with pytest.raises(UnsupportedRuleError):
-        registry.adapter_for("sgs_weapon_qinggangjian")
+    # CP-04K：11种武器牌本体已接入生产注册表；坐骑仍未实现并继续失败关闭。
+    assert "sgs_weapon_qinggangjian" in registry.implemented_card_keys
     with pytest.raises(UnsupportedRuleError):
         registry.adapter_for("sgs_mount_defensive")
 
-    # 装备栏一旦出现武器，攻击范围计算必须失败关闭，而不是返回近似值
+    # 装备武器后攻击范围按正式结构化CSV动态计算（青釭剑=2），不再返回近似值
     weapon = next(
         record
         for record in registry.records
@@ -801,12 +804,12 @@ def test_unimplemented_equipment_fails_closed_including_range() -> None:
     equipped = game.state.move_card(
         weapon.instance_id, ZoneRef.equipment("p1", "weapon")
     )
-    with pytest.raises(UnsupportedRuleError):
-        attack_range_of(equipped, "p1")
-    with pytest.raises(UnsupportedRuleError):
-        is_valid_slash_target(equipped, "p1", "p2")
+    assert attack_range_of(equipped, "p1") == 2
+    assert is_valid_slash_target(equipped, "p1", "p2") is True
+    # 无武器时默认攻击范围1
+    assert attack_range_of(game.state, "p1") == 1
 
-    # 伪造装备动作不能通过验证
+    # 伪造坐骑装备动作不能通过验证（坐骑无生产适配器）
     mount_id = next(
         instance_id
         for instance_id in game.state.card_ids_in(ZoneRef.hand("p1"))
@@ -831,7 +834,7 @@ def test_unimplemented_equipment_fails_closed_including_range() -> None:
 def test_test_only_adapters_never_enter_production_registry() -> None:
     game = ProductionBasicCardBatch(seed=1)
     registry = game.formal_registry
-    assert set(registry.adapters) == set(PRODUCTION_BASIC_CARD_KEYS) | set(PRODUCTION_TRICK_KEYS)
+    assert set(registry.adapters) == set(PRODUCTION_BASIC_CARD_KEYS) | set(PRODUCTION_TRICK_KEYS) | set(PRODUCTION_WEAPON_KEYS)
     for key, adapter in registry.adapters.items():
         assert isinstance(adapter, BasicCardAdapter)
         assert not str(type(adapter).__module__).endswith(".duel")

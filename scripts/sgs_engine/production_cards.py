@@ -18,6 +18,7 @@ Knowledge（《三国杀卡牌效果》《三国杀卡牌使用方式》《三�
 
 from __future__ import annotations
 
+import csv
 import itertools
 from pathlib import Path
 from types import MappingProxyType
@@ -62,6 +63,18 @@ CARD_NAMES_BY_KEY: Mapping[str, str] = {
     "sgs_trick_taoyuanjieyi": "桃园结义",
     "sgs_trick_tiesuolianhuan": "铁索连环",
     "sgs_trick_wugufengdeng": "五谷丰登",
+    "sgs_trick_jiedaosharen": "借刀杀人",
+    "sgs_weapon_zhugeliannu": "诸葛连弩",
+    "sgs_weapon_qinggangjian": "青釭剑",
+    "sgs_weapon_hanbingjian": "寒冰剑",
+    "sgs_weapon_cixiongshuanggujian": "雌雄双股剑",
+    "sgs_weapon_gudingdao": "古锭刀",
+    "sgs_weapon_qinglongyanyuedao": "青龙偃月刀",
+    "sgs_weapon_guanshifu": "贯石斧",
+    "sgs_weapon_zhangbashemao": "丈八蛇矛",
+    "sgs_weapon_fangtianhuaji": "方天画戟",
+    "sgs_weapon_zhuqueyushan": "朱雀羽扇",
+    "sgs_weapon_qilingong": "麒麟弓",
 }
 
 SLASH_CARD_KEYS: tuple[str, ...] = (
@@ -84,6 +97,7 @@ PRODUCTION_TRICK_KEYS: tuple[str, ...] = (
     "sgs_trick_taoyuanjieyi",
     "sgs_trick_tiesuolianhuan",
     "sgs_trick_wugufengdeng",
+    "sgs_trick_jiedaosharen",
 )
 
 GROUP_TRICK_KEYS: tuple[str, ...] = (
@@ -92,20 +106,92 @@ GROUP_TRICK_KEYS: tuple[str, ...] = (
     "sgs_trick_taoyuanjieyi",
 )
 
+PRODUCTION_WEAPON_KEYS: tuple[str, ...] = (
+    "sgs_weapon_zhugeliannu",
+    "sgs_weapon_qinggangjian",
+    "sgs_weapon_hanbingjian",
+    "sgs_weapon_cixiongshuanggujian",
+    "sgs_weapon_gudingdao",
+    "sgs_weapon_qinglongyanyuedao",
+    "sgs_weapon_guanshifu",
+    "sgs_weapon_zhangbashemao",
+    "sgs_weapon_fangtianhuaji",
+    "sgs_weapon_zhuqueyushan",
+    "sgs_weapon_qilingong",
+)
+
+DEFAULT_STRUCTURED_CARD_CSV_PATH = Path("knowledge") / "三国杀卡牌结构化数据.csv"
+
+_WEAPON_ATTACK_RANGES_CACHE: Mapping[str, int] | None = None
+
+
+def weapon_attack_ranges(
+    path: str | Path = DEFAULT_STRUCTURED_CARD_CSV_PATH,
+) -> Mapping[str, int]:
+    """读取正式结构化CSV中的11种武器攻击范围并缓存。
+
+    攻击范围以 `knowledge/三国杀卡牌结构化数据.csv` 的 ``attack_range``
+    列为唯一来源；缺失、非正整数或键缺失时立即失败关闭，不猜测数值。
+    """
+
+    global _WEAPON_ATTACK_RANGES_CACHE
+    if _WEAPON_ATTACK_RANGES_CACHE is not None:
+        return _WEAPON_ATTACK_RANGES_CACHE
+    try:
+        with open(path, encoding="utf-8-sig", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+    except (OSError, UnicodeError) as exc:
+        raise UnsupportedRuleError(
+            f"无法读取正式结构化卡牌CSV：{path}"
+        ) from exc
+    result: dict[str, int] = {}
+    for row in rows:
+        card_id = str(row.get("card_id") or "").strip()
+        if card_id not in PRODUCTION_WEAPON_KEYS:
+            continue
+        raw = str(row.get("attack_range") or "").strip()
+        try:
+            value = int(raw)
+        except ValueError as exc:
+            raise UnsupportedRuleError(
+                f"正式结构化CSV中武器{card_id}的攻击范围缺失或非法：{raw!r}"
+            ) from exc
+        if value < 1:
+            raise UnsupportedRuleError(
+                f"正式结构化CSV中武器{card_id}的攻击范围必须为正整数"
+            )
+        result[card_id] = value
+    missing = set(PRODUCTION_WEAPON_KEYS).difference(result)
+    if missing:
+        raise UnsupportedRuleError(
+            "正式结构化CSV缺少武器攻击范围：" + "、".join(sorted(missing))
+        )
+    _WEAPON_ATTACK_RANGES_CACHE = MappingProxyType(result)
+    return _WEAPON_ATTACK_RANGES_CACHE
+
 
 def attack_range_of(state: GameState, player_id: str) -> int:
-    """返回角色的当前攻击范围；本批次未实现武器，装备栏必须为空。
+    """返回角色的当前攻击范围；每次从当前装备区动态计算。
 
-    武器是后续批次的范围；在武器实现前，若武器栏被占用则失败关闭，
-    绝不返回近似攻击范围。
+    无武器时返回默认攻击范围1；装备武器时读取正式结构化CSV登记的攻击
+    范围；武器槽状态非法或攻击范围未登记时失败关闭，绝不返回近似值。
     """
 
     weapon_ids = state.card_ids_in(ZoneRef.equipment(player_id, "weapon"))
-    if weapon_ids:
+    if not weapon_ids:
+        return DEFAULT_ATTACK_RANGE
+    if len(weapon_ids) != 1:
         raise UnsupportedRuleError(
-            "武器尚未实现，不能计算装备武器后的攻击范围；本批次失败关闭"
+            f"角色{player_id}的武器槽必须恰好包含一张武器牌；当前为{len(weapon_ids)}张"
         )
-    return DEFAULT_ATTACK_RANGE
+    weapon = state.cards_by_id[weapon_ids[0]]
+    ranges = weapon_attack_ranges()
+    try:
+        return ranges[weapon.card_key]
+    except KeyError as exc:
+        raise UnsupportedRuleError(
+            f"武器{weapon.card_key}未在正式结构化CSV登记攻击范围；失败关闭"
+        ) from exc
 
 
 def actual_distance(state: GameState, source_id: str, target_id: str) -> int:
@@ -135,6 +221,182 @@ def is_valid_slash_target(state: GameState, attacker_id: str, target_id: str) ->
         return False
     return actual_distance(state, attacker_id, target_id) <= attack_range_of(
         state, attacker_id
+    )
+
+
+_WEAPON_GATE_DECISIONS: frozenset[str] = frozenset(
+    {
+        "use_slash",
+        "forced_slash",
+        "play_slash",
+        "slash_damage",
+        "slash_dodged",
+    }
+)
+
+
+def check_weapon_skill_gate(
+    state: GameState,
+    *,
+    actor_id: str,
+    decision: str,
+    target_id: str | None = None,
+    slash_card_key: str | None = None,
+    slash_used_count: int = 0,
+) -> None:
+    """集中式武器技能影响门禁（CP-04K）。
+
+    11种武器只实现牌本体，专属技能全部保持 partial。本函数在首次需要
+    作出相关判断前检查：若能以当前完整公开状态证明专属技能不可能影响
+    本次合法性、可选动作或结算结果则直接返回；否则抛出
+    ``UnsupportedRuleError`` 失败关闭。失败发生在任何状态、事件、RNG、
+    pending或处理区变化之前。禁止把未知条件当作 false，禁止把武器技能
+    近似为无效果。
+    """
+
+    if decision not in _WEAPON_GATE_DECISIONS:
+        raise UnsupportedRuleError(
+            f"武器技能门禁不支持决策类型{decision!r}；失败关闭"
+        )
+    weapon_ids = state.card_ids_in(ZoneRef.equipment(actor_id, "weapon"))
+    if not weapon_ids:
+        return
+    if len(weapon_ids) != 1:
+        raise UnsupportedRuleError(
+            f"角色{actor_id}的武器槽必须恰好包含一张武器牌；当前为{len(weapon_ids)}张"
+        )
+    weapon_key = state.cards_by_id[weapon_ids[0]].card_key
+    if weapon_key not in PRODUCTION_WEAPON_KEYS:
+        raise UnsupportedRuleError(
+            f"武器{weapon_key}未在武器技能影响矩阵中登记；失败关闭"
+        )
+
+    if weapon_key == "sgs_weapon_zhugeliannu":
+        # 技能：你使用【杀】无次数限制。主动出杀次数已用尽时，
+        # 合法动作集合依赖该技能，必须失败关闭；借刀强制杀绕过次数
+        # 限制来自借刀规则本身，不依赖连弩，因此不失败关闭。
+        if decision == "use_slash" and slash_used_count >= 1:
+            raise UnsupportedRuleError(
+                "诸葛连弩的无限出杀技能未实现；当前主动出杀合法性依赖该技能，失败关闭"
+            )
+        return
+
+    if weapon_key == "sgs_weapon_qinggangjian":
+        # 技能：使用【杀】指定目标时无视其防具。防具槽为空可证明
+        # 技能不影响本次结算；防具槽被占用时无法证明，失败关闭。
+        if decision in ("use_slash", "forced_slash") and target_id is not None:
+            if state.card_ids_in(ZoneRef.equipment(target_id, "armor")):
+                raise UnsupportedRuleError(
+                    "青釭剑无视防具技能未实现；目标装备防具时失败关闭"
+                )
+        return
+
+    if weapon_key == "sgs_weapon_hanbingjian":
+        # 技能：使用【杀】将要造成伤害时可以防止伤害并弃置目标2张牌。
+        # 伤害结算可能被该技能改变，无法从当前状态证明不发动，失败关闭。
+        if decision == "slash_damage":
+            raise UnsupportedRuleError(
+                "寒冰剑防止伤害并弃置目标牌技能未实现；杀伤害结算前失败关闭"
+            )
+        return
+
+    if weapon_key == "sgs_weapon_cixiongshuanggujian":
+        # 技能：使用【杀】指定异性角色为目标时可令其选择。PlayerState
+        # 没有性别字段，缺少性别数据不能证明目标非异性，因此对另一
+        # 角色使用【杀】时一律失败关闭，不得当作白板武器。
+        if decision in ("use_slash", "forced_slash") and target_id is not None:
+            raise UnsupportedRuleError(
+                "雌雄双股剑技能需要性别判定；PlayerState无性别字段，无法证明目标非异性，失败关闭"
+            )
+        return
+
+    if weapon_key == "sgs_weapon_gudingdao":
+        # 技能：对没有手牌的角色使用【杀】时伤害+1。目标在手牌为0的
+        # 状态被指定时技能必然生效，无法按无属性杀结算，失败关闭。
+        if decision in ("use_slash", "forced_slash") and target_id is not None:
+            if not state.card_ids_in(ZoneRef.hand(target_id)):
+                raise UnsupportedRuleError(
+                    "古锭刀对无手牌目标伤害+1技能未实现；失败关闭"
+                )
+        return
+
+    if weapon_key == "sgs_weapon_qinglongyanyuedao":
+        # 技能：使用的【杀】被【闪】响应后可继续对该目标使用【杀】。
+        # 被闪后若手中仍有【杀】，可选动作集合可能扩大，失败关闭。
+        if decision == "slash_dodged":
+            if any(
+                state.cards_by_id[instance_id].card_key in SLASH_CARD_KEYS
+                for instance_id in state.card_ids_in(ZoneRef.hand(actor_id))
+            ):
+                raise UnsupportedRuleError(
+                    "青龙偃月刀被闪后继续使用杀技能未实现；失败关闭"
+                )
+        return
+
+    if weapon_key == "sgs_weapon_guanshifu":
+        # 技能：被【闪】响应后可弃置手牌区与装备区合计2张牌强制造成伤害。
+        # 可支付牌不足2张时可证明技能不可发动；否则失败关闭。
+        if decision == "slash_dodged":
+            hand_count = len(state.card_ids_in(ZoneRef.hand(actor_id)))
+            equip_count = sum(
+                len(state.card_ids_in(ZoneRef.equipment(actor_id, slot)))
+                for slot in EQUIPMENT_SLOTS
+            )
+            if hand_count + equip_count >= 2:
+                raise UnsupportedRuleError(
+                    "贯石斧弃两张牌强制命中技能未实现；失败关闭"
+                )
+        return
+
+    if weapon_key == "sgs_weapon_zhangbashemao":
+        # 技能：可将2张手牌当作普通【杀】使用或打出。手牌数达到2张时
+        # 合法杀集合可能扩大，无法证明不影响，失败关闭；不足2张时
+        # 不存在转化材料，可证明不影响，继续按实体杀流程。
+        if decision in ("use_slash", "forced_slash", "play_slash"):
+            if len(state.card_ids_in(ZoneRef.hand(actor_id))) >= 2:
+                raise UnsupportedRuleError(
+                    "丈八蛇矛两张手牌转化杀技能未实现；合法杀集合可能扩大，失败关闭"
+                )
+        return
+
+    if weapon_key == "sgs_weapon_fangtianhuaji":
+        # 技能：使用作为最后一张手牌的【杀】时可指定至多3个目标。
+        # 当前生产切片为双人环，额外目标不存在，目标集合可证明不变；
+        # 三人以上无法证明，失败关闭。
+        if len(state.players) != 2:
+            raise UnsupportedRuleError(
+                "方天画戟多目标技能未实现；当前不是双人切片，无法证明目标集合不变，失败关闭"
+            )
+        return
+
+    if weapon_key == "sgs_weapon_zhuqueyushan":
+        # 技能：使用普通【杀】指定目标时可将其转为【火杀】。实体普通杀
+        # 的属性选择可能改变伤害与传导，失败关闭；实体火杀／雷杀不受
+        # 本技能影响，可继续。
+        if decision in ("use_slash", "forced_slash"):
+            if slash_card_key == "sgs_basic_sha":
+                raise UnsupportedRuleError(
+                    "朱雀羽扇普通杀转火杀技能未实现；实体普通杀失败关闭"
+                )
+        return
+
+    if weapon_key == "sgs_weapon_qilingong":
+        # 技能：使用【杀】对目标造成伤害时可以弃置目标装备区一张坐骑牌。
+        # 目标坐骑槽为空时可证明技能无法弃置；否则失败关闭。
+        if decision == "slash_damage" and target_id is not None:
+            mounts = state.card_ids_in(
+                ZoneRef.equipment(target_id, "attack_horse")
+            ) + state.card_ids_in(
+                ZoneRef.equipment(target_id, "defense_horse")
+            )
+            if mounts:
+                raise UnsupportedRuleError(
+                    "麒麟弓弃置坐骑技能未实现；目标有坐骑时失败关闭"
+                )
+        return
+
+    raise UnsupportedRuleError(
+        f"武器{weapon_key}的技能影响矩阵未覆盖决策{decision!r}；失败关闭"
     )
 
 
@@ -310,7 +572,18 @@ class SlashAdapter(BasicCardAdapter):
         session = self._require_session()
         if session.phase.value != "play":
             return ()
-        if session.runtime.slash_used:
+        if session.runtime.slash_used_counts.get(context.actor_id, 0) > 0:
+            # 达到通常上限：仍须先经过武器技能门禁，避免把连弩等技能
+            # 可能扩展的合法动作静默当作不存在（不得错误允许或错误禁止）。
+            check_weapon_skill_gate(
+                state,
+                actor_id=context.actor_id,
+                decision="use_slash",
+                target_id=session.opponent_of(context.actor_id),
+                slash_used_count=session.runtime.slash_used_counts.get(
+                    context.actor_id, 0
+                ),
+            )
             return ()
         actions: list[LegalAction] = []
         for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
@@ -320,6 +593,16 @@ class SlashAdapter(BasicCardAdapter):
             target = session.opponent_of(context.actor_id)
             if not is_valid_slash_target(state, context.actor_id, target):
                 continue
+            check_weapon_skill_gate(
+                state,
+                actor_id=context.actor_id,
+                decision="use_slash",
+                target_id=target,
+                slash_card_key=self.card_key,
+                slash_used_count=session.runtime.slash_used_counts.get(
+                    context.actor_id, 0
+                ),
+            )
             actions.append(
                 LegalAction(
                     action_type=ActionType.USE_CARD,
@@ -1707,6 +1990,195 @@ class TaoyuanJieyiAdapter(GroupTargetTrickAdapter):
         super().__init__(session)
 
 
+class WeaponCardAdapter(BasicCardAdapter):
+    """11种武器牌本体的通用生产适配器（CP-04K）。
+
+    只实现牌本体：出牌阶段主动使用、武器进入weapon槽、同槽替换把旧武器
+    原子移入弃牌堆、攻击范围按正式结构化CSV登记值动态计算、装备区公开。
+    武器专属技能全部保持 partial，由 ``check_weapon_skill_gate`` 集中
+    失败关闭，不近似为无效果。
+    """
+
+    def __init__(
+        self,
+        card_key: str,
+        session: "ProductionBasicCardBatch | None" = None,
+    ) -> None:
+        super().__init__(session)
+        if card_key not in PRODUCTION_WEAPON_KEYS:
+            raise ValueError(f"{card_key}不是本批次的武器卡牌键")
+        self.card_key = card_key
+        self.card_name = CARD_NAMES_BY_KEY[card_key]
+        self._attack_range = weapon_attack_ranges()[card_key]
+
+    def rule_spec(self) -> dict[str, object]:
+        return {
+            "card_key": self.card_key,
+            "card_name": self.card_name,
+            "use_timing": "own_play_phase",
+            "use_limit": "unlimited_base;requires_entity_card",
+            "target_count": 0,
+            "target_filter": "self_equip_weapon_slot",
+            "equipment_slot": "weapon",
+            "attack_range": self._attack_range,
+            "skill_status": "partial",
+            "skill_effect": "not_implemented_fail_closed",
+            "movement_lifecycle": "hand->processing->weapon_slot",
+            "replacement": "old_weapon_atomic_to_discard",
+            "adapter_version": self.adapter_version,
+            "implemented": self.implemented,
+            "tested": self.tested,
+            "production_adapter": self.production_adapter,
+        }
+
+    def enumerate_legal_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        session = self._require_session()
+        if session.phase.value != "play":
+            return ()
+        if context.actor_id != session.runtime.current_player_id:
+            return ()
+        actions: list[LegalAction] = []
+        for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
+            card = state.cards_by_id[instance_id]
+            if card.card_key != self.card_key:
+                continue
+            actions.append(
+                LegalAction(
+                    action_type=ActionType.USE_CARD,
+                    actor_id=context.actor_id,
+                    card_instance_id=instance_id,
+                    target_ids=(context.actor_id,),
+                    payload={
+                        "operation": "use_weapon",
+                        "card_key": self.card_key,
+                        "card_name": self.card_name,
+                    },
+                )
+            )
+        return tuple(actions)
+
+    def apply_action(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        session = self._require_session()
+        if session.phase.value == "play":
+            return session.apply_weapon_use(state, context, action, self)
+        raise InvalidActionError(
+            f"{self.card_name}生产适配器不能处理当前阶段的动作"
+        )
+
+
+class JiedaoSharenAdapter(TrickCardAdapter):
+    """【借刀杀人】的生产适配器（CP-04K）。
+
+    出牌阶段选择第一目标（装备区有武器的其他角色）与第二目标（第一目标
+    攻击范围内、应使用【杀】的角色）。锦囊只以第一目标为无懈目标；生效
+    后第一目标选择使用一张实体普通／火／雷【杀】或拒绝；使用后视为履行
+    要求，拒绝或无法使用时把第一目标当前武器交给借刀使用者手牌。
+    """
+
+    def __init__(self, session: "ProductionBasicCardBatch | None" = None) -> None:
+        super().__init__(session)
+        self.card_key = "sgs_trick_jiedaosharen"
+        self.card_name = "借刀杀人"
+
+    def rule_spec(self) -> dict[str, object]:
+        return {
+            "card_key": self.card_key,
+            "card_name": self.card_name,
+            "use_timing": "own_play_phase",
+            "use_limit": "unlimited_base;requires_entity_card",
+            "target_count": 1,
+            "target_filter": (
+                "first_target_other_with_weapon;"
+                "second_target_in_first_target_attack_range"
+            ),
+            "nullification_eligible": True,
+            "nullification_target": "first_target_only",
+            "movement_lifecycle": "trick:hand->processing->discard",
+            "effect": (
+                "first_target_uses_slash_on_second_target_or_"
+                "delivers_current_weapon_to_user_hand"
+            ),
+            "adapter_version": self.adapter_version,
+            "implemented": self.implemented,
+            "tested": self.tested,
+            "production_adapter": self.production_adapter,
+        }
+
+    def _enumerate_use(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        session = self._require_session()
+        if context.actor_id != session.runtime.current_player_id:
+            return ()
+        actions: list[LegalAction] = []
+        for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
+            card = state.cards_by_id[instance_id]
+            if card.card_key != self.card_key:
+                continue
+            for first_target in state.players_by_id:
+                if first_target == context.actor_id:
+                    continue
+                if not state.card_ids_in(
+                    ZoneRef.equipment(first_target, "weapon")
+                ):
+                    continue
+                for second_target in state.players_by_id:
+                    if second_target == first_target:
+                        continue
+                    if not is_valid_slash_target(
+                        state, first_target, second_target
+                    ):
+                        continue
+                    actions.append(
+                        LegalAction(
+                            action_type=ActionType.USE_CARD,
+                            actor_id=context.actor_id,
+                            card_instance_id=instance_id,
+                            target_ids=(first_target,),
+                            payload={
+                                "operation": "use_jiedao",
+                                "card_key": self.card_key,
+                                "card_name": self.card_name,
+                                "second_target_id": second_target,
+                                "purpose": "force_slash_or_weapon_gain",
+                            },
+                        )
+                    )
+        return tuple(actions)
+
+    def enumerate_legal_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        session = self._require_session()
+        if session.phase.value == "play":
+            return self._enumerate_use(state, context)
+        if session.phase.value == "borrowed_sword_choice":
+            return session.enumerate_borrowed_sword_actions(state, context)
+        return ()
+
+    def apply_action(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        session = self._require_session()
+        if session.phase.value == "play":
+            return session.apply_jiedao_use(state, context, action, self)
+        if session.phase.value == "borrowed_sword_choice":
+            operation = str(action.payload.get("operation", ""))
+            if operation in (
+                "choose_borrowed_sword_slash",
+                "refuse_borrowed_sword_slash",
+            ):
+                return session.apply_borrowed_sword_slash_choice(
+                    state, context, action
+                )
+        raise InvalidActionError(
+            f"{self.card_name}生产适配器不能处理当前阶段的动作"
+        )
+
 def _default_adapters() -> dict[str, RuleAdapter]:
     return {
         "sgs_basic_sha": SlashAdapter("sgs_basic_sha", "无属性"),
@@ -1726,6 +2198,28 @@ def _default_adapters() -> dict[str, RuleAdapter]:
         "sgs_trick_taoyuanjieyi": TaoyuanJieyiAdapter(),
         "sgs_trick_tiesuolianhuan": TiesuoLianhuanAdapter(),
         "sgs_trick_wugufengdeng": WugufengdengAdapter(),
+        "sgs_trick_jiedaosharen": JiedaoSharenAdapter(),
+        "sgs_weapon_zhugeliannu": WeaponCardAdapter("sgs_weapon_zhugeliannu"),
+        "sgs_weapon_qinggangjian": WeaponCardAdapter("sgs_weapon_qinggangjian"),
+        "sgs_weapon_hanbingjian": WeaponCardAdapter("sgs_weapon_hanbingjian"),
+        "sgs_weapon_cixiongshuanggujian": WeaponCardAdapter(
+            "sgs_weapon_cixiongshuanggujian"
+        ),
+        "sgs_weapon_gudingdao": WeaponCardAdapter("sgs_weapon_gudingdao"),
+        "sgs_weapon_qinglongyanyuedao": WeaponCardAdapter(
+            "sgs_weapon_qinglongyanyuedao"
+        ),
+        "sgs_weapon_guanshifu": WeaponCardAdapter("sgs_weapon_guanshifu"),
+        "sgs_weapon_zhangbashemao": WeaponCardAdapter(
+            "sgs_weapon_zhangbashemao"
+        ),
+        "sgs_weapon_fangtianhuaji": WeaponCardAdapter(
+            "sgs_weapon_fangtianhuaji"
+        ),
+        "sgs_weapon_zhuqueyushan": WeaponCardAdapter(
+            "sgs_weapon_zhuqueyushan"
+        ),
+        "sgs_weapon_qilingong": WeaponCardAdapter("sgs_weapon_qilingong"),
     }
 
 
@@ -1866,8 +2360,10 @@ __all__ = [
     "GuoheChaiqiaoAdapter",
     "GroupTargetTrickAdapter",
     "HuogongAdapter",
+    "JiedaoSharenAdapter",
     "JuedouAdapter",
     "NanmanRuqinAdapter",
+    "PRODUCTION_WEAPON_KEYS",
     "ShunshouQianyangAdapter",
     "TaoyuanJieyiAdapter",
     "TiesuoLianhuanAdapter",
@@ -1876,6 +2372,7 @@ __all__ = [
     "WugufengdengAdapter",
     "WuxiekejiAdapter",
     "WuzhongshengyouAdapter",
+    "WeaponCardAdapter",
     "BasicCardAdapter",
     "DodgeAdapter",
     "FormalCardRegistry",
@@ -1884,6 +2381,8 @@ __all__ = [
     "WineAdapter",
     "actual_distance",
     "attack_range_of",
+    "check_weapon_skill_gate",
+    "weapon_attack_ranges",
     "has_target_zone_cards",
     "is_valid_shunshou_target",
     "is_valid_slash_target",

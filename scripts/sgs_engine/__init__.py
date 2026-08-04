@@ -4,9 +4,11 @@
 失败关闭会话。正式160张牌堆的六种基本牌（普通【杀】、火【杀】、雷【杀】、
 【闪】、【桃】、【酒】）、普通锦囊垂直切片（【无中生有】、【无懈可击】）、
 目标区域选牌批次（【过河拆桥】、【顺手牵羊】）、伤害型普通锦囊批次
-（【决斗】、【火攻】）与群体普通锦囊批次（【南蛮入侵】、【万箭齐发】、
-【桃园结义】）已接入生产注册表与权威核心调用路径；其余正式卡牌、
-模式、武将、AI 和正式整局仍未完成；调用
+（【决斗】、【火攻】）、群体普通锦囊批次（【南蛮入侵】、【万箭齐发】、
+【桃园结义】）、【借刀杀人】以及11种武器牌本体（主动装备、同槽替换、
+攻击范围动态计算）已接入生产注册表与权威核心调用路径；武器专属技能保持
+partial 并按集中式门禁失败关闭；其余正式卡牌、模式、武将、AI 和正式
+整局仍未完成；调用
 ``AuthoritativeCoreSession.run_game`` 会明确抛出 ``UnsupportedRuleError``。
 """
 
@@ -117,16 +119,21 @@ from .production_cards import (
     DodgeAdapter,
     FormalCardRegistry,
     HuogongAdapter,
+    JiedaoSharenAdapter,
     JuedouAdapter,
     PeachAdapter,
     SlashAdapter,
     TrickCardAdapter,
     WineAdapter,
+    WeaponCardAdapter,
     WuxiekejiAdapter,
     WuzhongshengyouAdapter,
     actual_distance,
+    PRODUCTION_WEAPON_KEYS,
     attack_range_of,
+    check_weapon_skill_gate,
     is_valid_slash_target,
+    weapon_attack_ranges,
 )
 from .production_replay import (
     ProductionReexecutionReplay,
@@ -185,8 +192,10 @@ __all__ = [
     "DodgeAdapter",
     "FormalCardRegistry",
     "HuogongAdapter",
+    "JiedaoSharenAdapter",
     "JuedouAdapter",
     "PeachAdapter",
+    "PRODUCTION_WEAPON_KEYS",
     "PRODUCTION_BASIC_CARD_KEYS",
     "PRODUCTION_BASIC_CARDS_MODE",
     "PRODUCTION_TRICK_KEYS",
@@ -208,10 +217,13 @@ __all__ = [
     "SlashAdapter",
     "TrickCardAdapter",
     "WineAdapter",
+    "WeaponCardAdapter",
     "WuxiekejiAdapter",
     "WuzhongshengyouAdapter",
     "actual_distance",
     "attack_range_of",
+    "check_weapon_skill_gate",
+    "weapon_attack_ranges",
     "is_valid_slash_target",
     "record_reference_production_batch",
     "reexecute_production_replay",

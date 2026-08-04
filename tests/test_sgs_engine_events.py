@@ -704,3 +704,73 @@ def test_chain_events_reject_extra_field(
     payload["extra"] = "多余字段"
     with pytest.raises(ValueError, match="字段必须恰好"):
         _chain_event(event_type, payload)
+
+
+# ---------------------------------------------------------------------
+# CP-04K：装备最小事件契约（equipment_equipped / removed / replaced）
+# ---------------------------------------------------------------------
+
+
+def _equipment_event(
+    event_type: EventType,
+    *,
+    instance_id: str = "sgs-mobile-20260725-138",
+    card_key: str = "sgs_weapon_qinggangjian",
+    equipment_owner: str = "p1",
+    target: str | None = None,
+    target_ids: tuple[str, ...] | None = None,
+    payload: dict[str, object] | None = None,
+) -> GameEvent:
+    return GameEvent(
+        event_type=event_type,
+        card_instance_id=instance_id,
+        card_key=card_key,
+        equipment_owner=equipment_owner,
+        target_ids=target_ids or (target or (equipment_owner or "p1"),),
+        payload=payload
+        or (
+            {"slot": "weapon", "reason": "equip"}
+            if event_type is EventType.EQUIPMENT_EQUIPPED
+            else {"slot": "weapon", "reason": "replaced"}
+            if event_type is EventType.EQUIPMENT_REMOVED
+            else {
+                "slot": "weapon",
+                "old_instance_id": "sgs-mobile-20260725-001",
+                "new_instance_id": "sgs-mobile-20260725-138",
+            }
+        ),
+    )
+
+
+def test_equipment_three_events_legal_construction() -> None:
+    equipped = _equipment_event(EventType.EQUIPMENT_EQUIPPED)
+    assert equipped.equipment_owner == "p1"
+    assert equipped.target_ids == ("p1",)
+    assert equipped.payload == {"slot": "weapon", "reason": "equip"}
+    removed = _equipment_event(EventType.EQUIPMENT_REMOVED)
+    assert removed.payload == {"slot": "weapon", "reason": "replaced"}
+    replaced = _equipment_event(EventType.EQUIPMENT_REPLACED)
+    assert replaced.payload["old_instance_id"] != replaced.payload["new_instance_id"]
+
+
+@pytest.mark.parametrize(
+    ("event_type", "override", "match"),
+    [
+        (EventType.EQUIPMENT_EQUIPPED, {"equipment_owner": None}, "必须提供equipment_owner"),
+        (EventType.EQUIPMENT_REMOVED, {"equipment_owner": None}, "必须提供equipment_owner"),
+        (EventType.EQUIPMENT_REPLACED, {"equipment_owner": None}, "必须提供equipment_owner"),
+        (EventType.EQUIPMENT_EQUIPPED, {"target_ids": ("p2",)}, "只能以装备拥有者为target"),
+        (EventType.EQUIPMENT_REMOVED, {"target_ids": ("p2",)}, "只能以装备拥有者为target"),
+        (EventType.EQUIPMENT_REPLACED, {"target_ids": ("p2",)}, "只能以装备拥有者为target"),
+        (EventType.EQUIPMENT_EQUIPPED, {"payload": {"reason": "equip"}}, "必须是正式装备栏"),
+        (EventType.EQUIPMENT_REMOVED, {"payload": {"slot": "weapon"}}, "字段必须恰好为slot与reason"),
+        (EventType.EQUIPMENT_REPLACED, {"payload": {"slot": "weapon"}}, "字段必须恰好为slot"),
+        (EventType.EQUIPMENT_EQUIPPED, {"payload": {"slot": "hand", "reason": "equip"}}, "必须是正式装备栏"),
+        (EventType.EQUIPMENT_REPLACED, {"payload": {"slot": "weapon", "old_instance_id": "a", "new_instance_id": "b", "extra": 1}}, "字段必须恰好为slot"),
+    ],
+)
+def test_equipment_events_reject_invalid_construction(
+    event_type: EventType, override: dict[str, object], match: str
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        _equipment_event(event_type, **override)  # type: ignore[arg-type]

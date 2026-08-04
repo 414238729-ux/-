@@ -81,6 +81,7 @@ from .production_cards import (
     WuxiekejiAdapter,
     WuzhongshengyouAdapter,
     SLASH_CARD_KEYS,
+    check_weapon_skill_gate,
     has_target_zone_cards,
     is_valid_shunshou_target,
     is_valid_slash_target,
@@ -102,6 +103,7 @@ class ProductionPhase(str, Enum):
     DUEL_RESPONSE = "duel_response"
     FIRE_ATTACK_REVEAL = "fire_attack_reveal"
     FIRE_ATTACK_DISCARD = "fire_attack_discard"
+    BORROWED_SWORD_CHOICE = "borrowed_sword_choice"
     NANMAN_RESPONSE = "nanman_response"
     WANJIAN_RESPONSE = "wanjian_response"
     WUGU_PICK = "wugu_pick"
@@ -118,6 +120,7 @@ BATCH_PHASES: tuple[ProductionPhase, ...] = (
     ProductionPhase.DUEL_RESPONSE,
     ProductionPhase.FIRE_ATTACK_REVEAL,
     ProductionPhase.FIRE_ATTACK_DISCARD,
+    ProductionPhase.BORROWED_SWORD_CHOICE,
     ProductionPhase.NANMAN_RESPONSE,
     ProductionPhase.WANJIAN_RESPONSE,
     ProductionPhase.WUGU_PICK,
@@ -253,6 +256,33 @@ class _PendingWugu:
     window_id: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _PendingBorrowedSword:
+    """【借刀杀人】的外层根结算挂起状态。
+
+    借刀是整个外层根；被要求使用的【杀】是其子结算。该结构不得覆盖
+    pending_slash／pending_trick／pending_chain／pending_dying 等既有
+    挂起字段，子结算结束后通过明确出口恢复本状态。``weapon_instance_id``
+    只作审计快照，不作为交付时唯一依据；``chosen_slash_instance_id``
+    只存在于权威端，私有句柄材料不进入玩家可见回放。
+    """
+
+    user_id: str
+    trick_instance_id: str
+    first_target_id: str
+    second_target_id: str
+    effect_active: bool
+    stage: str
+    weapon_instance_id: str | None = None
+    slash_choice_snapshot_digest: str | None = None
+    chosen_slash_instance_id: str | None = None
+    decision: str | None = None
+    session_id: str = ""
+    requirement_fulfilled: bool = False
+    game_over_cleanup: bool = False
+    root_discarded: bool = False
+
+
 class _ChainStepOutcome(str, Enum):
     """传导目标结算后的明确控制流结果。"""
 
@@ -293,7 +323,7 @@ class _BatchRuntime:
     current_player_id: str
     turn_number: int = 1
     phase: ProductionPhase = ProductionPhase.PLAY
-    slash_used: bool = False
+    slash_used_counts: Mapping[str, int] = MappingProxyType({})
     wine_buff_owner_id: str | None = None
     wine_buff_used_this_play_phase: bool = False
     pending_slash: _PendingSlash | None = None
@@ -321,6 +351,9 @@ class _BatchRuntime:
     group_response_handles: Mapping[str, str] = MappingProxyType({})
     group_response_snapshot_digest: str | None = None
     pending_wugu: _PendingWugu | None = None
+    pending_borrowed_sword: _PendingBorrowedSword | None = None
+    borrowed_sword_slash_handles: Mapping[str, str] = MappingProxyType({})
+    borrowed_sword_slash_snapshot_digest: str | None = None
     pending_damage_card_id: str | None = None
     pending_damage_source_id: str | None = None
     pending_damage_kill_credit: str | None = None
@@ -388,7 +421,7 @@ class _BatchRuntime:
             "current_player_id": self.current_player_id,
             "turn_number": self.turn_number,
             "phase": self.phase.value,
-            "slash_used": self.slash_used,
+            "slash_used_counts": dict(self.slash_used_counts),
             "wine_buff_owner_id": self.wine_buff_owner_id,
             "wine_buff_used_this_play_phase": self.wine_buff_used_this_play_phase,
             "pending_slash": pending,
@@ -424,7 +457,39 @@ class _BatchRuntime:
             "pending_damage_rescue_reason": self.pending_damage_rescue_reason,
             "pending_damage_death_reason": self.pending_damage_death_reason,
             "pending_chain": self._pending_chain_value(self.pending_chain),
+            "pending_borrowed_sword": self._pending_borrowed_sword_value(),
+            "borrowed_sword_slash_handles": dict(
+                self.borrowed_sword_slash_handles
+            ),
+            "borrowed_sword_slash_snapshot_digest": (
+                self.borrowed_sword_slash_snapshot_digest
+            ),
             "winner_id": self.winner_id,
+        }
+
+    def _pending_borrowed_sword_value(
+        self
+    ) -> dict[str, object] | None:
+        pending = self.pending_borrowed_sword
+        if pending is None:
+            return None
+        return {
+            "user_id": pending.user_id,
+            "trick_instance_id": pending.trick_instance_id,
+            "first_target_id": pending.first_target_id,
+            "second_target_id": pending.second_target_id,
+            "effect_active": pending.effect_active,
+            "stage": pending.stage,
+            "weapon_instance_id": pending.weapon_instance_id,
+            "slash_choice_snapshot_digest": (
+                pending.slash_choice_snapshot_digest
+            ),
+            "chosen_slash_instance_id": pending.chosen_slash_instance_id,
+            "decision": pending.decision,
+            "session_id": pending.session_id,
+            "requirement_fulfilled": pending.requirement_fulfilled,
+            "game_over_cleanup": pending.game_over_cleanup,
+            "root_discarded": pending.root_discarded,
         }
 
     def _pending_duel_value(self) -> dict[str, object] | None:
@@ -850,6 +915,157 @@ def _resolve_fire_reveal_handle(
         ):
             return instance_id
     return None
+
+
+BORROWED_SWORD_HANDLE_PREFIX = "bs_"
+BORROWED_SWORD_HANDLE_HEX_CHARS = 32
+
+
+def _borrowed_sword_slash_message(
+    session_id: str,
+    window_id: str,
+    first_target_id: str,
+    second_target_id: str,
+    snapshot_digest: str,
+    instance_id: str,
+    card_key: str,
+    stage: str,
+) -> str:
+    """构造借刀【杀】选择句柄的HMAC消息。
+
+    消息绑定会话标识、选择窗口、第一目标、第二目标、手牌快照摘要、
+    杀实体ID、卡牌键与当前阶段；保密性完全来自会话级随机秘密，消息
+    中的公开字段本身不提供保密性。
+    """
+
+    return canonical_json(
+        {
+            "session_id": session_id,
+            "borrowed_sword_slash_window": window_id,
+            "first_target_id": first_target_id,
+            "second_target_id": second_target_id,
+            "hand_snapshot_sha256": snapshot_digest,
+            "slash_instance_id": instance_id,
+            "card_key": card_key,
+            "stage": stage,
+            "execution_context": "production_basic_cards_batch:borrowed_sword_choice",
+        }
+    )
+
+
+def _borrowed_sword_slash_handle(
+    session_id: str,
+    session_secret: bytes,
+    window_id: str,
+    first_target_id: str,
+    second_target_id: str,
+    snapshot_digest: str,
+    instance_id: str,
+    card_key: str,
+    stage: str,
+) -> str:
+    """生成绑定当前借刀选择窗口的不透明【杀】选择句柄。"""
+
+    digest = hmac.new(
+        session_secret,
+        _borrowed_sword_slash_message(
+            session_id,
+            window_id,
+            first_target_id,
+            second_target_id,
+            snapshot_digest,
+            instance_id,
+            card_key,
+            stage,
+        ).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return (
+        BORROWED_SWORD_HANDLE_PREFIX
+        + digest[:BORROWED_SWORD_HANDLE_HEX_CHARS]
+    )
+
+
+def _borrowed_sword_slash_snapshot(
+    session_id: str,
+    session_secret: bytes,
+    state: GameState,
+    first_target_id: str,
+    second_target_id: str,
+    window_id: str,
+    stage: str,
+) -> tuple[Mapping[str, str], str]:
+    """生成当前选择窗口的句柄快照与手牌摘要。
+
+    只把第一目标手牌中的实体普通／火／雷【杀】纳入候选；映射只保存在
+    会话运行时与权威执行快照中，不进入玩家决策上下文、普通合法动作
+    负载或玩家可见回放导出。
+    """
+
+    hand_ids = tuple(state.card_ids_in(ZoneRef.hand(first_target_id)))
+    snapshot_digest = sha256_value(hand_ids)
+    snapshot: dict[str, str] = {}
+    for instance_id in hand_ids:
+        card_key = state.cards_by_id[instance_id].card_key
+        if card_key not in SLASH_CARD_KEYS:
+            continue
+        snapshot[
+            _borrowed_sword_slash_handle(
+                session_id,
+                session_secret,
+                window_id,
+                first_target_id,
+                second_target_id,
+                snapshot_digest,
+                instance_id,
+                card_key,
+                stage,
+            )
+        ] = instance_id
+    return MappingProxyType(snapshot), snapshot_digest
+
+
+def _resolve_borrowed_sword_slash_handle(
+    session_id: str,
+    session_secret: bytes,
+    state: GameState,
+    first_target_id: str,
+    second_target_id: str,
+    window_id: str,
+    snapshot_digest: str | None,
+    snapshot_handles: Mapping[str, str],
+    handle: object,
+    stage: str,
+) -> str | None:
+    """把借刀【杀】选择句柄解析为真实实体；任何绑定不符都返回None。"""
+
+    if snapshot_digest is None or not isinstance(handle, str):
+        return None
+    instance_id = snapshot_handles.get(handle)
+    if instance_id is None:
+        return None
+    card_key = state.cards_by_id[instance_id].card_key
+    expected = _borrowed_sword_slash_handle(
+        session_id,
+        session_secret,
+        window_id,
+        first_target_id,
+        second_target_id,
+        snapshot_digest,
+        instance_id,
+        card_key,
+        stage,
+    )
+    if not hmac.compare_digest(expected, handle):
+        return None
+    if state.location_of(instance_id) != ZoneRef.hand(first_target_id):
+        return None
+    current_digest = sha256_value(
+        tuple(state.card_ids_in(ZoneRef.hand(first_target_id)))
+    )
+    if not hmac.compare_digest(current_digest, snapshot_digest):
+        return None
+    return instance_id
 
 
 def _replace_player(
@@ -1426,6 +1642,13 @@ class ProductionBasicCardBatch:
             return runtime.rescue_order[runtime.rescue_index]
         if runtime.phase in (ProductionPhase.PLAY, ProductionPhase.END):
             return runtime.current_player_id
+        if runtime.phase is ProductionPhase.BORROWED_SWORD_CHOICE:
+            pending = runtime.pending_borrowed_sword
+            if pending is None or pending.stage != "slash_request":
+                raise ProductionBatchError(
+                    "借刀选牌阶段缺少当前选择目标"
+                )
+            return pending.first_target_id
         raise ProductionBatchError(
             f"阶段{runtime.phase.value!r}没有可行动角色"
         )
@@ -1453,7 +1676,7 @@ class ProductionBasicCardBatch:
             expected_revision=self.state.revision,
             metadata={
                 "turn_number": runtime.turn_number,
-                "slash_used": runtime.slash_used,
+                "slash_used_counts": dict(runtime.slash_used_counts),
                 "wine_buff_owner_id": runtime.wine_buff_owner_id,
                 "wine_buff_used_this_play_phase": (
                     runtime.wine_buff_used_this_play_phase
@@ -1725,6 +1948,9 @@ class ProductionBasicCardBatch:
                     payload={"operation": "pass_fire_attack_discard"},
                 )
             )
+        elif self.phase is ProductionPhase.BORROWED_SWORD_CHOICE:
+            for adapter in self._formal_registry.adapters.values():
+                actions.extend(adapter.enumerate_legal_actions(state, context))
         elif self.phase is ProductionPhase.NANMAN_RESPONSE:
             for adapter in self._formal_registry.adapters.values():
                 actions.extend(adapter.enumerate_legal_actions(state, context))
@@ -1831,6 +2057,14 @@ class ProductionBasicCardBatch:
             if operation == "use_wugu":
                 return self._formal_registry.adapter_for(
                     "sgs_trick_wugufengdeng"
+                ).apply_action(state, context, action)
+            if operation == "use_jiedao":
+                return self._formal_registry.adapter_for(
+                    "sgs_trick_jiedaosharen"
+                ).apply_action(state, context, action)
+            if operation == "use_weapon":
+                return self._formal_registry.adapter_for(
+                    action.payload.get("card_key", "")
                 ).apply_action(state, context, action)
             if action.action_type is ActionType.PASS and operation == (
                 "end_play_phase"
@@ -1952,6 +2186,16 @@ class ProductionBasicCardBatch:
                 ).apply_action(state, context, action)
             raise InvalidActionError("五谷选牌阶段不支持当前动作")
 
+        if self.phase is ProductionPhase.BORROWED_SWORD_CHOICE:
+            if operation in (
+                "choose_borrowed_sword_slash",
+                "refuse_borrowed_sword_slash",
+            ):
+                return self._formal_registry.adapter_for(
+                    "sgs_trick_jiedaosharen"
+                ).apply_action(state, context, action)
+            raise InvalidActionError("借刀选牌阶段不支持当前动作")
+
         raise ProductionBatchError(
             f"阶段{self.phase.value!r}不能应用动作"
         )
@@ -2044,6 +2288,8 @@ class ProductionBasicCardBatch:
             group_response_handles=MappingProxyType({}),
             group_response_snapshot_digest=None,
             pending_wugu=None,
+            borrowed_sword_slash_handles=MappingProxyType({}),
+            borrowed_sword_slash_snapshot_digest=None,
             pending_damage_card_id=None,
             pending_damage_source_id=None,
             pending_damage_kill_credit=None,
@@ -2274,7 +2520,7 @@ class ProductionBasicCardBatch:
         self._events.extend((finish_event,))
         if runtime.pending_chain is not None:
             return self._advance_chain(next_state, runtime)
-        return next_state, self._return_to_play(runtime)
+        return self._complete_slash_subresolution(next_state, runtime)
 
     def _apply_chain_damage_to_target(
         self,
@@ -2329,6 +2575,13 @@ class ProductionBasicCardBatch:
                 _ChainStepOutcome.FINISHED,
             )
 
+        if chain.root_card_key in SLASH_CARD_KEYS:
+            check_weapon_skill_gate(
+                state,
+                actor_id=chain.root_card_user,
+                decision="slash_damage",
+                target_id=target_id,
+            )
         next_state = _replace_player(state, target_id, hp=victim.hp - amount)
         damage_event = DamageEvent(
             target_id=target_id,
@@ -2459,7 +2712,7 @@ class ProductionBasicCardBatch:
         next_runtime = replace(runtime, pending_chain=None)
         if stop_reason == "winner":
             return state, next_runtime
-        return state, self._return_to_play(next_runtime)
+        return self._complete_slash_subresolution(state, next_runtime)
 
     def _advance_chain(
         self,
@@ -2586,7 +2839,7 @@ class ProductionBasicCardBatch:
         runtime = self._runtime
         if runtime.phase is not ProductionPhase.PLAY:
             raise InvalidActionError("【杀】只能在出牌阶段使用")
-        if runtime.slash_used:
+        if runtime.slash_used_counts.get(context.actor_id, 0) > 0:
             raise InvalidActionError("本出牌阶段已经使用过【杀】，受次数限制")
         if action.card_instance_id is None or len(action.target_ids) != 1:
             raise InvalidActionError("【杀】必须指定一张实体牌和恰好一名目标")
@@ -2600,6 +2853,16 @@ class ProductionBasicCardBatch:
             state, context.actor_id, target
         ):
             raise InvalidActionError("【杀】目标不在攻击范围内或目标非法")
+        check_weapon_skill_gate(
+            state,
+            actor_id=context.actor_id,
+            decision="use_slash",
+            target_id=target,
+            slash_card_key=adapter.card_key,
+            slash_used_count=runtime.slash_used_counts.get(
+                context.actor_id, 0
+            ),
+        )
         if state.location_of(action.card_instance_id) != ZoneRef.hand(
             context.actor_id
         ):
@@ -2623,10 +2886,14 @@ class ProductionBasicCardBatch:
         queued = self._events.extend((used_event, move_event))
         used_sequence = queued[0].sequence
         assert used_sequence is not None
+        next_counts = {**runtime.slash_used_counts,
+                       context.actor_id: runtime.slash_used_counts.get(
+                           context.actor_id, 0
+                       ) + 1}
         next_runtime = replace(
             runtime,
             phase=ProductionPhase.SLASH_RESPONSE,
-            slash_used=True,
+            slash_used_counts=MappingProxyType(next_counts),
             wine_buff_owner_id=None,
             pending_slash=_PendingSlash(
                 context.actor_id, target, action.card_instance_id, boosted
@@ -2664,6 +2931,12 @@ class ProductionBasicCardBatch:
             context.actor_id
         ):
             raise InvalidActionError("只能使用行动角色真实手牌中的实体牌")
+        check_weapon_skill_gate(
+            state,
+            actor_id=runtime.pending_slash.attacker_id,
+            decision="slash_dodged",
+            target_id=runtime.pending_slash.target_id,
+        )
 
         window = self._build_window(runtime)
         dodge_event = GameEvent(
@@ -2700,7 +2973,10 @@ class ProductionBasicCardBatch:
                 slash_finish,
             )
         )
-        self._commit_runtime(runtime, self._return_to_play(runtime))
+        next_state, next_runtime = self._complete_slash_subresolution(
+            next_state, runtime
+        )
+        self._commit_runtime(runtime, next_runtime)
         return next_state
 
     def apply_slash_damage(
@@ -2717,6 +2993,12 @@ class ProductionBasicCardBatch:
             raise InvalidActionError("当前没有待结算的【杀】")
         if context.actor_id != runtime.pending_slash.target_id:
             raise InvalidActionError("只有【杀】目标可以放弃响应")
+        check_weapon_skill_gate(
+            state,
+            actor_id=runtime.pending_slash.attacker_id,
+            decision="slash_damage",
+            target_id=runtime.pending_slash.target_id,
+        )
 
         pending = runtime.pending_slash
         slash = state.cards_by_id[pending.slash_instance_id]
@@ -2973,6 +3255,10 @@ class ProductionBasicCardBatch:
                     next_state, next_runtime = self._open_fire_attack(
                         state, runtime, trick
                     )
+                elif trick.trick_key == "sgs_trick_jiedaosharen":
+                    next_state, next_runtime = self._open_borrowed_sword(
+                        state, runtime, trick
+                    )
                 elif runtime.pending_group_trick is not None:
                     next_state, next_runtime = (
                         self._resolve_group_trick_target(state, runtime, trick)
@@ -3008,7 +3294,12 @@ class ProductionBasicCardBatch:
                     nullified_reason,
                 )
                 self._events.extend((cancelled_event, finish_event))
-                next_runtime = self._return_to_play(runtime)
+                cleared_runtime = runtime
+                if trick.trick_key == "sgs_trick_jiedaosharen":
+                    cleared_runtime = replace(
+                        runtime, pending_borrowed_sword=None
+                    )
+                next_runtime = self._return_to_play(cleared_runtime)
         else:
             next_state = state
             next_index = (runtime.trick_response_index + 1) % len(
@@ -3729,6 +4020,11 @@ class ProductionBasicCardBatch:
             context.actor_id
         ):
             raise InvalidActionError("只能打出行动角色真实手牌中的实体牌")
+        check_weapon_skill_gate(
+            state,
+            actor_id=context.actor_id,
+            decision="play_slash",
+        )
         payload = action.payload
         if str(payload.get("operation", "")) != "play_slash_for_duel":
             raise InvalidActionError("【决斗】响应动作负载无效")
@@ -4243,6 +4539,681 @@ class ProductionBasicCardBatch:
         next_runtime = self._return_to_play(runtime)
         self._commit_runtime(runtime, next_runtime)
         return next_state
+
+    # ------------------------------------------------------------------
+    # 武器牌本体与【借刀杀人】（CP-04K）
+    # ------------------------------------------------------------------
+
+    def apply_weapon_use(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: WeaponCardAdapter,
+    ) -> GameState:
+        """从手牌主动装备武器：处理区→weapon槽，同槽替换原子化。
+
+        旧武器因替换进入弃牌堆，不伪造“玩家主动弃牌”；装备、移除与
+        替换三个最小装备事件按固定顺序登记，进入事件哈希链。"""
+
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.PLAY:
+            raise InvalidActionError("武器只能在出牌阶段装备")
+        if context.actor_id != runtime.current_player_id:
+            raise InvalidActionError("只有当前回合角色可以装备武器")
+        if action.card_instance_id is None:
+            raise InvalidActionError("装备武器必须指定实体牌")
+        card = state.cards_by_id[action.card_instance_id]
+        if card.card_key != adapter.card_key:
+            raise InvalidActionError("武器动作的实体牌与适配器卡牌键不一致")
+        if str(action.payload.get("card_key", "")) != adapter.card_key:
+            raise InvalidActionError("武器动作负载与适配器卡牌键不一致")
+        if state.location_of(action.card_instance_id) != ZoneRef.hand(
+            context.actor_id
+        ):
+            raise InvalidActionError("只能装备行动角色真实手牌中的实体牌")
+        if card.card_type != "装备牌" or card.equipment_slot != "weapon":
+            raise InvalidActionError("该实体牌不是武器槽装备牌")
+        if action.target_ids != (context.actor_id,):
+            raise InvalidActionError("武器装备只能以自己为目标")
+
+        next_state, enter_event = self._move_to_processing(
+            state,
+            action.card_instance_id,
+            context.actor_id,
+            "weapon_equip:enter_processing",
+        )
+        used_event = GameEvent(
+            event_type=EventType.CARD_USED,
+            card_instance_id=action.card_instance_id,
+            card_key=adapter.card_key,
+            card_user=context.actor_id,
+            target_ids=(context.actor_id,),
+            payload={
+                "purpose": "equip",
+                "equipment_slot": "weapon",
+                "card_name": adapter.card_name,
+            },
+        )
+        self._events.extend((used_event, enter_event))
+
+        slot = ZoneRef.equipment(context.actor_id, "weapon")
+        old_ids = next_state.card_ids_in(slot)
+        if len(old_ids) > 1:
+            raise ProductionBatchError("武器槽必须至多包含一张武器牌")
+        equip_events: list[GameEvent] = []
+        if old_ids:
+            old_id = old_ids[0]
+            next_state = next_state.move_cards(
+                {
+                    old_id: DISCARD_PILE,
+                    action.card_instance_id: slot,
+                }
+            )
+            equip_events.append(
+                GameEvent(
+                    event_type=EventType.CARD_MOVED,
+                    card_instance_id=old_id,
+                    card_key=_card_key(state, old_id),
+                    card_user=context.actor_id,
+                    payload={
+                        "source": _zone_payload(slot),
+                        "destination": _zone_payload(DISCARD_PILE),
+                        "reason": "weapon_equip:replaced_old_to_discard",
+                        "equipment_slot": "weapon",
+                    },
+                )
+            )
+            equip_events.append(
+                GameEvent(
+                    event_type=EventType.EQUIPMENT_REMOVED,
+                    card_instance_id=old_id,
+                    card_key=_card_key(state, old_id),
+                    equipment_owner=context.actor_id,
+                    target_ids=(context.actor_id,),
+                    payload={"slot": "weapon", "reason": "replaced"},
+                )
+            )
+            equip_events.append(
+                GameEvent(
+                    event_type=EventType.EQUIPMENT_REPLACED,
+                    card_instance_id=action.card_instance_id,
+                    card_key=adapter.card_key,
+                    equipment_owner=context.actor_id,
+                    target_ids=(context.actor_id,),
+                    payload={
+                        "slot": "weapon",
+                        "old_instance_id": old_id,
+                        "new_instance_id": action.card_instance_id,
+                    },
+                )
+            )
+        else:
+            next_state = next_state.move_card(action.card_instance_id, slot)
+        equip_events.append(
+            GameEvent(
+                event_type=EventType.CARD_MOVED,
+                card_instance_id=action.card_instance_id,
+                card_key=adapter.card_key,
+                card_user=context.actor_id,
+                payload={
+                    "source": _zone_payload(PROCESSING_ZONE),
+                    "destination": _zone_payload(slot),
+                    "reason": "weapon_equip:equipped",
+                    "equipment_slot": "weapon",
+                },
+            )
+        )
+        equip_events.append(
+            GameEvent(
+                event_type=EventType.EQUIPMENT_EQUIPPED,
+                card_instance_id=action.card_instance_id,
+                card_key=adapter.card_key,
+                equipment_owner=context.actor_id,
+                target_ids=(context.actor_id,),
+                payload={"slot": "weapon", "reason": "equip"},
+            )
+        )
+        self._events.extend(tuple(equip_events))
+        return next_state
+
+    def apply_jiedao_use(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: JiedaoSharenAdapter,
+    ) -> GameState:
+        """使用【借刀杀人】：第一次目标检测并建立作用于第一目标的无懈链。
+
+        card_used 的 target_ids 只包含第一目标；第二目标与 purpose 以
+        公开负载记录。借刀实体由手牌进入处理区，无懈链结束后按最终生效
+        状态进入杀请求或武器交付。"""
+
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.PLAY:
+            raise InvalidActionError("【借刀杀人】只能在出牌阶段使用")
+        if context.actor_id != runtime.current_player_id:
+            raise InvalidActionError("只有当前回合角色可以使用【借刀杀人】")
+        if action.card_instance_id is None or len(action.target_ids) != 1:
+            raise InvalidActionError(
+                "使用【借刀杀人】必须指定实体牌与恰好一名第一目标"
+            )
+        card = state.cards_by_id[action.card_instance_id]
+        if card.card_key != adapter.card_key:
+            raise InvalidActionError(
+                "【借刀杀人】动作的实体牌与适配器卡牌键不一致"
+            )
+        if str(action.payload.get("card_key", "")) != adapter.card_key:
+            raise InvalidActionError("【借刀杀人】动作负载与适配器卡牌键不一致")
+        if state.location_of(action.card_instance_id) != ZoneRef.hand(
+            context.actor_id
+        ):
+            raise InvalidActionError("只能使用行动角色真实手牌中的实体牌")
+        first_target = action.target_ids[0]
+        second_target = str(action.payload.get("second_target_id", ""))
+        if first_target == context.actor_id:
+            raise InvalidActionError("第一目标不能是借刀使用者")
+        if first_target == second_target:
+            raise InvalidActionError("第一目标与第二目标不能相同")
+        first = state.players_by_id.get(first_target)
+        second = state.players_by_id.get(second_target)
+        if first is None or second is None:
+            raise InvalidActionError("借刀目标必须存在于游戏中")
+        if not first.alive or not second.alive:
+            raise InvalidActionError("借刀目标必须存活且在游戏中")
+        if not state.card_ids_in(ZoneRef.equipment(first_target, "weapon")):
+            raise InvalidActionError("第一目标必须装备武器")
+        if not is_valid_slash_target(state, first_target, second_target):
+            raise InvalidActionError(
+                "第二目标必须处于第一目标当前攻击范围内且为合法杀目标"
+            )
+
+        next_state, move_event = self._move_to_processing(
+            state, action.card_instance_id, context.actor_id, "jiedaosharen_use"
+        )
+        used_event = GameEvent(
+            event_type=EventType.CARD_USED,
+            card_instance_id=action.card_instance_id,
+            card_key=adapter.card_key,
+            card_user=context.actor_id,
+            target_ids=(first_target,),
+            payload={
+                "purpose": "force_slash_or_weapon_gain",
+                "card_name": adapter.card_name,
+                "second_target_id": second_target,
+            },
+        )
+        queued = self._events.extend((used_event, move_event))
+        used_sequence = queued[0].sequence
+        assert used_sequence is not None
+        order = (
+            runtime.current_player_id,
+            self.opponent_of(runtime.current_player_id),
+        )
+        weapon_ids = state.card_ids_in(
+            ZoneRef.equipment(first_target, "weapon")
+        )
+        weapon_instance_id = weapon_ids[0] if weapon_ids else None
+        next_runtime = replace(
+            runtime,
+            phase=ProductionPhase.TRICK_RESPONSE,
+            pending_trick=_PendingTrick(
+                context.actor_id,
+                first_target,
+                action.card_instance_id,
+                adapter.card_key,
+            ),
+            trick_effect_active=True,
+            trick_consecutive_passes=0,
+            trick_response_order=order,
+            trick_response_index=0,
+            trick_decision_count=0,
+            trick_direct_response_to=action.card_instance_id,
+            response_window_id=(
+                f"trick:{runtime.turn_number}:"
+                f"{action.card_instance_id}:dec0"
+            ),
+            response_window_order=(order[0],),
+            response_window_source_sequence=used_sequence,
+            pending_borrowed_sword=_PendingBorrowedSword(
+                user_id=context.actor_id,
+                trick_instance_id=action.card_instance_id,
+                first_target_id=first_target,
+                second_target_id=second_target,
+                effect_active=True,
+                stage="awaiting_wuxie",
+                weapon_instance_id=weapon_instance_id,
+                session_id=self._session_id,
+            ),
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+
+    def _open_borrowed_sword(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        trick: _PendingTrick,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """无懈链结束且借刀生效后的第二次动态检测与杀选择窗口。"""
+
+        pending = runtime.pending_borrowed_sword
+        if pending is None or pending.trick_instance_id != trick.trick_instance_id:
+            raise ProductionBatchError("借刀生效结算缺少挂起状态")
+        first_target = pending.first_target_id
+        second_target = pending.second_target_id
+        first = state.players_by_id.get(first_target)
+        second = state.players_by_id.get(second_target)
+        if first is None or second is None or not first.alive or not second.alive:
+            return self._borrowed_sword_weapon_gain(
+                state, runtime, decision="no_legal_slash"
+            )
+        if not is_valid_slash_target(state, first_target, second_target):
+            return self._borrowed_sword_weapon_gain(
+                state, runtime, decision="no_legal_slash"
+            )
+        hand_ids = tuple(state.card_ids_in(ZoneRef.hand(first_target)))
+        slash_candidates = [
+            instance_id
+            for instance_id in hand_ids
+            if state.cards_by_id[instance_id].card_key in SLASH_CARD_KEYS
+        ]
+        if not slash_candidates:
+            return self._borrowed_sword_weapon_gain(
+                state, runtime, decision="no_legal_slash"
+            )
+        # 武器技能门禁：任何候选杀可能受第一目标当前武器专属技能影响时
+        # 在选择窗口打开前失败关闭，不进入部分结算。
+        for instance_id in slash_candidates:
+            check_weapon_skill_gate(
+                state,
+                actor_id=first_target,
+                decision="forced_slash",
+                target_id=second_target,
+                slash_card_key=state.cards_by_id[instance_id].card_key,
+            )
+        window_id = (
+            f"borrowed_sword:{runtime.turn_number}:"
+            f"{trick.trick_instance_id}"
+        )
+        handles, digest = _borrowed_sword_slash_snapshot(
+            self._session_id,
+            self._session_secret,
+            state,
+            first_target,
+            second_target,
+            window_id,
+            "slash_request",
+        )
+        next_runtime = replace(
+            runtime,
+            phase=ProductionPhase.BORROWED_SWORD_CHOICE,
+            pending_borrowed_sword=replace(
+                pending,
+                stage="slash_request",
+                slash_choice_snapshot_digest=digest,
+            ),
+            borrowed_sword_slash_handles=handles,
+            borrowed_sword_slash_snapshot_digest=digest,
+            response_window_id=window_id,
+            response_window_order=(first_target,),
+            response_window_source_sequence=None,
+        )
+        return state, next_runtime
+
+    def enumerate_borrowed_sword_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        """枚举借刀【杀】选择窗口动作：不透明句柄选择或拒绝。
+
+        决策输入不携带实体ID、牌名、花色、点数或可识别摘要；真实实体
+        由权威引擎通过会话级HMAC句柄解析。"""
+
+        runtime = self._runtime
+        pending = runtime.pending_borrowed_sword
+        if pending is None or pending.stage != "slash_request":
+            return ()
+        if runtime.phase is not ProductionPhase.BORROWED_SWORD_CHOICE:
+            return ()
+        if context.actor_id != pending.first_target_id:
+            return ()
+        window_id = runtime.response_window_id
+        if window_id is None:
+            return ()
+        state_hash = state_sha256(canonical_state_snapshot(state))
+        base_payload: dict[str, object] = {
+            "operation": "choose_borrowed_sword_slash",
+            "trick_instance_id": pending.trick_instance_id,
+            "root_trick_instance_id": pending.trick_instance_id,
+            "user_id": pending.user_id,
+            "first_target_id": pending.first_target_id,
+            "second_target_id": pending.second_target_id,
+            "window_id": window_id,
+            "state_hash": state_hash,
+        }
+        actions: list[LegalAction] = []
+        for handle in runtime.borrowed_sword_slash_handles:
+            actions.append(
+                LegalAction(
+                    action_type=ActionType.RESPOND,
+                    actor_id=pending.first_target_id,
+                    target_ids=(pending.first_target_id,),
+                    payload={**base_payload, "handle": handle},
+                )
+            )
+        actions.append(
+            LegalAction(
+                action_type=ActionType.PASS,
+                actor_id=pending.first_target_id,
+                payload={
+                    **base_payload,
+                    "operation": "refuse_borrowed_sword_slash",
+                },
+            )
+        )
+        return tuple(actions)
+
+    def apply_borrowed_sword_slash_choice(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+    ) -> GameState:
+        """第一目标选择借刀【杀】或拒绝；选择实体只接受不透明句柄。"""
+
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.BORROWED_SWORD_CHOICE:
+            raise InvalidActionError("借刀【杀】选择只能在借刀选择窗口进行")
+        pending = runtime.pending_borrowed_sword
+        if pending is None or pending.stage != "slash_request":
+            raise InvalidActionError("当前没有打开的借刀【杀】选择窗口")
+        if context.actor_id != pending.first_target_id:
+            raise InvalidActionError("只有第一目标可以选择借刀【杀】")
+        payload = action.payload
+        if str(payload.get("trick_instance_id", "")) != (
+            pending.trick_instance_id
+        ):
+            raise InvalidActionError("借刀选择动作绑定的根锦囊与当前结算不一致")
+        if str(payload.get("root_trick_instance_id", "")) != (
+            pending.trick_instance_id
+        ):
+            raise InvalidActionError("借刀选择动作绑定的根锦囊标识不一致")
+        if str(payload.get("user_id", "")) != pending.user_id:
+            raise InvalidActionError("借刀选择动作绑定的使用者不一致")
+        if str(payload.get("first_target_id", "")) != (
+            pending.first_target_id
+        ):
+            raise InvalidActionError("借刀选择动作绑定的第一目标不一致")
+        if str(payload.get("second_target_id", "")) != (
+            pending.second_target_id
+        ):
+            raise InvalidActionError("借刀选择动作绑定的第二目标不一致")
+        if str(payload.get("window_id", "")) != runtime.response_window_id:
+            raise InvalidActionError("借刀选择窗口标识已过期")
+        if str(payload.get("state_hash", "")) != state_sha256(
+            canonical_state_snapshot(state)
+        ):
+            raise InvalidActionError("借刀选择动作绑定的状态哈希已过期")
+        operation = str(payload.get("operation", ""))
+        if operation == "refuse_borrowed_sword_slash":
+            next_state, next_runtime = self._borrowed_sword_weapon_gain(
+                state, runtime, decision="refuse"
+            )
+            self._commit_runtime(runtime, next_runtime)
+            return next_state
+        if operation != "choose_borrowed_sword_slash":
+            raise InvalidActionError("借刀选择动作负载无效")
+        # 第二次动态重检：不使用使用借刀时保存的旧合法性结果。
+        first = state.players_by_id[pending.first_target_id]
+        second = state.players_by_id.get(pending.second_target_id)
+        if not first.alive or second is None or not second.alive:
+            raise InvalidActionError(
+                "第二次检测失败：借刀目标已失效，不能使用【杀】"
+            )
+        if not is_valid_slash_target(
+            state, pending.first_target_id, pending.second_target_id
+        ):
+            raise InvalidActionError(
+                "第二次检测失败：第二目标已不在第一目标当前攻击范围内"
+            )
+        handle = payload.get("handle")
+        instance_id = _resolve_borrowed_sword_slash_handle(
+            self._session_id,
+            self._session_secret,
+            state,
+            pending.first_target_id,
+            pending.second_target_id,
+            runtime.response_window_id or "",
+            pending.slash_choice_snapshot_digest,
+            runtime.borrowed_sword_slash_handles,
+            handle,
+            "slash_request",
+        )
+        if instance_id is None:
+            raise InvalidActionError(
+                "借刀【杀】句柄无效、过期或伪造；不接受裸实体ID提交"
+            )
+        card = state.cards_by_id[instance_id]
+        if card.card_key not in SLASH_CARD_KEYS:
+            raise InvalidActionError("借刀选择实体必须是普通／火／雷【杀】")
+        if state.location_of(instance_id) != ZoneRef.hand(
+            pending.first_target_id
+        ):
+            raise InvalidActionError("借刀【杀】实体必须仍在第一目标手牌中")
+        check_weapon_skill_gate(
+            state,
+            actor_id=pending.first_target_id,
+            decision="forced_slash",
+            target_id=pending.second_target_id,
+            slash_card_key=card.card_key,
+        )
+        next_state, next_runtime = self._apply_forced_slash_use(
+            state,
+            runtime,
+            slash_instance_id=instance_id,
+            attacker_id=pending.first_target_id,
+            target_id=pending.second_target_id,
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+
+    def _apply_forced_slash_use(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        *,
+        slash_instance_id: str,
+        attacker_id: str,
+        target_id: str,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """借刀要求的正式【杀】使用子结算。
+
+        绕过“通常出杀次数上限”这一项前置检查（绕过来自借刀规则本身），
+        但仍增加第一目标自己的计数；产生第一目标自己的正常 ``card_used``，
+        正常进入闪响应、伤害、濒死、救援、死亡与属性传导。"""
+
+        pending = runtime.pending_borrowed_sword
+        if pending is None or pending.stage != "slash_request":
+            raise ProductionBatchError("强制使用杀缺少借刀挂起状态")
+        card = state.cards_by_id[slash_instance_id]
+        adapter = self._formal_registry.adapter_for(card.card_key)
+        if not isinstance(adapter, SlashAdapter):
+            raise ProductionBatchError("借刀强制使用杀必须使用【杀】生产适配器")
+        next_state, move_event = self._move_to_processing(
+            state, slash_instance_id, attacker_id, "borrowed_sword_slash_use"
+        )
+        boosted = runtime.wine_buff_owner_id == attacker_id
+        used_event = GameEvent(
+            event_type=EventType.CARD_USED,
+            card_instance_id=slash_instance_id,
+            card_key=card.card_key,
+            card_user=attacker_id,
+            target_ids=(target_id,),
+            payload={
+                "damage_nature": adapter.damage_nature,
+                "boosted": boosted,
+                "forced_use_context": "borrowed_sword",
+                "ignore_slash_use_limit": True,
+                "root_trick_instance_id": pending.trick_instance_id,
+                "root_trick_user_id": pending.user_id,
+            },
+        )
+        queued = self._events.extend((used_event, move_event))
+        used_sequence = queued[0].sequence
+        assert used_sequence is not None
+        next_counts = {
+            **runtime.slash_used_counts,
+            attacker_id: runtime.slash_used_counts.get(attacker_id, 0) + 1,
+        }
+        next_runtime = replace(
+            runtime,
+            phase=ProductionPhase.SLASH_RESPONSE,
+            slash_used_counts=MappingProxyType(next_counts),
+            wine_buff_owner_id=None,
+            pending_slash=_PendingSlash(
+                attacker_id, target_id, slash_instance_id, boosted
+            ),
+            pending_borrowed_sword=replace(
+                pending,
+                stage="slash_resolving",
+                chosen_slash_instance_id=slash_instance_id,
+                decision="use_slash",
+                requirement_fulfilled=True,
+            ),
+            borrowed_sword_slash_handles=MappingProxyType({}),
+            borrowed_sword_slash_snapshot_digest=None,
+            response_window_id=(
+                f"slash:{runtime.turn_number}:{slash_instance_id}"
+            ),
+            response_window_order=(target_id,),
+            response_window_source_sequence=used_sequence,
+        )
+        return next_state, next_runtime
+
+    def _borrowed_sword_weapon_gain(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        *,
+        decision: str,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """拒绝／无法使用杀时：动态读取第一目标当前武器并交付使用者手牌。
+
+        武器从第一目标装备区直接进入借刀使用者手牌，不经过第一目标手牌、
+        不进入使用者装备区、不触发装备替换；无武器或使用者已死亡时记录
+        ``no_weapon_to_transfer`` 且不移动任何牌。"""
+
+        pending = runtime.pending_borrowed_sword
+        if pending is None:
+            raise ProductionBatchError("借刀武器交付缺少挂起状态")
+        if pending.root_discarded or pending.stage in ("finishing", "finished"):
+            raise ProductionBatchError("借刀结算不能重复执行武器交付")
+        user = state.players_by_id[pending.user_id]
+        weapon_ids = state.card_ids_in(
+            ZoneRef.equipment(pending.first_target_id, "weapon")
+        )
+        next_state = state
+        events: list[GameEvent] = []
+        no_weapon_to_transfer = False
+        if not weapon_ids or not user.alive:
+            no_weapon_to_transfer = True
+        else:
+            weapon_id = weapon_ids[0]
+            destination = ZoneRef.hand(pending.user_id)
+            source = ZoneRef.equipment(pending.first_target_id, "weapon")
+            next_state = state.move_card(weapon_id, destination)
+            card_key = _card_key(state, weapon_id)
+            events.append(
+                GameEvent(
+                    event_type=EventType.CARD_MOVED,
+                    card_instance_id=weapon_id,
+                    card_key=card_key,
+                    card_user=pending.user_id,
+                    target_ids=(pending.first_target_id,),
+                    payload={
+                        "source": _zone_payload(source),
+                        "destination": _zone_payload(destination),
+                        "reason": "jiedaosharen_weapon_gain",
+                        "trick_instance_id": pending.trick_instance_id,
+                        "movement": "gain_direct",
+                    },
+                )
+            )
+            events.append(
+                GameEvent(
+                    event_type=EventType.CARD_LOST,
+                    card_instance_id=weapon_id,
+                    card_key=card_key,
+                    target_ids=(pending.first_target_id,),
+                    payload={
+                        "reason": "jiedaosharen_weapon_gain",
+                        "source_zone": _zone_id(source),
+                        "trick_instance_id": pending.trick_instance_id,
+                    },
+                )
+            )
+            events.append(
+                GameEvent(
+                    event_type=EventType.CARD_GAINED,
+                    card_instance_id=weapon_id,
+                    card_key=card_key,
+                    target_ids=(pending.user_id,),
+                    payload={
+                        "reason": "jiedaosharen_weapon_gain",
+                        "source_zone": _zone_id(source),
+                        "trick_instance_id": pending.trick_instance_id,
+                    },
+                )
+            )
+        self._events.extend(tuple(events))
+        next_state, finish_event = self._finish_processing(
+            next_state,
+            pending.trick_instance_id,
+            "jiedaosharen_finished",
+            extra={
+                "decision": decision,
+                "no_weapon_to_transfer": no_weapon_to_transfer,
+                "weapon_delivered": not no_weapon_to_transfer,
+            },
+        )
+        self._events.extend((finish_event,))
+        base_runtime = self._return_to_play(runtime)
+        next_runtime = replace(base_runtime, pending_borrowed_sword=None)
+        return next_state, next_runtime
+
+    def _complete_slash_subresolution(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """杀子结算完成出口：普通路径返回出牌阶段；借刀路径完成要求。
+
+        成功使用【杀】即视为履行借刀要求（即使被闪抵消、未造成伤害、
+        目标死亡、进入濒死救援或属性传导），不再交武器；根借刀只弃置
+        一次并清理挂起状态。"""
+
+        pending = runtime.pending_borrowed_sword
+        if pending is not None and pending.stage == "slash_resolving":
+            if pending.root_discarded:
+                raise ProductionBatchError("借刀根锦囊不能重复弃置")
+            next_state, finish_event = self._finish_processing(
+                state,
+                pending.trick_instance_id,
+                "jiedaosharen_fulfilled",
+                extra={
+                    "decision": pending.decision,
+                    "chosen_slash_instance_id": pending.chosen_slash_instance_id,
+                    "requirement_fulfilled": True,
+                },
+            )
+            self._events.extend((finish_event,))
+            base_runtime = self._return_to_play(runtime)
+            next_runtime = replace(base_runtime, pending_borrowed_sword=None)
+            return next_state, next_runtime
+        return state, self._return_to_play(runtime)
 
     # ------------------------------------------------------------------
     # 群体普通锦囊：逐目标结算状态机（【南蛮入侵】【万箭齐发】【桃园结义】）
@@ -5640,6 +6611,14 @@ class ProductionBasicCardBatch:
             )
         if state.location_of(instance_id) != ZoneRef.hand(context.actor_id):
             raise InvalidActionError("只能打出行动角色真实手牌中的实体牌")
+        if adapter.card_key == "sgs_trick_nanmanruqin":
+            # 【南蛮入侵】要求打出【杀】：丈八蛇矛等打出转化可能改变
+            # 合法响应集合，在首次判断前失败关闭。
+            check_weapon_skill_gate(
+                state,
+                actor_id=context.actor_id,
+                decision="play_slash",
+            )
 
         played_event = GameEvent(
             event_type=EventType.CARD_PLAYED,
@@ -5984,7 +6963,9 @@ class ProductionBasicCardBatch:
                 )
                 pending_events.append(finish_event)
                 self._events.extend(pending_events)
-                next_runtime = self._return_to_play(runtime)
+                next_state, next_runtime = self._complete_slash_subresolution(
+                    next_state, runtime
+                )
         else:
             self._events.extend(pending_events)
             decision_count = runtime.rescue_decision_count + 1
@@ -6077,7 +7058,9 @@ class ProductionBasicCardBatch:
                 )
                 pending_events.append(finish_event)
                 self._events.extend(pending_events)
-                next_runtime = self._return_to_play(runtime)
+                next_state, next_runtime = self._complete_slash_subresolution(
+                    next_state, runtime
+                )
         else:
             self._events.extend(pending_events)
             decision_count = runtime.rescue_decision_count + 1
@@ -6148,7 +7131,9 @@ class ProductionBasicCardBatch:
                 self._pending_damage_rescue_reason(runtime),
             )
             self._events.extend((finish_event,))
-            next_runtime = self._return_to_play(runtime)
+            next_state, next_runtime = self._complete_slash_subresolution(
+                next_state, runtime
+            )
             self._commit_runtime(runtime, next_runtime)
             return next_state
         if runtime.pending_wugu is not None:
@@ -6180,6 +7165,23 @@ class ProductionBasicCardBatch:
                 self._pending_damage_death_reason(runtime),
             )
             finish_events = [finish_event]
+        borrowed = runtime.pending_borrowed_sword
+        if (
+            borrowed is not None
+            and borrowed.stage == "slash_resolving"
+            and not borrowed.root_discarded
+        ):
+            # 终局清理：根借刀从处理区确定性进入弃牌堆，不遗留处理区。
+            next_state, borrowed_finish = self._finish_processing(
+                next_state,
+                borrowed.trick_instance_id,
+                "jiedaosharen_victory_cleanup",
+                extra={
+                    "game_over_cleanup": True,
+                    "requirement_fulfilled": True,
+                },
+            )
+            finish_events = [*finish_events, borrowed_finish]
         next_state = _replace_player(next_state, dying_id, alive=False)
         winner = self.opponent_of(dying_id)
         damage_source = self._pending_damage_source(runtime)
@@ -6231,6 +7233,9 @@ class ProductionBasicCardBatch:
             group_response_handles=MappingProxyType({}),
             group_response_snapshot_digest=None,
             pending_wugu=None,
+            pending_borrowed_sword=None,
+            borrowed_sword_slash_handles=MappingProxyType({}),
+            borrowed_sword_slash_snapshot_digest=None,
             pending_damage_card_id=None,
             pending_damage_source_id=None,
             pending_damage_kill_credit=None,
@@ -6275,7 +7280,9 @@ class ProductionBasicCardBatch:
             current_player_id=next_player,
             turn_number=runtime.turn_number + 1,
             phase=ProductionPhase.PLAY,
-            slash_used=False,
+            slash_used_counts=MappingProxyType(
+                {**runtime.slash_used_counts, next_player: 0}
+            ),
             wine_buff_owner_id=None,
             wine_buff_used_this_play_phase=False,
             pending_slash=None,

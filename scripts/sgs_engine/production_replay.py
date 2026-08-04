@@ -213,6 +213,7 @@ _HEADER_FIELDS = {
     "initial_event_count",
     "initial_execution_hash",
     "initial_game_state_hash",
+    "fixture_applied",
 }
 _DECISION_FIELDS = {
     "index",
@@ -548,6 +549,7 @@ def record_reference_production_batch(
     shuffle: bool = True,
     controller: Any | None = None,
     max_steps: int = 500,
+    fixture: Any | None = None,
 ) -> ProductionReexecutionReplay:
     """运行确定性控制器并记录一局可严格重执行的生产基本牌批次。"""
 
@@ -561,6 +563,11 @@ def record_reference_production_batch(
         initial_hand_count=initial_hand_count,
         shuffle=shuffle,
     )
+    if fixture is not None:
+        # 测试与编排专用：在初始装配后、任何决策前应用确定性夹具；
+        # 夹具必须只使用不可变 GameState 与正式牌区移动接口，且重执行
+        # 时传入同一夹具必须得到相同初始状态。
+        fixture(game)
     authoritative_private = {
         "schema": AUTHORITATIVE_PRIVATE_SCHEMA,
         "session_id": game.session_id,
@@ -597,6 +604,7 @@ def record_reference_production_batch(
         "initial_event_count": len(game.events),
         "initial_execution_hash": _execution_hash(game),
         "initial_game_state_hash": _game_state_hash(game),
+        "fixture_applied": fixture is not None,
     }
     decisions: list[dict[str, object]] = []
     while not game.is_finished:
@@ -708,6 +716,7 @@ def _compare_sequence(
 
 def reexecute_production_replay(
     record: ProductionReexecutionReplay,
+    fixture: Any | None = None,
 ) -> ProductionReplayVerificationResult:
     """从配置重新执行规则并严格验证每项决策、随机、事件和状态。"""
 
@@ -737,6 +746,16 @@ def reexecute_production_replay(
         session_id=session_id,
         session_secret=session_secret,
     )
+    if header.get("fixture_applied") is True:
+        if fixture is None:
+            raise ProductionReplayFormatError(
+                "该回放录制时应用了确定性夹具；重执行必须传入同一夹具"
+            )
+        fixture(game)
+    elif fixture is not None:
+        raise ProductionReplayFormatError(
+            "回放录制时未应用夹具；重执行不得额外应用夹具"
+        )
     live_ruleset = _ruleset_value(game)
     _expect_equal("engine", None, header["engine_version"], ENGINE_VERSION, "引擎版本不一致")
     _expect_equal(

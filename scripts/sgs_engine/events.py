@@ -14,6 +14,8 @@ import math
 from types import MappingProxyType
 from typing import Iterable, Mapping
 
+from .model import EQUIPMENT_SLOTS
+
 
 class EventType(str, Enum):
     """规则核心可观察的基础事件类型。"""
@@ -39,6 +41,9 @@ class EventType(str, Enum):
     CHAIN_DAMAGE_STARTED = "chain_damage_started"
     CHAIN_TARGET_RESOLVED = "chain_target_resolved"
     CHAIN_DAMAGE_FINISHED = "chain_damage_finished"
+    EQUIPMENT_EQUIPPED = "equipment_equipped"
+    EQUIPMENT_REMOVED = "equipment_removed"
+    EQUIPMENT_REPLACED = "equipment_replaced"
 
 
 def _validate_id(value: object, field_name: str) -> None:
@@ -321,6 +326,47 @@ def validate_event_contract(event: GameEvent) -> GameEvent:
             raise ValueError("展示牌事件必须提供实体牌ID与card_key")
         if not event.target_ids:
             raise ValueError("展示牌事件必须至少指定一名相关角色")
+    if event.event_type in (
+        EventType.EQUIPMENT_EQUIPPED,
+        EventType.EQUIPMENT_REMOVED,
+        EventType.EQUIPMENT_REPLACED,
+    ):
+        if event.card_instance_id is None:
+            raise ValueError(f"{event.event_type.value}事件必须提供card_instance_id")
+        if event.equipment_owner is None:
+            raise ValueError(f"{event.event_type.value}事件必须提供equipment_owner")
+        if (
+            len(event.target_ids) != 1
+            or event.target_ids[0] != event.equipment_owner
+        ):
+            raise ValueError(
+                f"{event.event_type.value}事件必须且只能以装备拥有者为target"
+            )
+        slot = event.payload.get("slot")
+        if not isinstance(slot, str) or slot not in EQUIPMENT_SLOTS:
+            raise ValueError(
+                f"{event.event_type.value}事件payload.slot必须是正式装备栏"
+            )
+    if event.event_type is EventType.EQUIPMENT_EQUIPPED:
+        if set(event.payload) != {"slot", "reason"}:
+            raise ValueError(
+                "装备事件payload字段必须恰好为slot与reason"
+            )
+    if event.event_type is EventType.EQUIPMENT_REMOVED:
+        if set(event.payload) != {"slot", "reason"}:
+            raise ValueError(
+                "装备移除事件payload字段必须恰好为slot与reason"
+            )
+    if event.event_type is EventType.EQUIPMENT_REPLACED:
+        if set(event.payload) != {
+            "slot",
+            "old_instance_id",
+            "new_instance_id",
+        }:
+            raise ValueError(
+                "装备替换事件payload字段必须恰好为slot、"
+                "old_instance_id与new_instance_id"
+            )
     if event.event_type is EventType.LOSE_HP:
         if len(event.target_ids) != 1:
             raise ValueError("失去体力事件必须且只能指定一名目标角色")

@@ -41,7 +41,9 @@
     "chain_damage_infrastructure_implement_commit_note": "属性伤害传导生产基础设施（CP-04J）已由用户在外部PowerShell创建真实实现提交：提交信息为 feat: implement production chain damage infrastructure，完整提交哈希为 c094bff5dab127917e8d0b9a2d3422e3ab736783；检查点文档提交 55228c9d464daac6eb061ba356b0497ec814eba6（docs: record chain damage infrastructure checkpoint）；审计残项关闭提交 68e419b79e379184c1f1cc7ad650039771530f89（fix: close chain damage audit gaps）；2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED，审计残项 N1-N4 已由审计残项关闭提交正式关闭",
     "chain_damage_infrastructure_checkpoint_commit": "55228c9d464daac6eb061ba356b0497ec814eba6",
     "chain_damage_infrastructure_audit_close_commit": "68e419b79e379184c1f1cc7ad650039771530f89",
-    "chain_damage_infrastructure_audit_close_note": "CP-04J 最终独立复审结论 AUDIT_PASSED（2026-08-04）；初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES；审计残项 N1-N4 已由提交 68e419b79e379184c1f1cc7ad650039771530f89（fix: close chain damage audit gaps）正式关闭；里程碑标签 milestone-b2-chain-damage-infrastructure-audited 为本次最终文档提交后由用户立即建立的标签名称（本轮未执行 git tag、未验证标签已存在）"
+    "chain_damage_infrastructure_audit_close_note": "CP-04J 最终独立复审结论 AUDIT_PASSED（2026-08-04）；初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES；审计残项 N1-N4 已由提交 68e419b79e379184c1f1cc7ad650039771530f89（fix: close chain damage audit gaps）正式关闭；里程碑标签 milestone-b2-chain-damage-infrastructure-audited 为本次最终文档提交后由用户立即建立的标签名称（本轮未执行 git tag、未验证标签已存在）",
+    "cp04k_worktree_branch": "deepseek-borrowed-sword-weapon-system",
+    "cp04k_worktree_branch_note": "本批（【借刀杀人】＋11种武器牌本体，CP-04K）实现所在工作树分支；该分支上的本批代码尚未由用户提交，当前 HEAD 仍为基线 3ea01f4e8603dd96698a2e5deee09c1e9b3fccef"
   },
   "feature_status": {
     "authoritative_core_foundation": true,
@@ -57,7 +59,8 @@
     "production_duel_fire_attack_batch": true,
     "production_group_target_trick_batch": true,
     "production_remaining_ordinary_trick_batch": true,
-    "production_chain_damage_infrastructure": true
+    "production_chain_damage_infrastructure": true,
+    "production_borrowed_sword_weapon_system": true
   },
   "stage_status": {
     "1_source_and_callchain_audit": "passed",
@@ -223,23 +226,34 @@
         "milestone_tag_note": "本次最终文档提交后由用户立即在外部PowerShell建立的标签名称；本轮未执行 git tag，未验证标签已存在；用户建立标签后该字段即与 Git 状态完全一致",
         "final_status": "audited"
       }
+    },
+    {
+      "id": "CP-04K-PRODUCTION-BORROWED-SWORD-WEAPON-SYSTEM",
+      "status": "worktree_complete_pending_user_commit",
+      "commit": null,
+      "commit_note": "代码与测试已在当前工作树完成，尚未由用户在外部PowerShell提交真实Git提交；未进行独立只读审计",
+      "independent_audit_done": false,
+      "audit_conclusion": "NOT_AUDITED_YET",
+      "milestone_tag": null,
+      "evidence": "scripts/sgs_engine/production_cards.py、scripts/sgs_engine/production_batch.py、scripts/sgs_engine/events.py、scripts/sgs_engine/production_replay.py、tests/test_sgs_production_borrowed_sword_weapon_system.py、tests/test_sgs_engine_events.py；正式160张牌堆【借刀杀人】＋11种武器牌本体批次",
+      "scope": "formal；【借刀杀人】2张完整双人生产语义与11种武器12张牌本体接入生产注册表与权威核心；两次目标检测、强制使用【杀】与按角色出杀计数、武器直接进入使用者手牌、装备三事件、挂起与终局清理、武器专属技能集中式失败关闭门禁；不构成武器技能完成、装备全部完成、多人借刀完成、正式单挑完成或里程碑B完成"
     }
   ],
   "final_verification": {
     "pytest": {
-      "command": ".\\\\.venv\\\\Scripts\\\\python.exe -m pytest -q -p no:cacheprovider",
-      "passed": 1543,
+      "command": ".\\venv\\Scripts\\python.exe -m pytest -q -p no:cacheprovider",
+      "passed": 1635,
       "failed": 0,
       "skipped": 0,
-      "note": "1543=1503+40：CP-04J 审计残项关闭新增40项（tests/test_sgs_engine_events.py 链事件契约36项、tests/test_sgs_production_chain_damage.py prevented_zero 控制流与文档检查4项）；1503=1463+40 为 CP-04J 实现提交时验收；1463=1454+9 为 CP-04I 审计三个非阻塞问题关闭新增的回归测试"
+      "note": "1635=1543+92：CP-04K 新增80项借刀＋武器专项（tests/test_sgs_production_borrowed_sword_weapon_system.py）与12项装备事件契约测试（tests/test_sgs_engine_events.py）"
     },
     "compileall": {
       "command": ".\\\\.venv\\\\Scripts\\\\python.exe -m compileall -q scripts tests",
       "passed": true
     },
     "source_integrity": {
-      "command": ".\\\\.venv\\\\Scripts\\\\python.exe -m scripts.sgs_source_integrity_audit . --fail-on-defect",
-      "scanned_python_files": 116,
+      "command": ".\\venv\\Scripts\\python.exe -m scripts.sgs_source_integrity_audit . --fail-on-defect",
+      "scanned_python_files": 117,
       "defect_count": 0,
       "audit_item_count": 55
     },
@@ -290,7 +304,6 @@
     "milestone_b_blockers": [
       "Knowledge未闭合正式160张无技能单挑的适用范围、同将许可与首轮摸牌修正（基本牌批次已锁定双人、先手摸2约定）",
       "AuthoritativeCoreSession.run_game仍明确抛出UnsupportedRuleError",
-      "借刀杀人仍无生产实现：依赖尚未实现的装备系统（武器牌适配器、装备攻击范围、正式装备状态注入边界），等待装备生产切片（CP-04K）；借刀出杀次数口径已于2026-08-04按用户移动版实测修正：响应借刀使用【杀】不受本出牌阶段已用杀次数的前置限制、该次使用成功后正常产生card_used并计入次数、仅次数用尽不构成无合法杀（CP-04K必测清单见Knowledge 4.6.2）；铁索连环完整语义（含属性伤害传导）已由CP-04J完成",
       "观看、亮牌及判定彻底耗尽仍是分析约定，不能用于approximation_count=0的正式入口",
       "尚无正式160张单挑100-seed验收运行器",
       "38种正式卡牌定义中六种基本牌、【无中生有】／【无懈可击】／【过河拆桥】／【顺手牵羊】／【决斗】／【火攻】／【南蛮入侵】／【万箭齐发】／【桃园结义】／【五谷丰登】已建立生产规则适配器，【铁索连环】已接入完整语义（6张实体，含属性伤害传导）；其余21种（借刀、3种延时锦囊、17种装备）仍未建立",
@@ -529,40 +542,74 @@
       "multi_player_production_proven": false,
       "approximation_count": 0,
       "audit_closure_note": "N1-N4 已由提交 68e419b79e379184c1f1cc7ad650039771530f89（fix: close chain damage audit gaps）正式关闭：stopped_winner 非合法 result；三个链事件完整字段集／类型／枚举／组合校验；prevented_zero 采用 CONTINUE/FINISHED/PAUSED 控制流并立即结束传导；Knowledge 保留 CP-04I 历史并追加 CP-04J 当前双人生产范围说明（三人以上 NOT PROVEN，prevented_zero 无正式减伤路径端到端证明）"
+    },
+    "production_borrowed_sword_weapon_system": {
+      "implemented": true,
+      "tested": true,
+      "card_types_complete": 18,
+      "complete_entities": 128,
+      "adapter_card_kinds": 29,
+      "adapter_entities": 140,
+      "remaining_unimplemented_card_keys": 9,
+      "remaining_normal_tricks": 0,
+      "weapon_card_kinds": 11,
+      "weapon_card_entities": 12,
+      "weapon_skill_complete": 0,
+      "jiedao_entities": 2,
+      "slash_used_counts_per_role": true,
+      "weapon_skill_gate": "check_weapon_skill_gate_fail_closed",
+      "handle_mechanism": "hmac_sha256_session_secret_borrowed_sword_window",
+      "test_only_adapters_in_production_registry": false,
+      "fallback_for_unimplemented": false,
+      "unsupported_rules": 1,
+      "approximation_count": 0,
+      "reexecution_replay_supported": true,
+      "formal_result": false,
+      "milestone_b_complete": false,
+      "authoritative_full_game_core": false,
+      "formal_run_ready": false,
+      "formal_duel_no_skill_ready": false,
+      "multi_player_production_proven": false,
+      "worktree_commit_pending": true,
+      "independent_audit_done": false,
+      "audit_conclusion": "NOT_AUDITED_YET",
+      "milestone_tag": null
     }
   },
   "sha256": {
-    "docs/ENGINE_STATUS.md": "96d478bf3384d5d13882b1498263b8bedcd024762304084c967e647a30ab5565",
-    "docs/IMPLEMENTATION_MATRIX.md": "6df2ee189c2809adf0a20081acf0b6ab154f2550d4c805fbf209579434ae509c",
+    "docs/ENGINE_STATUS.md": "d68a7d3c66f82e418805ddb6939d330dac195eae865307bf3ebb63b1cbd3ef3f",
+    "docs/IMPLEMENTATION_MATRIX.md": "2c1ede491162a1169ca82486abefc542b137f6e88e69802bd76a33343fc9b2e0",
     "docs/LEGACY_RESULTS_INVALID.md": "267d51329b65b4435ed770b9fe90a0d53148d17cc9b0dae3e6d3406b06c0c0cc",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "81037dbf36f96c76c2c9cafc3af934e697fa52f8ef1d5a1b80238fd7750aec2c",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "34945a235600843fe39b8e73939927c0e0d6b899b96c46ba53219176ceb87e26",
     "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "23b56a0edf0c85657b332100538013de16be4d71ea6a8214ac862a6708105af6",
     "knowledge/三国杀牌堆数据.csv": "8cb8da4177f11962776ae0f7e0154ed4ce56e293e96ac457874d48650517de18",
     "scripts/sgs_dev_runner.py": "6f88baa78fc9c22106188defda7190cd2a4412325db46f3964d217fd0e61c755",
-    "scripts/sgs_engine/__init__.py": "eb6ce59ef061b410940cbcce4e6688585b52f67f0e4599e82747e6eaaef8edb1",
+    "scripts/sgs_engine/__init__.py": "caa0053001c3543b2601a69a4b41988895656d7133e7edb238c39d47530e6a39",
     "scripts/sgs_engine/actions.py": "92c76be32afa52a79f76e8439ec95a1dff04e1df2592966b461681ae7b346fff",
     "scripts/sgs_engine/duel.py": "4e2b716e68346948b8b50fc09bac2c0160f30f43410b09aa7e6f7caaebf01218",
     "scripts/sgs_engine/duel_replay.py": "99661777d171928d6c8c0a12ff45da7bf4b051a2f26a21ae78424068a1fc1231",
     "scripts/sgs_engine/engine.py": "1a983ef03cc607644d27ac1902c961e687f1eab254679c81a6ab2e5235d824c7",
-    "scripts/sgs_engine/events.py": "a3fb22b0a7b1b4e821a47e84246cfa44a48b885872f2c473174e929b839f0f07",
+    "scripts/sgs_engine/events.py": "acfa87be1b9fde5f15121eda000816a3c096bde332932a0e0f38272e71f5a525",
     "scripts/sgs_engine/model.py": "54e9ddaacbd57bed216e5a98cbfded9ce1b89fe5a94b8141e6d77c46d3d9f014",
-    "scripts/sgs_engine/production_batch.py": "11f700d6c902058f1fc8b11a12fdcdce51a046f502750808e398621bc0979b69",
-    "scripts/sgs_engine/production_cards.py": "6573535168377eec5f116e4f633de7d4410a9ffd1d16ee5a22401f64792b2f6a",
-    "scripts/sgs_engine/production_replay.py": "ddafa7ddfb26cd097140d252ec3281cc5c4a04d77f5c271ac9827e78e5b45459",
+    "scripts/sgs_engine/production_batch.py": "8fc1924d1516bdd590b220c7b4a27dc494d1531c712b773ed0b16fd516b4bdee",
+    "scripts/sgs_engine/production_cards.py": "0f70f3972a10722f4aaa4b10371c6f9f7bee190fc3085e4069e6cda54c8c397f",
+    "scripts/sgs_engine/production_replay.py": "a9d6f70454d2da280e82be6f771b87dfb91fd649dcdcdc0f92a0e3f46911ddae",
     "scripts/sgs_engine/replay.py": "27cd09a98e9ea09d03a6de3542d13abc94341fde4d33a5fdc5e8bdc5497580b1",
     "scripts/sgs_engine/rng.py": "3cb67017556535802c2b323e8002217961955ffee7ff161de85d804d86d5ead6",
     "scripts/sgs_engine_gate.py": "acdfa735982f234462080de4b4137e1b1f3cfcadb709b7258ffb73c4aeb2e925",
     "scripts/sgs_formal_runner.py": "840aa483354a80bcb8867c197352d34f32f985a92cb2287dc2593812c0260be2",
     "scripts/sgs_source_integrity_audit.py": "046aa2a68ed3c3da6df0e8ee9389fe27f8ff4120bc4475f8317fec5a899d8909",
-    "tests/test_sgs_production_basic_cards.py": "948bbea68f4a44ffea198db8d4f23a82140f11a40945e6ba5d7ac7411beb6095",
-    "tests/test_sgs_production_duel_fire_attack.py": "07cca8acbde155cca4cf2463fb95c153e29111eb7d6b81587875d4f85817fde5",
-    "tests/test_sgs_production_group_target_tricks.py": "60e98647fb67ab9d69b8058835585040502abb814e11b51e4bad15237ca0ac00",
+    "tests/test_sgs_production_basic_cards.py": "1ded98bc5697befe705169f66c02dcd9130d9610b98de8d47ac9d09342f80718",
+    "tests/test_sgs_production_duel_fire_attack.py": "b8b6c172c6252c99cf2fbd9a33441c924a72c611b46ceda5762b38616c5028ac",
+    "tests/test_sgs_production_group_target_tricks.py": "edd375185e5c0f7e1cacc6aba2f446f20df2a9b08f596b31e0ed1a25bccab609",
     "tests/test_sgs_production_hidden_handle_security.py": "ff372c1e5a3005a680e05eb8f34025f18962a0384caacc919574197e8dbb7f4f",
-    "tests/test_sgs_production_single_target_tricks.py": "741db6fcd08db02de258215043c55aa7cc73248bdbca51e7ad827c54af5d2444",
-    "tests/test_sgs_production_zone_target_tricks.py": "5be49acce056f9cd5d52fd06776523cab8ffa4b5979c6f954de3db0ffccfba37",
-    "hash_note": "本表以Git跟踪内容的规范化blob字节为权威（UTF-8无BOM）；不以不同平台检出的CRLF/LF工作树原始字节为权威；Windows core.autocrlf导致的行尾差异不视为内容漂移；CHECKPOINT_MANIFEST.json不包含自身哈希；仅作状态记录，不参与门禁校验",
+    "tests/test_sgs_production_single_target_tricks.py": "c2a4d9902a92e05a743b46062b745605b3b666cec43bd56eb38ca4ed5662a220",
+    "tests/test_sgs_production_zone_target_tricks.py": "8a3e87d9bea0470eb5c0d85bb77bb9d19d7b00e20d952df750281004cb2ce240",
+    "hash_note": "本表为当前工作树文件按Git规范化blob字节（core.autocrlf=true，CRLF统一为LF，UTF-8无BOM）计算的SHA-256；仅作状态记录，不参与门禁校验；docs/CHECKPOINT_MANIFEST.json自身不进入本表",
     "tests/test_sgs_production_chain_damage.py": "bde1176d5495556efc77db02ff21b48d53313a8f350647b760f584bd4b328811",
     "tests/test_sgs_production_remaining_ordinary_tricks.py": "fe1650350a56c228ed5e9cef41c4f294356d63e1fe898a71e2e4eb16470a6cdd",
-    "knowledge/三国杀卡牌效果.md": "329ffdfb21a990a029fca82d856ae06c68701284a6654ce06e642d1d653c272b"
+    "knowledge/三国杀卡牌效果.md": "e8c78df783d95ff5969903aa0a34ad3ea685ca3bc720f196db56b30ce5fe6442",
+    "tests/test_sgs_engine_events.py": "ad44b796857fec4a6a81ba4a574dbb6f0b5424193de8d76389294095e624cfaf",
+    "tests/test_sgs_production_borrowed_sword_weapon_system.py": "f03cba924662d9f48bb6ff835d655a49d6792c141b72c33476e9b4c8b977458a"
   }
 }

@@ -353,8 +353,8 @@ def test_implemented_and_remaining_card_counts_updated() -> None:
     game = _fresh(3)
     registry = game.formal_registry
     assert {NANMAN, WANJIAN, TAOYUAN} <= set(registry.implemented_card_keys)
-    assert len(registry.implemented_card_keys) == 17
-    assert len(registry.unimplemented_card_keys) == 21
+    assert len(registry.implemented_card_keys) == 29
+    assert len(registry.unimplemented_card_keys) == 9
     assert {NANMAN, WANJIAN, TAOYUAN} <= set(PRODUCTION_TRICK_KEYS)
     assert set(GROUP_TRICK_KEYS) == {NANMAN, WANJIAN, TAOYUAN}
     assert (
@@ -362,14 +362,14 @@ def test_implemented_and_remaining_card_counts_updated() -> None:
             len(registry.instances_of(key))
             for key in registry.implemented_card_keys
         )
-        == 126
+        == 140
     )
 
 
 def test_other_unimplemented_cards_stay_fail_closed() -> None:
     game = _fresh(3)
     registry = game.formal_registry
-    for key in ("sgs_trick_jiedaosharen",):
+    for key in ("sgs_delayed_lebusi",):
         assert key in registry.unimplemented_card_keys
         with pytest.raises(UnsupportedRuleError):
             registry.adapter_for(key)
@@ -854,7 +854,7 @@ def test_nanman_slash_is_played_not_used() -> None:
     assert played[0].payload["counts_for_use_or_play_total"] is True
     assert played[0].payload["response_action"] == "play"
     assert not any(event.card_instance_id == sha_id for event in used)
-    assert game.runtime.slash_used is False
+    assert not game.runtime.slash_used_counts
 
 
 def test_nanman_slash_full_zone_lifecycle() -> None:
@@ -1147,7 +1147,7 @@ def test_wanjian_jink_is_played_not_used() -> None:
     assert played[0].payload["counts_for_use_or_play_total"] is True
     assert played[0].payload["response_action"] == "play"
     assert not any(event.card_instance_id == jink_id for event in used)
-    assert game.runtime.slash_used is False
+    assert not game.runtime.slash_used_counts
 
 
 def test_wanjian_jink_full_zone_lifecycle() -> None:

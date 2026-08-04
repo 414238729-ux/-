@@ -1,7 +1,7 @@
 # 三国杀正式引擎状态
 
 > 更新日期：2026-08-04
-> 状态：已有权威核心 foundation、测试专用最小单挑纵向切片、正式160张牌堆上六种基本牌的生产适配器批次、最小普通锦囊垂直切片（【无中生有】、【无懈可击】），以及目标区域选牌批次（【过河拆桥】6张、【顺手牵羊】5张接入生产适配器），以及伤害型普通锦囊批次（【决斗】3张、【火攻】3张接入生产适配器，2026-08-03已通过独立只读审计AUDIT_PASSED_WITH_NONBLOCKING_ISSUES），以及群体普通锦囊批次（【南蛮入侵】3张、【万箭齐发】1张、【桃园结义】1张接入生产适配器并建立逐目标结算框架，已由用户在外部PowerShell提交（实现提交哈希 `5f2fbf27b7041bbf3010636de37306eea5da6256`），2026-08-03 完成独立只读审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED），以及剩余普通锦囊批次（【五谷丰登】2张完整生产语义＋【铁索连环】6张牌本体接入生产适配器，已由用户在外部PowerShell提交，实现提交哈希 `20cb1b1f766529a88aa5f3346a4761b77eca66b7`，提交信息 feat: implement wugu and tiesuo card-body slice；2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED，见 2.9 节），以及属性伤害传导生产基础设施（CP-04J，已由用户在外部PowerShell提交实现提交 `c094bff5dab127917e8d0b9a2d3422e3ab736783`，审计残项关闭提交 `68e419b79e379184c1f1cc7ad650039771530f89`；2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED，见 2.10 节）；但正式整局引擎仍未完成，正式入口继续失败关闭。
+> 状态：已有权威核心 foundation、测试专用最小单挑纵向切片、正式160张牌堆上六种基本牌的生产适配器批次、最小普通锦囊垂直切片（【无中生有】、【无懈可击】），以及目标区域选牌批次（【过河拆桥】6张、【顺手牵羊】5张接入生产适配器），以及伤害型普通锦囊批次（【决斗】3张、【火攻】3张接入生产适配器，2026-08-03已通过独立只读审计AUDIT_PASSED_WITH_NONBLOCKING_ISSUES），以及群体普通锦囊批次（【南蛮入侵】3张、【万箭齐发】1张、【桃园结义】1张接入生产适配器并建立逐目标结算框架，已由用户在外部PowerShell提交（实现提交哈希 `5f2fbf27b7041bbf3010636de37306eea5da6256`），2026-08-03 完成独立只读审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED），以及剩余普通锦囊批次（【五谷丰登】2张完整生产语义＋【铁索连环】6张牌本体接入生产适配器，已由用户在外部PowerShell提交，实现提交哈希 `20cb1b1f766529a88aa5f3346a4761b77eca66b7`，提交信息 feat: implement wugu and tiesuo card-body slice；2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED，见 2.9 节），以及属性伤害传导生产基础设施（CP-04J，已由用户在外部PowerShell提交实现提交 `c094bff5dab127917e8d0b9a2d3422e3ab736783`，审计残项关闭提交 `68e419b79e379184c1f1cc7ad650039771530f89`；2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED，见 2.10 节），以及【借刀杀人】＋11种武器牌本体批次（CP-04K：普通锦囊最后一张【借刀杀人】完整双人生产语义、11种／12张武器牌本体主动装备与同槽替换、按角色出杀计数、武器专属技能集中式失败关闭门禁；工作树已实现，尚未由用户提交、未进行独立只读审计）；但正式整局引擎仍未完成，正式入口继续失败关闭。
 > 本文是运行能力状态页，不得用测试总数或文档完整度替换完整引擎验收。
 
 ## 0. 机器可读状态摘要
@@ -18,12 +18,13 @@ production_duel_fire_attack_batch=true
 production_group_target_trick_batch=true
 production_remaining_ordinary_trick_batch=true
 production_chain_damage_infrastructure=true
+production_borrowed_sword_weapon_system=true
 authoritative_full_game_core=false
 formal_duel_no_skill_ready=false
 formal_run_ready=false
 ```
 
-`production_basic_cards_batch=true` 只描述正式160张牌堆中六种基本牌（普通【杀】、火【杀】、雷【杀】、【闪】、【桃】、【酒】）已接入生产适配器批次；`production_single_target_trick_slice=true` 只描述【无中生有】（4张）与【无懈可击】（7张）的最小普通锦囊垂直切片；`production_zone_target_trick_batch=true` 只描述【过河拆桥】（6张）与【顺手牵羊】（5张）接入生产适配器并共用“目标区域选牌、隐藏手牌选择、实体牌移动”基础设施；`production_duel_fire_attack_batch=true` 只描述【决斗】（3张）与【火攻】（3张）接入生产适配器并复用【无懈可击】逐张响应链与伤害型普通锦囊结算路径；`production_group_target_trick_batch=true` 只描述【南蛮入侵】（3张）、【万箭齐发】（1张）与【桃园结义】（1张）接入生产适配器并建立“群体普通锦囊按行动顺序逐目标结算框架”（服务器自动目标序列、逐目标独立【无懈可击】窗口、逐目标响应或受伤／回复、濒死救援期间队列暂停与恢复）；`production_remaining_ordinary_trick_batch=true` 只描述【五谷丰登】（2张）完整生产语义与【铁索连环】（6张）完整语义接入生产适配器（公共REVEALED展示池、逐目标独立【无懈可击】、横置状态切换、重铸与属性伤害传导，CP-04J）；`production_chain_damage_infrastructure=true` 只描述横置角色火／雷属性伤害传导生产基础设施（统一传导入口、原始与派生伤害区分、确定性候选顺序、濒死挂起恢复、严格回放与链事件契约，CP-04J；三人以上传导未由正式生产入口证明）。它们都不表示普通锦囊批次完成，也不表示正式160张牌无技能单挑完成；其余21种正式卡牌（含1种未实现普通锦囊：借刀杀人；3种延时锦囊；17种装备）仍未实现，正式整局入口继续失败关闭。当前计数口径必须分开：
+`production_basic_cards_batch=true` 只描述正式160张牌堆中六种基本牌（普通【杀】、火【杀】、雷【杀】、【闪】、【桃】、【酒】）已接入生产适配器批次；`production_single_target_trick_slice=true` 只描述【无中生有】（4张）与【无懈可击】（7张）的最小普通锦囊垂直切片；`production_zone_target_trick_batch=true` 只描述【过河拆桥】（6张）与【顺手牵羊】（5张）接入生产适配器并共用“目标区域选牌、隐藏手牌选择、实体牌移动”基础设施；`production_duel_fire_attack_batch=true` 只描述【决斗】（3张）与【火攻】（3张）接入生产适配器并复用【无懈可击】逐张响应链与伤害型普通锦囊结算路径；`production_group_target_trick_batch=true` 只描述【南蛮入侵】（3张）、【万箭齐发】（1张）与【桃园结义】（1张）接入生产适配器并建立“群体普通锦囊按行动顺序逐目标结算框架”（服务器自动目标序列、逐目标独立【无懈可击】窗口、逐目标响应或受伤／回复、濒死救援期间队列暂停与恢复）；`production_remaining_ordinary_trick_batch=true` 只描述【五谷丰登】（2张）完整生产语义与【铁索连环】（6张）完整语义接入生产适配器（公共REVEALED展示池、逐目标独立【无懈可击】、横置状态切换、重铸与属性伤害传导，CP-04J）；`production_chain_damage_infrastructure=true` 只描述横置角色火／雷属性伤害传导生产基础设施（统一传导入口、原始与派生伤害区分、确定性候选顺序、濒死挂起恢复、严格回放与链事件契约，CP-04J；三人以上传导未由正式生产入口证明）；`production_borrowed_sword_weapon_system=true` 只描述【借刀杀人】（2张）完整双人生产语义与11种／12张武器牌本体接入生产适配器（主动装备、同槽替换、攻击范围动态计算、装备区公开、按角色出杀计数、武器专属技能按集中式影响门禁失败关闭，CP-04K）。它们都不表示普通锦囊批次完成，也不表示正式160张牌无技能单挑完成；其余9种正式卡牌（3种延时锦囊、4种防具、2种坐骑；普通锦囊已全部实现）仍未实现，正式整局入口继续失败关闭。当前计数口径必须分开：
 
 ```text
 [test_only_duel_vertical_slice]
@@ -31,58 +32,74 @@ unsupported_rules=0
 approximation_count=0
 
 [formal]
-unsupported_rules=1  # 至少存在一个完整正式整局能力阻塞的哨兵，不是精确缺项数（38种正式卡牌中仍有21种未接生产适配器）
+unsupported_rules=1  # 至少存在一个完整正式整局能力阻塞的哨兵，不是精确缺项数（38种正式卡牌中仍有9种未接生产适配器）
 approximation_count=0  # 正式入口拒绝执行，所以没有运行近似
 
 [production_basic_cards_batch]
 implemented=true
 tested=true
 card_types=6
-unsupported_rules=1  # 批次范围外（锦囊、装备等26种正式卡牌）仍失败关闭
+unsupported_rules=1  # 批次范围外（延时锦囊、防具、坐骑等9种正式卡牌）仍失败关闭
 approximation_count=0
 
 [production_single_target_trick_slice]
 implemented=true
 tested=true
 card_types=2  # 【无中生有】4张、【无懈可击】7张，共11张实体牌
-unsupported_rules=1  # 切片范围外（其余6种普通锦囊、延时锦囊、装备等26种正式卡牌）仍失败关闭
+unsupported_rules=1  # 切片范围外（延时锦囊、防具、坐骑等9种正式卡牌）仍失败关闭
 approximation_count=0
 
 [production_zone_target_trick_batch]
 implemented=true
 tested=true
 card_types=2  # 【过河拆桥】6张、【顺手牵羊】5张，共11张实体牌
-unsupported_rules=1  # 批次范围外（其余6种普通锦囊、延时锦囊、装备等26种正式卡牌）仍失败关闭
+unsupported_rules=1  # 批次范围外（延时锦囊、防具、坐骑等9种正式卡牌）仍失败关闭
 approximation_count=0
 
 [production_duel_fire_attack_batch]
 implemented=true
 tested=true
 card_types=2  # 【决斗】3张、【火攻】3张，共6张实体牌
-unsupported_rules=1  # 批次范围外（其余6种普通锦囊、延时锦囊、装备等26种正式卡牌）仍失败关闭
+unsupported_rules=1  # 批次范围外（延时锦囊、防具、坐骑等9种正式卡牌）仍失败关闭
 approximation_count=0
 
 [production_group_target_trick_batch]
 implemented=true
 tested=true
 card_types=3  # 【南蛮入侵】3张、【万箭齐发】1张、【桃园结义】1张，共5张实体牌
-unsupported_rules=1  # 批次范围外（其余3种普通锦囊、延时锦囊、装备等23种正式卡牌）仍失败关闭
+unsupported_rules=1  # 批次范围外（延时锦囊、防具、坐骑等9种正式卡牌）仍失败关闭
 approximation_count=0
 
 [production_remaining_ordinary_trick_batch]
 implemented=true
 tested=true
 card_types=2  # 【五谷丰登】2张（完整实现）、【铁索连环】6张（完整实现，含属性伤害传导）
-complete_card_kinds=17  # 完整实现卡牌种数：16+【铁索连环】完整语义
-adapter_card_kinds=17  # 注册表口径：已接入生产适配器17种
-adapter_entities=126  # 注册表口径：已接入实体126张
-complete_entities=126  # 完整实现实体牌：120+6（铁索完整语义）
-remaining_card_kinds=21
-remaining_normal_tricks=1  # 借刀杀人（等待CP-04K）
+complete_card_kinds=18  # 完整实现卡牌种数：17+【借刀杀人】完整语义（武器实体不计入完整实现）
+adapter_card_kinds=29  # 注册表口径：已接入生产适配器29种
+adapter_entities=140  # 注册表口径：已接入实体140张
+complete_entities=128  # 完整实现实体牌：126+2（借刀完整语义）
+remaining_card_kinds=9
+remaining_normal_tricks=0
 tiesuo_card_body_implemented=true
 tiesuo_chain_damage_implemented=true
 tiesuo_full_semantics_complete=true
-unsupported_rules=1  # 批次范围外（借刀、延时锦囊、装备等21种正式卡牌）仍失败关闭
+unsupported_rules=1  # 批次范围外（延时锦囊、防具、坐骑等9种正式卡牌）仍失败关闭
+approximation_count=0
+
+[production_borrowed_sword_weapon_system]
+implemented=true
+tested=true
+card_types=12  # 【借刀杀人】2张完整语义；11种武器12张牌本体（全部partial，0种完整实现）
+weapon_card_body_implemented=true
+weapon_skill_complete=0  # 11种武器专属技能全部未实现，按集中式门禁失败关闭
+complete_card_kinds=18
+complete_entities=128
+adapter_card_kinds=29
+adapter_entities=140
+remaining_card_kinds=9
+remaining_normal_tricks=0
+multi_player_production_proven=false
+unsupported_rules=1  # 批次范围外（延时锦囊、防具、坐骑等9种正式卡牌）仍失败关闭
 approximation_count=0
 ```
 
@@ -99,7 +116,7 @@ approximation_count=0
 | 当前是否存在正式多进程胜率入口 | 否 |
 | 外部 `sgs_sim_engine_worker.py` 是否是正式引擎 | 否；它位于 Downloads，未被仓库导入，是独立近似器 |
 | 外部 `sgs_ai_audit_20260729.py` 是否调用真实 AI | 否；它使用本文件内微场景与自证式 `chosen = expected` |
-| 当前组件测试是否通过 | 是；本轮最终完整测试为 `1403 passed`，失败0、跳过0 |
+| 当前组件测试是否通过 | 是；本轮最终完整测试为 `1635 passed`，失败0、跳过0 |
 
 ## 2. 当前正式资产
 
@@ -260,6 +277,22 @@ CP-04J 在双人生产入口上接通统一属性伤害传导管线（实现提�
 - 审计残项关闭（N1-N4，提交 `68e419b79e379184c1f1cc7ad650039771530f89`，fix: close chain damage audit gaps）：N1 `stopped_winner` 不再是合法 `chain_target_resolved.result`，winner 只产生 `chain_damage_finished(stop_reason=winner)`；N2 三个链事件在构造时做完整字段集、类型、枚举与组合校验，缺字段、多余字段、bool 冒充整数、非法 result、非法 stop_reason、非法列表结构等均被拒绝；N3 `prevented_zero` 控制流改为明确结果（`_ChainStepOutcome`）驱动——目标伤害归零后 `_advance_chain` 立即返回，不再循环访问已清理的 `pending_chain`、不重复产生 `chain_damage_finished`、不处理后续尚未开始目标、不抛二次 `ProductionBatchError`；N4 保留 CP-04I 历史说明并追加 CP-04J 当前双人生产范围说明；
 - 验证：批次测试文件 `tests/test_sgs_production_chain_damage.py` 44项（40项生产路径＋4项审计残项关闭：prevented_zero 控制流与文档检查）、`tests/test_sgs_engine_events.py` 63项（含36项链事件契约）；最终独立复审定向回归 434 passed，完整 pytest `1543 passed`（失败0、跳过0），compileall 通过，源码完整性审计 scanned_file_count=116、defect_count=0、audit_item_count=55，git diff --check 通过，SHA-256 清单31项全部匹配；`tiesuo_card_body_implemented=true`、`tiesuo_chain_damage_implemented=true`、`tiesuo_full_semantics_complete=true`（均限于当前双人正式生产入口范围）；`authoritative_full_game_core=false`、`formal_run_ready=false`、`formal_duel_no_skill_ready=false`、`unsupported_rules=1`、`approximation_count=0`、`multi_player_production_proven=false`；`prevented_zero` 仅完成状态机分支与事件契约，尚无正式防具、减伤或伤害防止路径端到端证明；剩余普通锦囊仅【借刀杀人】等待 CP-04K，里程碑 B 未完成，正式胜率模拟未开放。
 
+### 2.11 【借刀杀人】＋11种武器牌本体批次（CP-04K）
+
+正式160张牌堆上最后一张普通锦囊与全部武器牌本体的生产批次，继续复用现有权威核心、普通锦囊使用窗口、【无懈可击】逐张响应链、隐藏句柄体系与严格重执行回放：
+
+- 模式 ID 仍为 `production_basic_cards_batch`（双人生产切片）；正式牌堆总实体牌数仍为160，实例ID唯一；【借刀杀人】2张与11种武器12张实体牌真实读取牌堆CSV并绑定生产适配器；其余9种正式卡牌（3种延时锦囊、4种防具、2种坐骑）继续失败关闭，普通锦囊已全部实现；
+- 武器牌本体：出牌阶段主动使用、武器进入weapon槽、同槽替换时旧武器原子移入弃牌堆（不伪造主动弃牌）、攻击范围每次从当前装备区按正式结构化CSV动态计算、装备区公开、实体身份保持；新增 `equipment_equipped`／`equipment_removed`／`equipment_replaced` 三个最小装备事件并进入事件哈希链；
+- 出杀次数由单一布尔值升级为按角色记录的 `slash_used_counts`：当前回合角色主动使用【杀】增加自己的计数；某角色自己的新出牌阶段开始时只重置该角色计数；借刀强制【杀】绕过通常次数上限但仍增加第一目标自己的计数；
+- 【借刀杀人】：第一目标为装备区有武器的其他角色，第二目标为第一目标攻击范围内的角色且可以是使用者本人；`card_used` 的 `target_ids` 只包含第一目标，第二目标以公开负载记录；只对第一目标打开【无懈可击】窗口，第二目标无独立无懈窗口但本人仍可对第一目标效果使用【无懈可击】；无懈链结束后进行第二次动态合法性检测并重新读取第一目标当前武器；
+- 生效后第一目标通过绑定“会话＋窗口＋第一目标＋第二目标＋手牌快照＋杀实体＋卡牌键＋阶段＋执行上下文”的HMAC-SHA256不透明句柄选择实体普通／火／雷【杀】或拒绝；裸实体ID提交、过期、伪造与手牌变化后的句柄失败关闭；
+- 选择【杀】即视为履行借刀要求：产生第一目标自己的正常 `card_used`、正常进入闪响应、伤害、濒死、救援、死亡与属性传导，即使被闪抵消或未造成伤害也不再交武器；拒绝或没有合法【杀】时把第一目标当前武器直接移入使用者手牌（`card_moved`／`card_lost`／`card_gained`，reason=`jiedaosharen_weapon_gain`），无武器或使用者已死亡时记录 `no_weapon_to_transfer` 且不移动；
+- 借刀是外层根，被要求使用的【杀】是子结算：杀等待闪、濒死救援与属性传导期间借刀保持挂起，子结算完成后恢复并只弃置根借刀一次；终局清理时根借刀从处理区确定性进入弃牌堆，处理区不遗留；
+- 11种武器专属技能全部保持 partial，建立集中式 `check_weapon_skill_gate` 影响矩阵：能从当前完整公开状态证明不影响本次合法性、可选动作或结算结果时继续通用牌本体流程，否则在首次相关判断前抛 `UnsupportedRuleError`（如雌雄双股剑因无性别字段对另一角色出杀一律失败关闭、丈八蛇矛手牌≥2张时失败关闭、朱雀羽扇实体普通杀失败关闭、诸葛连弩主动额外杀依赖技能时失败关闭但借刀强制杀不依赖连弩）；
+- 新增80项专项测试（`tests/test_sgs_production_borrowed_sword_weapon_system.py`）并扩展12项装备事件契约测试（`tests/test_sgs_engine_events.py`）；完整 pytest 为 `1635 passed`（失败0、跳过0）。
+
+本批次只验证双人生产切片：不构成武器技能完成、装备全部完成、正式单挑完成或里程碑 B 完成；三人以上借刀与“使用者死亡但游戏未结束”等边界未由正式生产入口证明。
+
 ## 3. foundation 已有接口与完整对局缺口
 
 当前已经存在以下 foundation 接口：
@@ -320,6 +353,7 @@ AI合法动作枚举完整
 - 构造 foundation 会话、确定性洗牌、原子移动实体牌、登记事件并校验回放记录完整性；这仍不是对局。
 - 通过生产批处理会话执行【过河拆桥】／【顺手牵羊】目标区域选牌路径：公开装备区／判定区实体候选、隐藏手牌HMAC-SHA256不透明句柄（会话级随机秘密，不可离线枚举）、直接弃置／直接获得、连续【无懈可击】响应链、无合法区域牌结算与严格规则重执行。
 - 通过生产批处理会话执行【决斗】／【火攻】伤害型普通锦囊路径：交替打出【杀】与主动不响应（响应【杀】记录为打出而非使用）、伤害来源为另一方参与者、死亡响应者立即结束边界、【火攻】目标本人选择展示手牌（HMAC-SHA256不透明展示句柄，仅选择窗口有效）与使用者同花色弃置／不弃置、1点火焰伤害、被【无懈可击】取消不打开后续窗口、无合法展示牌结算与严格规则重执行。
+- 通过生产批处理会话执行【借刀杀人】与11种武器牌本体路径：主动装备与同槽替换（三个最小装备事件）、攻击范围动态计算、两次目标检测、第一目标以HMAC-SHA256不透明句柄选择实体杀或拒绝、强制使用【杀】与按角色出杀计数、拒绝后武器直接进入使用者手牌、挂起与终局清理、武器专属技能集中式失败关闭门禁与严格规则重执行。
 - 运行测试专用最小单挑切片及其严格规则重执行回放：
 
   ```powershell
@@ -382,10 +416,11 @@ AI合法动作枚举完整
 # 1463 passed；失败0、跳过0（在1454基础上新增9项审计问题关闭回归：清单状态、横置角色火／雷／火攻失败关闭原子性、无属性与未横置正常结算、五谷牌量不足原子性、铁索重铸空牌堆空弃牌堆成功重洗摸回、重铸牌参与重洗候选池）
 # 1503 passed；失败0、跳过0（在1463基础上新增40项CP-04J属性伤害传导基础设施生产路径测试）
 # 1543 passed；失败0、跳过0（在1503基础上新增40项CP-04J审计残项关闭测试：36项链事件契约＋4项prevented_zero控制流与文档检查）
+# 1635 passed；失败0、跳过0（在1543基础上新增80项借刀＋武器专项与12项装备事件契约测试）
 .\.venv\Scripts\python.exe -m compileall -q scripts tests
 # 通过
 .\.venv\Scripts\python.exe -m scripts.sgs_source_integrity_audit . --fail-on-defect --pretty
-# 扫描116个Python文件，defect_count=0；55项均为显式门禁字段或测试证据等audit_item
+# 扫描117个Python文件，defect_count=0；55项均为显式门禁字段或测试证据等audit_item
 ```
 
 当前开发依赖仅声明 pytest 与 pandas；未发现 mypy、ruff、前端 `package.json` 或 CI 配置。因此类型检查、lint、前端测试和 CI 是“未配置”，不是“已通过”。
@@ -403,6 +438,7 @@ AI合法动作枚举完整
 
 里程碑 A 的提交只证明隔离三牌切片，不证明正式160张牌无技能单挑完成。
 - 剩余普通锦囊批次（`CP-04I-PRODUCTION-REMAINING-ORDINARY-TRICK-BATCH`）：【五谷丰登】2张完整生产语义＋【铁索连环】6张牌本体接入生产适配器（见 2.9 节）；已由用户在外部PowerShell提交实现（实现提交哈希 `20cb1b1f766529a88aa5f3346a4761b77eca66b7`，提交信息 feat: implement wugu and tiesuo card-body slice）；基线提交 `6af30432993d908546d7cec114fd78ae62798ad5`（里程碑标签 `milestone-b2-group-target-tricks-audited` 指向该提交）；2026-08-04 独立审计完成：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES（审计问题关闭提交 `5b1c2c15b6a8e21563aab02d8a5c181c553e4967`），最终独立复审结论 AUDIT_PASSED（最终措辞修正提交 `b2d4ffca18092938437d15826efdaddba8a0a689`）；里程碑标签 `milestone-b2-wugu-tiesuo-card-body-audited` 由用户在本次最终文档提交后立即建立（本轮未执行 git tag）。
+- 【借刀杀人】＋11种武器牌本体批次（`CP-04K-PRODUCTION-BORROWED-SWORD-WEAPON-SYSTEM`）：普通锦囊最后一张【借刀杀人】完整双人生产语义与11种／12张武器牌本体接入生产适配器（见 2.11 节）；代码与测试已在当前工作树完成，尚未由用户执行真实Git提交，也未进行独立只读审计；基线为 `3ea01f4e8603dd96698a2e5deee09c1e9b3fccef`（milestone-b2-chain-damage-infrastructure-audited）。
 - 属性伤害传导基础设施（`CP-04J-PRODUCTION-CHAIN-DAMAGE-INFRASTRUCTURE`）：横置角色受火／雷属性伤害后按统一生产管线确定性传导（见 2.10 节）；已由用户在外部PowerShell提交实现（实现提交哈希 `c094bff5dab127917e8d0b9a2d3422e3ab736783`，提交信息 feat: implement production chain damage infrastructure；检查点文档提交 `55228c9d464daac6eb061ba356b0497ec814eba6`；审计残项关闭提交 `68e419b79e379184c1f1cc7ad650039771530f89`，fix: close chain damage audit gaps）；2026-08-04 独立审计完成：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED（status=audited、independent_audit_done=true、audit_conclusion=AUDIT_PASSED）；里程碑标签 `milestone-b2-chain-damage-infrastructure-audited` 由用户在本次最终文档提交后立即建立（本轮未执行 git tag、未验证标签已存在）。
 
 ## 9. 下一可验收版本
@@ -411,9 +447,9 @@ AI合法动作枚举完整
 
 1. 正式 Knowledge 尚未把当前160张牌堆纳入单挑适用范围；同名武将、先手首轮摸牌修正等单挑配置仍须由资料或显式配置确定（六种基本牌批次已锁定双人、先手摸2的确定性开局约定）；
 2. `AuthoritativeCoreSession.run_game` 仍是失败关闭占位，尚未接入正式对局循环；
-3. 38 个正式 `card_key` 中已有六种基本牌、【无中生有】／【无懈可击】、【过河拆桥】／【顺手牵羊】、【决斗】／【火攻】、群体普通锦囊【南蛮入侵】／【万箭齐发】／【桃园结义】、【五谷丰登】以及【铁索连环】完整语义（含属性伤害传导）接入生产适配器，其余21种（含1种普通锦囊：借刀杀人；3种延时锦囊；17种装备）仍未接入权威 `GameState` 的生产适配器；
+3. 38 个正式 `card_key` 中已有六种基本牌、【无中生有】／【无懈可击】、【过河拆桥】／【顺手牵羊】、【决斗】／【火攻】、群体普通锦囊【南蛮入侵】／【万箭齐发】／【桃园结义】、【五谷丰登】、【铁索连环】完整语义（含属性伤害传导）、【借刀杀人】以及11种武器牌本体接入生产适配器，其余9种（3种延时锦囊、4种防具、2种坐骑）仍未接入权威 `GameState` 的生产适配器；
 4. 普通使用牌、响应牌、判定牌和死亡后牌区清理等完整牌生命周期仍有资料或统一实现缺口；
-5. 普通锦囊精确事件语义已闭合到当前批次：五谷公开展示池、逐目标选牌与剩余展示牌统一弃置、提前结束确定性清理（CP-04I 用户确认口径）；铁索横置状态切换（`chained_state`）、重铸（`card_recast`）与属性伤害传导（`chain_damage_started`／`chain_target_resolved`／`chain_damage_finished`）事件已闭合；CP-04I 临时失败关闭门禁已由 CP-04J 统一传导管线移除；五谷展示牌量不足失败关闭保持原子一致；铁索重铸因重铸牌自身进入弃牌堆而可重洗摸回，正式语义下不存在真实可达的牌量不足路径（不可达）；借刀杀人的武器转移与出杀次数口径（响应借刀不受本出牌阶段已用杀次数的前置限制、成功后正常计入次数、仅次数用尽不构成无合法杀，2026-08-04 用户移动版实测修正，见 Knowledge 4.6.1）依赖装备生产切片（CP-04K）；延时锦囊的精确事件语义以及非摸牌操作彻底耗尽后的处理仍存在歧义或分析约定；
+5. 普通锦囊精确事件语义已闭合到当前批次：五谷公开展示池、逐目标选牌与剩余展示牌统一弃置、提前结束确定性清理（CP-04I 用户确认口径）；铁索横置状态切换（`chained_state`）、重铸（`card_recast`）与属性伤害传导（`chain_damage_started`／`chain_target_resolved`／`chain_damage_finished`）事件已闭合；CP-04I 临时失败关闭门禁已由 CP-04J 统一传导管线移除；五谷展示牌量不足失败关闭保持原子一致；铁索重铸因重铸牌自身进入弃牌堆而可重洗摸回，正式语义下不存在真实可达的牌量不足路径（不可达）；借刀杀人的武器转移与出杀次数口径（响应借刀不受本出牌阶段已用杀次数的前置限制、成功后正常计入次数、仅次数用尽不构成无合法杀，2026-08-04 用户移动版实测修正，见 Knowledge 4.6.1）；CP-04K 已闭合：两次目标检测、第一目标以不透明句柄选择实体杀或拒绝、强制使用【杀】与按角色出杀计数、武器从第一目标装备区直接进入使用者手牌（`jiedaosharen_weapon_gain`）、装备三事件（`equipment_equipped`／`equipment_removed`／`equipment_replaced`）、挂起恢复与终局清理（见 Knowledge 4.6.3）依赖装备生产切片（CP-04K）；延时锦囊的精确事件语义以及非摸牌操作彻底耗尽后的处理仍存在歧义或分析约定；
 6. 里程碑 B 要求的正式100-seed 门槛尚未执行；测试切片的50-seed 结果不能替代它。
 
 只有解决上述阻塞、正式范围内 `unsupported_rules=0`、`approximation_count=0`，并完成100-seed、严格回放、牌守恒和完整 pytest 验收后，才可将 `formal_duel_no_skill_ready` 改为 `true`。其他模式和武将仍需分别验收。

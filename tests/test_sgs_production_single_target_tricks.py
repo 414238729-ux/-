@@ -834,17 +834,17 @@ def test_wuzhong_draw_reshuffles_when_draw_pile_exhausted() -> None:
 def test_other_normal_tricks_stay_fail_closed() -> None:
     game = ProductionBasicCardBatch(seed=3)
     registry = game.formal_registry
-    for key in ("sgs_trick_jiedaosharen",):
+    for key in ("sgs_delayed_lebusi",):
         assert key in registry.unimplemented_card_keys
         with pytest.raises(UnsupportedRuleError):
             registry.adapter_for(key)
-    # 【过河拆桥】【顺手牵羊】【南蛮入侵】【万箭齐发】【桃园结义】已经
-    # 接入生产适配器，不再属于未实现卡牌；其余未实现普通锦囊继续失败关闭。
+    # 【过河拆桥】【顺手牵羊】【南蛮入侵】【万箭齐发】【桃园结义】【借刀杀人】
+    # 已经接入生产适配器，不再属于未实现卡牌；其余未实现卡牌继续失败关闭。
     assert "sgs_trick_guohechaiqiao" not in registry.unimplemented_card_keys
     assert "sgs_trick_shunshouqianyang" not in registry.unimplemented_card_keys
     assert "sgs_trick_nanmanruqin" not in registry.unimplemented_card_keys
     with pytest.raises(UnsupportedRuleError):
-        registry.rule_spec_for("sgs_trick_jiedaosharen")
+        registry.rule_spec_for("sgs_delayed_lebusi")
     with pytest.raises(UnsupportedRuleError):
         registry.assert_no_unimplemented_fallback()
     implemented = set(PRODUCTION_BASIC_CARD_KEYS) | set(PRODUCTION_TRICK_KEYS)
