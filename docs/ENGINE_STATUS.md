@@ -1,7 +1,7 @@
 # 三国杀正式引擎状态
 
 > 更新日期：2026-08-04
-> 状态：已有权威核心 foundation、测试专用最小单挑纵向切片、正式160张牌堆上六种基本牌的生产适配器批次、最小普通锦囊垂直切片（【无中生有】、【无懈可击】），以及目标区域选牌批次（【过河拆桥】6张、【顺手牵羊】5张接入生产适配器），以及伤害型普通锦囊批次（【决斗】3张、【火攻】3张接入生产适配器，2026-08-03已通过独立只读审计AUDIT_PASSED_WITH_NONBLOCKING_ISSUES），以及群体普通锦囊批次（【南蛮入侵】3张、【万箭齐发】1张、【桃园结义】1张接入生产适配器并建立逐目标结算框架，已由用户在外部PowerShell提交（实现提交哈希 `5f2fbf27b7041bbf3010636de37306eea5da6256`），2026-08-03 完成独立只读审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED），以及剩余普通锦囊批次（【五谷丰登】2张完整生产语义＋【铁索连环】6张牌本体接入生产适配器，已由用户在外部PowerShell提交，实现提交哈希 `20cb1b1f766529a88aa5f3346a4761b77eca66b7`，提交信息 feat: implement wugu and tiesuo card-body slice；2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED，见 2.9 节）；但正式整局引擎仍未完成，正式入口继续失败关闭。
+> 状态：已有权威核心 foundation、测试专用最小单挑纵向切片、正式160张牌堆上六种基本牌的生产适配器批次、最小普通锦囊垂直切片（【无中生有】、【无懈可击】），以及目标区域选牌批次（【过河拆桥】6张、【顺手牵羊】5张接入生产适配器），以及伤害型普通锦囊批次（【决斗】3张、【火攻】3张接入生产适配器，2026-08-03已通过独立只读审计AUDIT_PASSED_WITH_NONBLOCKING_ISSUES），以及群体普通锦囊批次（【南蛮入侵】3张、【万箭齐发】1张、【桃园结义】1张接入生产适配器并建立逐目标结算框架，已由用户在外部PowerShell提交（实现提交哈希 `5f2fbf27b7041bbf3010636de37306eea5da6256`），2026-08-03 完成独立只读审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED），以及剩余普通锦囊批次（【五谷丰登】2张完整生产语义＋【铁索连环】6张牌本体接入生产适配器，已由用户在外部PowerShell提交，实现提交哈希 `20cb1b1f766529a88aa5f3346a4761b77eca66b7`，提交信息 feat: implement wugu and tiesuo card-body slice；2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED，见 2.9 节），以及属性伤害传导生产基础设施（CP-04J，已由用户在外部PowerShell提交实现提交 `c094bff5dab127917e8d0b9a2d3422e3ab736783`，审计残项关闭提交 `68e419b79e379184c1f1cc7ad650039771530f89`；2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED，见 2.10 节）；但正式整局引擎仍未完成，正式入口继续失败关闭。
 > 本文是运行能力状态页，不得用测试总数或文档完整度替换完整引擎验收。
 
 ## 0. 机器可读状态摘要
@@ -17,12 +17,13 @@ hidden_handle_hmac_security_fix=true
 production_duel_fire_attack_batch=true
 production_group_target_trick_batch=true
 production_remaining_ordinary_trick_batch=true
+production_chain_damage_infrastructure=true
 authoritative_full_game_core=false
 formal_duel_no_skill_ready=false
 formal_run_ready=false
 ```
 
-`production_basic_cards_batch=true` 只描述正式160张牌堆中六种基本牌（普通【杀】、火【杀】、雷【杀】、【闪】、【桃】、【酒】）已接入生产适配器批次；`production_single_target_trick_slice=true` 只描述【无中生有】（4张）与【无懈可击】（7张）的最小普通锦囊垂直切片；`production_zone_target_trick_batch=true` 只描述【过河拆桥】（6张）与【顺手牵羊】（5张）接入生产适配器并共用“目标区域选牌、隐藏手牌选择、实体牌移动”基础设施；`production_duel_fire_attack_batch=true` 只描述【决斗】（3张）与【火攻】（3张）接入生产适配器并复用【无懈可击】逐张响应链与伤害型普通锦囊结算路径；`production_group_target_trick_batch=true` 只描述【南蛮入侵】（3张）、【万箭齐发】（1张）与【桃园结义】（1张）接入生产适配器并建立“群体普通锦囊按行动顺序逐目标结算框架”（服务器自动目标序列、逐目标独立【无懈可击】窗口、逐目标响应或受伤／回复、濒死救援期间队列暂停与恢复）；`production_remaining_ordinary_trick_batch=true` 只描述【五谷丰登】（2张）完整生产语义与【铁索连环】（6张）完整语义接入生产适配器（公共REVEALED展示池、逐目标独立【无懈可击】、横置状态切换、重铸与属性伤害传导，CP-04J）。它们都不表示普通锦囊批次完成，也不表示正式160张牌无技能单挑完成；其余21种正式卡牌（含1种未实现普通锦囊：借刀杀人；3种延时锦囊；17种装备）仍未实现，正式整局入口继续失败关闭。当前计数口径必须分开：
+`production_basic_cards_batch=true` 只描述正式160张牌堆中六种基本牌（普通【杀】、火【杀】、雷【杀】、【闪】、【桃】、【酒】）已接入生产适配器批次；`production_single_target_trick_slice=true` 只描述【无中生有】（4张）与【无懈可击】（7张）的最小普通锦囊垂直切片；`production_zone_target_trick_batch=true` 只描述【过河拆桥】（6张）与【顺手牵羊】（5张）接入生产适配器并共用“目标区域选牌、隐藏手牌选择、实体牌移动”基础设施；`production_duel_fire_attack_batch=true` 只描述【决斗】（3张）与【火攻】（3张）接入生产适配器并复用【无懈可击】逐张响应链与伤害型普通锦囊结算路径；`production_group_target_trick_batch=true` 只描述【南蛮入侵】（3张）、【万箭齐发】（1张）与【桃园结义】（1张）接入生产适配器并建立“群体普通锦囊按行动顺序逐目标结算框架”（服务器自动目标序列、逐目标独立【无懈可击】窗口、逐目标响应或受伤／回复、濒死救援期间队列暂停与恢复）；`production_remaining_ordinary_trick_batch=true` 只描述【五谷丰登】（2张）完整生产语义与【铁索连环】（6张）完整语义接入生产适配器（公共REVEALED展示池、逐目标独立【无懈可击】、横置状态切换、重铸与属性伤害传导，CP-04J）；`production_chain_damage_infrastructure=true` 只描述横置角色火／雷属性伤害传导生产基础设施（统一传导入口、原始与派生伤害区分、确定性候选顺序、濒死挂起恢复、严格回放与链事件契约，CP-04J；三人以上传导未由正式生产入口证明）。它们都不表示普通锦囊批次完成，也不表示正式160张牌无技能单挑完成；其余21种正式卡牌（含1种未实现普通锦囊：借刀杀人；3种延时锦囊；17种装备）仍未实现，正式整局入口继续失败关闭。当前计数口径必须分开：
 
 ```text
 [test_only_duel_vertical_slice]
@@ -246,7 +247,7 @@ approximation_count=0
 
 ### 2.10 属性伤害传导生产基础设施（CP-04J）
 
-CP-04J 在双人生产入口上接通统一属性伤害传导管线（实现提交 `c094bff5dab127917e8d0b9a2d3422e3ab736783` 已由用户在外部PowerShell创建，提交信息 feat: implement production chain damage infrastructure；当前等待独立审计，独立审计未开始）：
+CP-04J 在双人生产入口上接通统一属性伤害传导管线（实现提交 `c094bff5dab127917e8d0b9a2d3422e3ab736783` 已由用户在外部PowerShell创建，提交信息 feat: implement production chain damage infrastructure；检查点文档提交 `55228c9d464daac6eb061ba356b0497ec814eba6`；审计残项关闭提交 `68e419b79e379184c1f1cc7ad650039771530f89`，fix: close chain damage audit gaps；2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED（status=audited、independent_audit_done=true、audit_conclusion=AUDIT_PASSED）；里程碑标签 `milestone-b2-chain-damage-infrastructure-audited` 为本次最终文档提交后由用户立即建立的标签名称（本轮未执行 git tag、未验证标签已存在））：
 
 - 触发条件：伤害类型为火属性或雷属性、原始受伤角色在本次伤害结算时 `chained=true`、最终实际伤害大于0、非传导派生伤害、游戏未结束；无属性伤害、实际伤害0、未横置角色、伤害被防止、已标记为 chain-transmitted 的派生伤害与胜利成立均不触发；
 - 原始角色结算顺序：计算并提交原始伤害→得到最终实际伤害→实际伤害大于0且横置时解除横置并产生 `chained_state`→建立传导根（`chain_damage_started`）→完整处理原始角色的伤害、濒死、救援、死亡与已有后续→全部结束且游戏未结束时才开始下一名传导目标；不得在濒死救援窗口提前扣除下一名角色体力；
@@ -256,8 +257,8 @@ CP-04J 在双人生产入口上接通统一属性伤害传导管线（实现提�
 - 濒死暂停：新增 `_PendingChainDamage` 挂起结构保存根事件ID、来源、根牌、damage_type、基数、原始角色、已处理集合、候选顺序、当前索引、当前目标、暂停原因、父级挂起上下文与会话绑定；与既有 `DYING_RESCUE` 状态机集成，原始角色与传导目标濒死时暂停、救援结束且游戏未结束后从准确索引恢复，不重复处理已处理目标、不跳过尚未处理合法目标；
 - 事件：`chain_damage_started`、`chain_target_resolved`（damaged|skipped_dead|skipped_unchained|prevented_zero）、`chain_damage_finished`（completed|prevented_zero|winner|no_candidates）进入严格回放事件哈希链；事件契约在构造时对三个链事件做完整字段、类型、枚举与组合校验，`stopped_winner` 不是生产实现值；玩家可见回放不泄露私有手牌或会话秘密；
 - 门禁：CP-04I 的 `_assert_chain_damage_gate` 已移除，火杀、雷杀、火攻与通用伤害入口统一接入，不再存在部分入口抛错、部分入口静默传导的分裂行为；未支持的多人与装备边界不因门禁移除而误标完成；
-- 审计残项：`prevented_zero` 控制流已改为明确结果（`_ChainStepOutcome`）驱动——目标伤害归零后 `_advance_chain` 立即返回，不再循环访问已清理的 `pending_chain`、不重复产生 `chain_damage_finished`、不处理后续尚未开始目标、不抛二次 `ProductionBatchError`；
-- 验证：新增 `tests/test_sgs_production_chain_damage.py` 40项（基础、来源与基数、顺序与暂停、严格回放与篡改、回归）；CP-04J 审计残项关闭新增40项（`tests/test_sgs_engine_events.py` 链事件契约36项、`tests/test_sgs_production_chain_damage.py` prevented_zero 控制流与文档检查4项），完整 pytest `1543 passed`（失败0、跳过0），compileall 通过，源码完整性审计 scanned_file_count=116、defect_count=0、audit_item_count=55；`tiesuo_card_body_implemented=true`、`tiesuo_chain_damage_implemented=true`、`tiesuo_full_semantics_complete=true`；`authoritative_full_game_core=false`、`formal_run_ready=false`、`formal_duel_no_skill_ready=false`、`unsupported_rules=1`、`approximation_count=0`、`multi_player_production_proven=false`；剩余普通锦囊仅【借刀杀人】等待 CP-04K，里程碑 B 未完成，正式胜率模拟未开放。
+- 审计残项关闭（N1-N4，提交 `68e419b79e379184c1f1cc7ad650039771530f89`，fix: close chain damage audit gaps）：N1 `stopped_winner` 不再是合法 `chain_target_resolved.result`，winner 只产生 `chain_damage_finished(stop_reason=winner)`；N2 三个链事件在构造时做完整字段集、类型、枚举与组合校验，缺字段、多余字段、bool 冒充整数、非法 result、非法 stop_reason、非法列表结构等均被拒绝；N3 `prevented_zero` 控制流改为明确结果（`_ChainStepOutcome`）驱动——目标伤害归零后 `_advance_chain` 立即返回，不再循环访问已清理的 `pending_chain`、不重复产生 `chain_damage_finished`、不处理后续尚未开始目标、不抛二次 `ProductionBatchError`；N4 保留 CP-04I 历史说明并追加 CP-04J 当前双人生产范围说明；
+- 验证：批次测试文件 `tests/test_sgs_production_chain_damage.py` 44项（40项生产路径＋4项审计残项关闭：prevented_zero 控制流与文档检查）、`tests/test_sgs_engine_events.py` 63项（含36项链事件契约）；最终独立复审定向回归 434 passed，完整 pytest `1543 passed`（失败0、跳过0），compileall 通过，源码完整性审计 scanned_file_count=116、defect_count=0、audit_item_count=55，git diff --check 通过，SHA-256 清单31项全部匹配；`tiesuo_card_body_implemented=true`、`tiesuo_chain_damage_implemented=true`、`tiesuo_full_semantics_complete=true`（均限于当前双人正式生产入口范围）；`authoritative_full_game_core=false`、`formal_run_ready=false`、`formal_duel_no_skill_ready=false`、`unsupported_rules=1`、`approximation_count=0`、`multi_player_production_proven=false`；`prevented_zero` 仅完成状态机分支与事件契约，尚无正式防具、减伤或伤害防止路径端到端证明；剩余普通锦囊仅【借刀杀人】等待 CP-04K，里程碑 B 未完成，正式胜率模拟未开放。
 
 ## 3. foundation 已有接口与完整对局缺口
 
@@ -380,6 +381,7 @@ AI合法动作枚举完整
 # 1454 passed；失败0、跳过0（在1403基础上新增51项剩余普通锦囊批次【五谷丰登】完整生产语义＋【铁索连环】牌本体生产路径测试）
 # 1463 passed；失败0、跳过0（在1454基础上新增9项审计问题关闭回归：清单状态、横置角色火／雷／火攻失败关闭原子性、无属性与未横置正常结算、五谷牌量不足原子性、铁索重铸空牌堆空弃牌堆成功重洗摸回、重铸牌参与重洗候选池）
 # 1503 passed；失败0、跳过0（在1463基础上新增40项CP-04J属性伤害传导基础设施生产路径测试）
+# 1543 passed；失败0、跳过0（在1503基础上新增40项CP-04J审计残项关闭测试：36项链事件契约＋4项prevented_zero控制流与文档检查）
 .\.venv\Scripts\python.exe -m compileall -q scripts tests
 # 通过
 .\.venv\Scripts\python.exe -m scripts.sgs_source_integrity_audit . --fail-on-defect --pretty
@@ -401,7 +403,7 @@ AI合法动作枚举完整
 
 里程碑 A 的提交只证明隔离三牌切片，不证明正式160张牌无技能单挑完成。
 - 剩余普通锦囊批次（`CP-04I-PRODUCTION-REMAINING-ORDINARY-TRICK-BATCH`）：【五谷丰登】2张完整生产语义＋【铁索连环】6张牌本体接入生产适配器（见 2.9 节）；已由用户在外部PowerShell提交实现（实现提交哈希 `20cb1b1f766529a88aa5f3346a4761b77eca66b7`，提交信息 feat: implement wugu and tiesuo card-body slice）；基线提交 `6af30432993d908546d7cec114fd78ae62798ad5`（里程碑标签 `milestone-b2-group-target-tricks-audited` 指向该提交）；2026-08-04 独立审计完成：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES（审计问题关闭提交 `5b1c2c15b6a8e21563aab02d8a5c181c553e4967`），最终独立复审结论 AUDIT_PASSED（最终措辞修正提交 `b2d4ffca18092938437d15826efdaddba8a0a689`）；里程碑标签 `milestone-b2-wugu-tiesuo-card-body-audited` 由用户在本次最终文档提交后立即建立（本轮未执行 git tag）。
-- 属性伤害传导基础设施（`CP-04J-PRODUCTION-CHAIN-DAMAGE-INFRASTRUCTURE`）：横置角色受火／雷属性伤害后按统一生产管线确定性传导（见 2.10 节）；已由用户在外部PowerShell提交实现（实现提交哈希 `c094bff5dab127917e8d0b9a2d3422e3ab736783`，提交信息 feat: implement production chain damage infrastructure）；尚未完成独立审计（independent_audit_done=false，audit_conclusion=NOT_AUDITED_YET），里程碑标签为 null，不得视为 audited。
+- 属性伤害传导基础设施（`CP-04J-PRODUCTION-CHAIN-DAMAGE-INFRASTRUCTURE`）：横置角色受火／雷属性伤害后按统一生产管线确定性传导（见 2.10 节）；已由用户在外部PowerShell提交实现（实现提交哈希 `c094bff5dab127917e8d0b9a2d3422e3ab736783`，提交信息 feat: implement production chain damage infrastructure；检查点文档提交 `55228c9d464daac6eb061ba356b0497ec814eba6`；审计残项关闭提交 `68e419b79e379184c1f1cc7ad650039771530f89`，fix: close chain damage audit gaps）；2026-08-04 独立审计完成：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED（status=audited、independent_audit_done=true、audit_conclusion=AUDIT_PASSED）；里程碑标签 `milestone-b2-chain-damage-infrastructure-audited` 由用户在本次最终文档提交后立即建立（本轮未执行 git tag、未验证标签已存在）。
 
 ## 9. 下一可验收版本
 

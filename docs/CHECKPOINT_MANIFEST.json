@@ -38,7 +38,10 @@
     "remaining_ordinary_tricks_implement_commit": "20cb1b1f766529a88aa5f3346a4761b77eca66b7",
     "remaining_ordinary_tricks_implement_commit_note": "剩余普通锦囊批次（CP-04I：【五谷丰登】完整生产语义＋【铁索连环】牌本体）已由用户在外部PowerShell提交，提交信息为 feat: implement wugu and tiesuo card-body slice，完整提交哈希为 20cb1b1f766529a88aa5f3346a4761b77eca66b7；2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED；审计问题关闭提交 5b1c2c15b6a8e21563aab02d8a5c181c553e4967，最终措辞修正提交 b2d4ffca18092938437d15826efdaddba8a0a689；里程碑标签 milestone-b2-wugu-tiesuo-card-body-audited 由用户在本次最终文档提交后立即建立（本轮未执行 git tag、未验证标签已存在）；remaining_ordinary_tricks_worktree_branch 保留原含义，指工作树实现验证所基于的分支",
     "chain_damage_infrastructure_implement_commit": "c094bff5dab127917e8d0b9a2d3422e3ab736783",
-    "chain_damage_infrastructure_implement_commit_note": "属性伤害传导生产基础设施（CP-04J）已由用户在外部PowerShell创建真实实现提交：提交信息为 feat: implement production chain damage infrastructure，完整提交哈希为 c094bff5dab127917e8d0b9a2d3422e3ab736783；当前尚未完成独立审计（independent_audit_done=false，audit_conclusion=NOT_AUDITED_YET），不得视为 audited"
+    "chain_damage_infrastructure_implement_commit_note": "属性伤害传导生产基础设施（CP-04J）已由用户在外部PowerShell创建真实实现提交：提交信息为 feat: implement production chain damage infrastructure，完整提交哈希为 c094bff5dab127917e8d0b9a2d3422e3ab736783；检查点文档提交 55228c9d464daac6eb061ba356b0497ec814eba6（docs: record chain damage infrastructure checkpoint）；审计残项关闭提交 68e419b79e379184c1f1cc7ad650039771530f89（fix: close chain damage audit gaps）；2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED，审计残项 N1-N4 已由审计残项关闭提交正式关闭",
+    "chain_damage_infrastructure_checkpoint_commit": "55228c9d464daac6eb061ba356b0497ec814eba6",
+    "chain_damage_infrastructure_audit_close_commit": "68e419b79e379184c1f1cc7ad650039771530f89",
+    "chain_damage_infrastructure_audit_close_note": "CP-04J 最终独立复审结论 AUDIT_PASSED（2026-08-04）；初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES；审计残项 N1-N4 已由提交 68e419b79e379184c1f1cc7ad650039771530f89（fix: close chain damage audit gaps）正式关闭；里程碑标签 milestone-b2-chain-damage-infrastructure-audited 为本次最终文档提交后由用户立即建立的标签名称（本轮未执行 git tag、未验证标签已存在）"
   },
   "feature_status": {
     "authoritative_core_foundation": true,
@@ -197,15 +200,28 @@
     },
     {
       "id": "CP-04J-PRODUCTION-CHAIN-DAMAGE-INFRASTRUCTURE",
-      "status": "committed_pending_audit",
+      "status": "audited",
       "commit": "c094bff5dab127917e8d0b9a2d3422e3ab736783",
-      "commit_note": "本批（横置角色火／雷属性伤害传导生产基础设施）已由用户在外部PowerShell创建真实实现提交：提交信息为 feat: implement production chain damage infrastructure，完整提交哈希为 c094bff5dab127917e8d0b9a2d3422e3ab736783；统一传导入口已接通火杀、雷杀、火攻与通用伤害管线，CP-04I 临时属性伤害失败关闭门禁已移除；铁索连环完整语义完成（tiesuo_card_body_implemented=true、tiesuo_chain_damage_implemented=true、tiesuo_full_semantics_complete=true）；实现提交时完整 pytest 1503 passed（失败0、跳过0），compileall 通过，源码完整性审计 scanned_file_count=116、defect_count=0、audit_item_count=55；当前尚未完成独立审计（independent_audit_done=false，audit_conclusion=NOT_AUDITED_YET），里程碑标签为 null，该提交不得视为 audited；独立审计残项 N1-N4 已在本工作树关闭（待用户提交）：stopped_winner 不再列为合法 result、链事件契约完整校验、prevented_zero 控制流修复、Knowledge 保留 CP-04I 历史并追加 CP-04J 说明，审计残项关闭后完整 pytest 1543 passed。",
+      "commit_note": "本批（横置角色火／雷属性伤害传导生产基础设施）真实提交链：基线里程碑提交 f0e7e3eab559935ee20fd6ff65813764b99b0ddd（docs: finalize wugu and tiesuo card-body audit milestone，里程碑标签 milestone-b2-wugu-tiesuo-card-body-audited）；实现提交 c094bff5dab127917e8d0b9a2d3422e3ab736783（feat: implement production chain damage infrastructure）；检查点文档提交 55228c9d464daac6eb061ba356b0497ec814eba6（docs: record chain damage infrastructure checkpoint）；审计残项关闭提交 68e419b79e379184c1f1cc7ad650039771530f89（fix: close chain damage audit gaps）。统一传导入口已接通火杀、雷杀、火攻与通用伤害管线，CP-04I 临时属性伤害失败关闭门禁已移除；铁索连环完整语义完成（tiesuo_card_body_implemented=true、tiesuo_chain_damage_implemented=true、tiesuo_full_semantics_complete=true，均限于当前双人正式生产入口范围）；实现提交时完整 pytest 1503 passed（失败0、跳过0），审计残项关闭后完整 pytest 1543 passed（失败0、跳过0），compileall 通过，源码完整性审计 scanned_file_count=116、defect_count=0、audit_item_count=55。2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED；审计残项 N1-N4 已由审计残项关闭提交正式关闭；里程碑标签 milestone-b2-chain-damage-infrastructure-audited 由用户在本次最终文档提交后立即建立（本轮未执行 git tag）。",
       "evidence": "scripts/sgs_engine/production_batch.py、scripts/sgs_engine/events.py、scripts/sgs_engine/production_cards.py、tests/test_sgs_production_chain_damage.py；正式160张牌堆双人生产入口传导基础设施",
       "scope": "formal；横置角色实际受到大于0点火／雷属性伤害后解除横置并按当前回合角色为锚点的座次递增顺序确定性传导；传导伤害继承原始来源、实体牌、伤害属性与使用记录；每名候选以根基数独立结算并完整处理伤害、濒死、救援与死亡；濒死期间挂起并在救援后恢复准确索引；胜利成立时确定性清理未开始目标；严格回放事件链与执行哈希接入；不包含新卡牌适配器、借刀杀人（CP-04K）、装备武器、延时锦囊、防具坐骑宝物、武将技能与三人以上正式生产入口（multi_player_production_proven=false）",
       "audit": {
-        "independent_audit_done": false,
-        "audit_conclusion": "NOT_AUDITED_YET",
-        "milestone_tag": null
+        "independent_audit_done": true,
+        "audit_conclusion": "AUDIT_PASSED",
+        "conclusion": "AUDIT_PASSED",
+        "initial_conclusion": "AUDIT_PASSED_WITH_NONBLOCKING_ISSUES",
+        "final_reaudit_conclusion": "AUDIT_PASSED",
+        "audited_at": "2026-08-04",
+        "auditor_note": "最终独立复审；初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES；审计残项 N1-N4 已由提交 68e419b79e379184c1f1cc7ad650039771530f89（fix: close chain damage audit gaps）正式关闭；N1：stopped_winner 不再是合法 chain_target_resolved.result，winner 只产生 chain_damage_finished(stop_reason=winner)；N2：三个链事件增加严格字段集、类型、枚举和组合校验（缺字段、多余字段、bool 冒充整数、非法 result、非法 stop_reason、非法列表结构等均被拒绝）；N3：增加 CONTINUE/FINISHED/PAUSED 明确控制流，prevented_zero 后立即结束传导，不再访问已清理的 pending_chain、不产生第二次 finished 事件、不处理后续目标、不抛二次 ProductionBatchError；N4：保留 CP-04I 历史说明，Knowledge 已追加 CP-04J 当前双人生产范围说明，三人以上仍为 NOT PROVEN，prevented_zero 尚未由正式减伤路径端到端证明；无规则、契约、回放或安全阻塞问题",
+        "audit_close_commit": "68e419b79e379184c1f1cc7ad650039771530f89",
+        "audit_close_commit_message": "fix: close chain damage audit gaps",
+        "implementation_commit": "c094bff5dab127917e8d0b9a2d3422e3ab736783",
+        "checkpoint_commit": "55228c9d464daac6eb061ba356b0497ec814eba6",
+        "audit_gap_fix_commit": "68e419b79e379184c1f1cc7ad650039771530f89",
+        "final_audit_conclusion": "AUDIT_PASSED",
+        "milestone_tag": "milestone-b2-chain-damage-infrastructure-audited",
+        "milestone_tag_note": "本次最终文档提交后由用户立即在外部PowerShell建立的标签名称；本轮未执行 git tag，未验证标签已存在；用户建立标签后该字段即与 Git 状态完全一致",
+        "final_status": "audited"
       }
     }
   ],
@@ -226,6 +242,19 @@
       "scanned_python_files": 116,
       "defect_count": 0,
       "audit_item_count": 55
+    },
+    "cp04j_final_reaudit": {
+      "event_contract_tests_passed": 63,
+      "event_contract_tests_file": "tests/test_sgs_engine_events.py",
+      "chain_damage_tests_passed": 44,
+      "chain_damage_tests_file": "tests/test_sgs_production_chain_damage.py",
+      "wugu_tiesuo_batch_tests_passed": 60,
+      "wugu_tiesuo_batch_tests_file": "tests/test_sgs_production_remaining_ordinary_tricks.py",
+      "final_reaudit_directed_regression_passed": 434,
+      "git_diff_check": "passed",
+      "sha256_blob_entries_matched": 31,
+      "final_reaudit_conclusion": "AUDIT_PASSED",
+      "note": "完整 pytest 1543 passed（失败0、跳过0）、compileall 通过、源码完整性审计 scanned_file_count=116、defect_count=0、audit_item_count=55 见本对象相邻字段；上述数字均为 2026-08-04 最终独立复审实际运行记录，本轮纯文档收尾未重新运行完整 pytest"
     },
     "test_only_duel_status": {
       "test_only": true,
@@ -486,24 +515,27 @@
       "implemented": true,
       "tested": true,
       "worktree_commit_pending": false,
-      "worktree_commit_pending_note": "实现提交 c094bff5dab127917e8d0b9a2d3422e3ab736783 已存在；当前待完成的是独立审计及审计收尾（independent_audit_done=false，audit_conclusion=NOT_AUDITED_YET），不是待用户提交工作树",
-      "independent_audit_done": false,
-      "audit_conclusion": "NOT_AUDITED_YET",
-      "milestone_tag": null,
+      "worktree_commit_pending_note": "实现提交 c094bff5dab127917e8d0b9a2d3422e3ab736783、检查点文档提交 55228c9d464daac6eb061ba356b0497ec814eba6 与审计残项关闭提交 68e419b79e379184c1f1cc7ad650039771530f89 均已存在；独立审计及审计收尾已完成（independent_audit_done=true，audit_conclusion=AUDIT_PASSED），不是待用户提交工作树",
+      "independent_audit_done": true,
+      "audit_conclusion": "AUDIT_PASSED",
+      "initial_audit_conclusion": "AUDIT_PASSED_WITH_NONBLOCKING_ISSUES",
+      "final_reaudit_conclusion": "AUDIT_PASSED",
+      "milestone_tag": "milestone-b2-chain-damage-infrastructure-audited",
+      "milestone_tag_note": "本次最终文档提交后由用户立即在外部PowerShell建立的标签名称；本轮未执行 git tag，未验证标签已存在；用户建立标签后该字段即与 Git 状态完全一致",
       "chain_damage_runtime_gate": "implemented",
       "chain_damage_runtime_gate_note": "CP-04I 临时失败关闭门禁已移除；统一属性伤害传导管线已接通火杀、雷杀、火攻与通用伤害入口",
       "tiesuo_chain_damage_implemented": true,
       "tiesuo_full_semantics_complete": true,
       "multi_player_production_proven": false,
       "approximation_count": 0,
-      "audit_residual_note": "N1-N4 已在本工作树关闭（待用户提交）：stopped_winner 非合法 result；链事件契约完整校验；prevented_zero 控制流修复；Knowledge 保留 CP-04I 历史并追加 CP-04J 说明"
+      "audit_closure_note": "N1-N4 已由提交 68e419b79e379184c1f1cc7ad650039771530f89（fix: close chain damage audit gaps）正式关闭：stopped_winner 非合法 result；三个链事件完整字段集／类型／枚举／组合校验；prevented_zero 采用 CONTINUE/FINISHED/PAUSED 控制流并立即结束传导；Knowledge 保留 CP-04I 历史并追加 CP-04J 当前双人生产范围说明（三人以上 NOT PROVEN，prevented_zero 无正式减伤路径端到端证明）"
     }
   },
   "sha256": {
-    "docs/ENGINE_STATUS.md": "762fbb0625a7908e22295240fae51fad372281a6082446b06b3de343da19ccc3",
-    "docs/IMPLEMENTATION_MATRIX.md": "4144eef01dcabb1032b7ababb337d02c4b3aa0246a816f4c79d8c38a72592fce",
+    "docs/ENGINE_STATUS.md": "96d478bf3384d5d13882b1498263b8bedcd024762304084c967e647a30ab5565",
+    "docs/IMPLEMENTATION_MATRIX.md": "6df2ee189c2809adf0a20081acf0b6ab154f2550d4c805fbf209579434ae509c",
     "docs/LEGACY_RESULTS_INVALID.md": "267d51329b65b4435ed770b9fe90a0d53148d17cc9b0dae3e6d3406b06c0c0cc",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "1a7cf7b2a2a83c4a11025075cbf02283b23e9865e1afff4c24fd155863ab560d",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "81037dbf36f96c76c2c9cafc3af934e697fa52f8ef1d5a1b80238fd7750aec2c",
     "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "23b56a0edf0c85657b332100538013de16be4d71ea6a8214ac862a6708105af6",
     "knowledge/三国杀牌堆数据.csv": "8cb8da4177f11962776ae0f7e0154ed4ce56e293e96ac457874d48650517de18",
     "scripts/sgs_dev_runner.py": "6f88baa78fc9c22106188defda7190cd2a4412325db46f3964d217fd0e61c755",
