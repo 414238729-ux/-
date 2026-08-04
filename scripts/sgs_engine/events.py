@@ -243,6 +243,8 @@ _CHAIN_FINISHED_FIELDS: frozenset[str] = frozenset(
         "stop_reason",
     }
 )
+_EQUIPMENT_EQUIPPED_REASONS: frozenset[str] = frozenset({"equip"})
+_EQUIPMENT_REMOVED_REASONS: frozenset[str] = frozenset({"replaced"})
 
 
 def _validate_nonempty_text(value: object, label: str) -> str:
@@ -352,10 +354,22 @@ def validate_event_contract(event: GameEvent) -> GameEvent:
             raise ValueError(
                 "装备事件payload字段必须恰好为slot与reason"
             )
+        reason = event.payload["reason"]
+        if not isinstance(reason, str) or reason not in _EQUIPMENT_EQUIPPED_REASONS:
+            raise ValueError(
+                "装备事件reason只能是equip；"
+                "不得使用任意自由文本或未知reason"
+            )
     if event.event_type is EventType.EQUIPMENT_REMOVED:
         if set(event.payload) != {"slot", "reason"}:
             raise ValueError(
                 "装备移除事件payload字段必须恰好为slot与reason"
+            )
+        reason = event.payload["reason"]
+        if not isinstance(reason, str) or reason not in _EQUIPMENT_REMOVED_REASONS:
+            raise ValueError(
+                "装备移除事件reason只能是replaced；"
+                "不得使用任意自由文本或未知reason"
             )
     if event.event_type is EventType.EQUIPMENT_REPLACED:
         if set(event.payload) != {
@@ -367,6 +381,7 @@ def validate_event_contract(event: GameEvent) -> GameEvent:
                 "装备替换事件payload字段必须恰好为slot、"
                 "old_instance_id与new_instance_id"
             )
+        # 生产实现中 equipment_replaced 没有 reason 字段，不为统一形式凭空增加。
     if event.event_type is EventType.LOSE_HP:
         if len(event.target_ids) != 1:
             raise ValueError("失去体力事件必须且只能指定一名目标角色")

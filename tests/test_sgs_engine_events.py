@@ -706,6 +706,116 @@ def test_chain_events_reject_extra_field(
         _chain_event(event_type, payload)
 
 
+# ----------------------------------------------------------------------
+# 装备事件 reason 封闭枚举（CP-04K 审计残项 N1）
+# ----------------------------------------------------------------------
+
+
+def _equipment_event(
+    event_type: EventType,
+    *,
+    payload: dict[str, object],
+    owner: str = "p1",
+) -> GameEvent:
+    return GameEvent(
+        event_type=event_type,
+        card_instance_id="sgs-mobile-20260725-138",
+        card_key="sgs_weapon_qinggangjian",
+        equipment_owner=owner,
+        target_ids=(owner,),
+        payload=payload,
+    )
+
+
+def test_equipment_equipped_reason_enum_legal() -> None:
+    event = _equipment_event(
+        EventType.EQUIPMENT_EQUIPPED,
+        payload={"slot": "weapon", "reason": "equip"},
+    )
+    assert event.payload["reason"] == "equip"
+
+
+def test_equipment_removed_reason_enum_legal() -> None:
+    event = _equipment_event(
+        EventType.EQUIPMENT_REMOVED,
+        payload={"slot": "weapon", "reason": "replaced"},
+    )
+    assert event.payload["reason"] == "replaced"
+
+
+def test_equipment_replaced_has_no_reason_field() -> None:
+    # 生产实现中 equipment_replaced 只有 slot/old_instance_id/new_instance_id；
+    # 不为统一形式凭空增加 reason。
+    event = _equipment_event(
+        EventType.EQUIPMENT_REPLACED,
+        payload={
+            "slot": "weapon",
+            "old_instance_id": "sgs-mobile-20260725-137",
+            "new_instance_id": "sgs-mobile-20260725-138",
+        },
+    )
+    assert "reason" not in event.payload
+    with pytest.raises(ValueError, match="字段必须恰好"):
+        _equipment_event(
+            EventType.EQUIPMENT_REPLACED,
+            payload={
+                "slot": "weapon",
+                "old_instance_id": "sgs-mobile-20260725-137",
+                "new_instance_id": "sgs-mobile-20260725-138",
+                "reason": "replaced",
+            },
+        )
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload"),
+    [
+        (
+            EventType.EQUIPMENT_EQUIPPED,
+            {"slot": "weapon", "reason": "replaced"},
+        ),
+        (
+            EventType.EQUIPMENT_EQUIPPED,
+            {"slot": "weapon", "reason": ""},
+        ),
+        (
+            EventType.EQUIPMENT_EQUIPPED,
+            {"slot": "weapon", "reason": 123},
+        ),
+        (
+            EventType.EQUIPMENT_REMOVED,
+            {"slot": "weapon", "reason": "equip"},
+        ),
+        (
+            EventType.EQUIPMENT_REMOVED,
+            {"slot": "weapon", "reason": ""},
+        ),
+        (
+            EventType.EQUIPMENT_REMOVED,
+            {"slot": "weapon", "reason": ["replaced"]},
+        ),
+    ],
+)
+def test_equipment_events_reject_invalid_reason(
+    event_type: EventType, payload: dict[str, object]
+) -> None:
+    with pytest.raises(ValueError, match="reason只能是"):
+        _equipment_event(event_type, payload=payload)
+
+
+def test_equipment_events_reject_unknown_reason() -> None:
+    with pytest.raises(ValueError, match="reason只能是"):
+        _equipment_event(
+            EventType.EQUIPMENT_EQUIPPED,
+            payload={"slot": "weapon", "reason": "borrowed_sword_gain"},
+        )
+    with pytest.raises(ValueError, match="reason只能是"):
+        _equipment_event(
+            EventType.EQUIPMENT_REMOVED,
+            payload={"slot": "weapon", "reason": "destroyed"},
+        )
+
+
 # ---------------------------------------------------------------------
 # CP-04K：装备最小事件契约（equipment_equipped / removed / replaced）
 # ---------------------------------------------------------------------

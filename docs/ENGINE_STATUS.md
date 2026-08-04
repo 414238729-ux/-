@@ -1,7 +1,7 @@
 # 三国杀正式引擎状态
 
 > 更新日期：2026-08-04
-> 状态：已有权威核心 foundation、测试专用最小单挑纵向切片、正式160张牌堆上六种基本牌的生产适配器批次、最小普通锦囊垂直切片（【无中生有】、【无懈可击】），以及目标区域选牌批次（【过河拆桥】6张、【顺手牵羊】5张接入生产适配器），以及伤害型普通锦囊批次（【决斗】3张、【火攻】3张接入生产适配器，2026-08-03已通过独立只读审计AUDIT_PASSED_WITH_NONBLOCKING_ISSUES），以及群体普通锦囊批次（【南蛮入侵】3张、【万箭齐发】1张、【桃园结义】1张接入生产适配器并建立逐目标结算框架，已由用户在外部PowerShell提交（实现提交哈希 `5f2fbf27b7041bbf3010636de37306eea5da6256`），2026-08-03 完成独立只读审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED），以及剩余普通锦囊批次（【五谷丰登】2张完整生产语义＋【铁索连环】6张牌本体接入生产适配器，已由用户在外部PowerShell提交，实现提交哈希 `20cb1b1f766529a88aa5f3346a4761b77eca66b7`，提交信息 feat: implement wugu and tiesuo card-body slice；2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED，见 2.9 节），以及属性伤害传导生产基础设施（CP-04J，已由用户在外部PowerShell提交实现提交 `c094bff5dab127917e8d0b9a2d3422e3ab736783`，审计残项关闭提交 `68e419b79e379184c1f1cc7ad650039771530f89`；2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED，见 2.10 节），以及【借刀杀人】＋11种武器牌本体批次（CP-04K：普通锦囊最后一张【借刀杀人】完整双人生产语义、11种／12张武器牌本体主动装备与同槽替换、按角色出杀计数、武器专属技能集中式失败关闭门禁；已由用户在外部PowerShell提交，最终实现提交 `75c596b12f34a6222d972b2190148386bb670653`（feat: implement borrowed sword and weapon card-body system），amend 替代旧提交 `7456377f...`；尚未进行独立只读审计）；但正式整局引擎仍未完成，正式入口继续失败关闭。
+> 状态：已有权威核心 foundation、测试专用最小单挑纵向切片、正式160张牌堆上六种基本牌的生产适配器批次、最小普通锦囊垂直切片（【无中生有】、【无懈可击】），以及目标区域选牌批次（【过河拆桥】6张、【顺手牵羊】5张接入生产适配器），以及伤害型普通锦囊批次（【决斗】3张、【火攻】3张接入生产适配器，2026-08-03已通过独立只读审计AUDIT_PASSED_WITH_NONBLOCKING_ISSUES），以及群体普通锦囊批次（【南蛮入侵】3张、【万箭齐发】1张、【桃园结义】1张接入生产适配器并建立逐目标结算框架，已由用户在外部PowerShell提交（实现提交哈希 `5f2fbf27b7041bbf3010636de37306eea5da6256`），2026-08-03 完成独立只读审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED），以及剩余普通锦囊批次（【五谷丰登】2张完整生产语义＋【铁索连环】6张牌本体接入生产适配器，已由用户在外部PowerShell提交，实现提交哈希 `20cb1b1f766529a88aa5f3346a4761b77eca66b7`，提交信息 feat: implement wugu and tiesuo card-body slice；2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED，见 2.9 节），以及属性伤害传导生产基础设施（CP-04J，已由用户在外部PowerShell提交实现提交 `c094bff5dab127917e8d0b9a2d3422e3ab736783`，审计残项关闭提交 `68e419b79e379184c1f1cc7ad650039771530f89`；2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED，见 2.10 节），以及【借刀杀人】＋11种武器牌本体批次（CP-04K：普通锦囊最后一张【借刀杀人】完整双人生产语义、11种／12张武器牌本体主动装备与同槽替换、按角色出杀计数、武器专属技能集中式失败关闭门禁；已由用户在外部PowerShell提交，最终实现提交 `75c596b12f34a6222d972b2190148386bb670653`（feat: implement borrowed sword and weapon card-body system），amend 替代旧提交 `7456377f...`；首次独立只读审计已完成（结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，N1-N3 非阻塞问题已在本工作树关闭，待用户提交））；但正式整局引擎仍未完成，正式入口继续失败关闭。
 > 本文是运行能力状态页，不得用测试总数或文档完整度替换完整引擎验收。
 
 ## 0. 机器可读状态摘要
@@ -116,7 +116,7 @@ approximation_count=0
 | 当前是否存在正式多进程胜率入口 | 否 |
 | 外部 `sgs_sim_engine_worker.py` 是否是正式引擎 | 否；它位于 Downloads，未被仓库导入，是独立近似器 |
 | 外部 `sgs_ai_audit_20260729.py` 是否调用真实 AI | 否；它使用本文件内微场景与自证式 `chosen = expected` |
-| 当前组件测试是否通过 | 是；本轮最终完整测试为 `1635 passed`，失败0、跳过0 |
+| 当前组件测试是否通过 | 是；本轮最终完整测试为 `1649 passed`，失败0、跳过0 |
 
 ## 2. 当前正式资产
 
@@ -289,7 +289,10 @@ CP-04J 在双人生产入口上接通统一属性伤害传导管线（实现提�
 - 选择【杀】即视为履行借刀要求：产生第一目标自己的正常 `card_used`、正常进入闪响应、伤害、濒死、救援、死亡与属性传导，即使被闪抵消或未造成伤害也不再交武器；拒绝或没有合法【杀】时把第一目标当前武器直接移入使用者手牌（`card_moved`／`card_lost`／`card_gained`，reason=`jiedaosharen_weapon_gain`），无武器或使用者已死亡时记录 `no_weapon_to_transfer` 且不移动；
 - 借刀是外层根，被要求使用的【杀】是子结算：杀等待闪、濒死救援与属性传导期间借刀保持挂起，子结算完成后恢复并只弃置根借刀一次；终局清理时根借刀从处理区确定性进入弃牌堆，处理区不遗留；
 - 11种武器专属技能全部保持 partial，建立集中式 `check_weapon_skill_gate` 影响矩阵：能从当前完整公开状态证明不影响本次合法性、可选动作或结算结果时继续通用牌本体流程，否则在首次相关判断前抛 `UnsupportedRuleError`（如雌雄双股剑因无性别字段对另一角色出杀一律失败关闭、丈八蛇矛手牌≥2张时失败关闭、朱雀羽扇实体普通杀失败关闭、诸葛连弩主动额外杀依赖技能时失败关闭但借刀强制杀不依赖连弩）；
-- 新增80项专项测试（`tests/test_sgs_production_borrowed_sword_weapon_system.py`）并扩展12项装备事件契约测试（`tests/test_sgs_engine_events.py`）；完整 pytest 为 `1635 passed`（失败0、跳过0）。
+- 装备事件 reason 封闭枚举（N1）：`equipment_equipped` 仅允许 `equip`、`equipment_removed` 仅允许 `replaced`、`equipment_replaced` 无 reason 字段；非字符串、空字符串与未知 reason 一律拒绝，正常主动装备与同槽替换事件不受影响；
+- 12张武器实体路径覆盖（N2）：从正式注册表枚举全部12张武器实体（含两张诸葛连弩）分别走 enumerate→validate→apply 真实装备路径，断言实体ID、离开手牌、进入weapon槽与 equipment_equipped 事件实体ID；
+- 关键专项与严格回放（N3）：拒绝出杀后第一目标与借刀使用者 `slash_used_counts` 均完全不变；借刀→子杀→濒死→救援失败→胜利的完整回放严格重执行（挂起清空、根借刀只清理一次且进弃牌堆、无后续武器交付、状态/执行/事件链/record哈希一致）；`no_weapon_to_transfer` 单字段篡改失败关闭；第二目标在回放与实况中均无独立无懈窗口（`pending_trick.target_id` 始终为第一目标，伪造第二目标窗口决策重执行失败关闭）；
+- 新增80项专项测试（`tests/test_sgs_production_borrowed_sword_weapon_system.py`）并扩展12项装备事件契约测试（`tests/test_sgs_engine_events.py`）；CP-04K 首次独立审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，N1-N3 已在本工作树关闭（待用户提交），审计残项关闭后完整 pytest 为 `1649 passed`（失败0、跳过0），SHA-256 清单33个文件条目全部匹配；另有1个 `hash_note` 元数据项，不计作文件哈希。
 
 本批次只验证双人生产切片：不构成武器技能完成、装备全部完成、正式单挑完成或里程碑 B 完成；三人以上借刀与“使用者死亡但游戏未结束”等边界未由正式生产入口证明。
 
@@ -438,7 +441,7 @@ AI合法动作枚举完整
 
 里程碑 A 的提交只证明隔离三牌切片，不证明正式160张牌无技能单挑完成。
 - 剩余普通锦囊批次（`CP-04I-PRODUCTION-REMAINING-ORDINARY-TRICK-BATCH`）：【五谷丰登】2张完整生产语义＋【铁索连环】6张牌本体接入生产适配器（见 2.9 节）；已由用户在外部PowerShell提交实现（实现提交哈希 `20cb1b1f766529a88aa5f3346a4761b77eca66b7`，提交信息 feat: implement wugu and tiesuo card-body slice）；基线提交 `6af30432993d908546d7cec114fd78ae62798ad5`（里程碑标签 `milestone-b2-group-target-tricks-audited` 指向该提交）；2026-08-04 独立审计完成：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES（审计问题关闭提交 `5b1c2c15b6a8e21563aab02d8a5c181c553e4967`），最终独立复审结论 AUDIT_PASSED（最终措辞修正提交 `b2d4ffca18092938437d15826efdaddba8a0a689`）；里程碑标签 `milestone-b2-wugu-tiesuo-card-body-audited` 由用户在本次最终文档提交后立即建立（本轮未执行 git tag）。
-- 【借刀杀人】＋11种武器牌本体批次（`CP-04K-PRODUCTION-BORROWED-SWORD-WEAPON-SYSTEM`）：普通锦囊最后一张【借刀杀人】完整双人生产语义与11种／12张武器牌本体接入生产适配器（见 2.11 节）；已由用户在外部PowerShell提交真实实现提交（最终提交哈希 `75c596b12f34a6222d972b2190148386bb670653`，feat: implement borrowed sword and weapon card-body system；amend 替代旧提交 `7456377f...`；测试文件末尾多余空行已在 amend 前修正）；当前工作树干净、尚未进行独立只读审计；本批基线为 `3ea01f4e8603dd96698a2e5deee09c1e9b3fccef`（milestone-b2-chain-damage-infrastructure-audited）。
+- 【借刀杀人】＋11种武器牌本体批次（`CP-04K-PRODUCTION-BORROWED-SWORD-WEAPON-SYSTEM`）：普通锦囊最后一张【借刀杀人】完整双人生产语义与11种／12张武器牌本体接入生产适配器（见 2.11 节）；已由用户在外部PowerShell提交真实实现提交（最终提交哈希 `75c596b12f34a6222d972b2190148386bb670653`，feat: implement borrowed sword and weapon card-body system；amend 替代旧提交 `7456377f...`；测试文件末尾多余空行已在 amend 前修正）；当前工作树包含 N1-N3 审计残项关闭修改（待用户提交），尚未复审或标记 audited；首次独立只读审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES；本批基线为 `3ea01f4e8603dd96698a2e5deee09c1e9b3fccef`（milestone-b2-chain-damage-infrastructure-audited）。
 - 属性伤害传导基础设施（`CP-04J-PRODUCTION-CHAIN-DAMAGE-INFRASTRUCTURE`）：横置角色受火／雷属性伤害后按统一生产管线确定性传导（见 2.10 节）；已由用户在外部PowerShell提交实现（实现提交哈希 `c094bff5dab127917e8d0b9a2d3422e3ab736783`，提交信息 feat: implement production chain damage infrastructure；检查点文档提交 `55228c9d464daac6eb061ba356b0497ec814eba6`；审计残项关闭提交 `68e419b79e379184c1f1cc7ad650039771530f89`，fix: close chain damage audit gaps）；2026-08-04 独立审计完成：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED（status=audited、independent_audit_done=true、audit_conclusion=AUDIT_PASSED）；里程碑标签 `milestone-b2-chain-damage-infrastructure-audited` 由用户在本次最终文档提交后立即建立（本轮未执行 git tag、未验证标签已存在）。
 
 ## 9. 下一可验收版本

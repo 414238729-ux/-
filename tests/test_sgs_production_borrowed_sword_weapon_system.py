@@ -320,18 +320,53 @@ def test_other_unimplemented_cards_stay_fail_closed() -> None:
 # ---------------------------------------------------------------------
 
 
-def test_all_11_weapons_can_be_equipped_from_hand() -> None:
-    for weapon_key in PRODUCTION_WEAPON_KEYS:
-        game = ProductionBasicCardBatch(seed=3)
-        registry = game.formal_registry
-        record = next(r for r in registry.records if r.card_key == weapon_key)
-        _swap(game, record.instance_id, ZoneRef.hand("p1"))
-        action = _action(game, "use_weapon", card_key=weapon_key)
-        assert action is not None, f"{weapon_key}必须能从手牌主动装备"
-        _step(game, action)
-        slot = game.state.card_ids_in(ZoneRef.equipment("p1", "weapon"))
-        assert slot == (record.instance_id,)
-        assert game.phase is ProductionPhase.PLAY
+def test_all_12_weapon_entities_equipped_from_hand_via_formal_path() -> None:
+    # N2：不按11个card_key各取第一张，而是从正式注册表枚举全部12张武器实体，
+    # 每张实体分别走 enumerate -> validate -> apply 真实装备路径。
+    game = ProductionBasicCardBatch(seed=3)
+    registry = game.formal_registry
+    weapon_records = [
+        record
+        for record in registry.records
+        if record.card_key in PRODUCTION_WEAPON_KEYS
+    ]
+    assert len(PRODUCTION_WEAPON_KEYS) == 11
+    assert len(weapon_records) == 12
+    zhuge_records = [
+        record
+        for record in weapon_records
+        if record.card_key == "sgs_weapon_zhugeliannu"
+    ]
+    assert len(zhuge_records) == 2  # 两张诸葛连弩必须分别实际装备
+    for record in weapon_records:
+        equipped_game = ProductionBasicCardBatch(seed=3)
+        _swap(equipped_game, record.instance_id, ZoneRef.hand("p1"))
+        action = _action(
+            equipped_game, "use_weapon", card_key=record.card_key
+        )
+        assert action is not None, (
+            f"{record.card_key}/{record.instance_id}必须能从手牌主动装备"
+        )
+        assert action.card_instance_id == record.instance_id
+        # 真实路径：step 内部执行 validate_action -> apply_action
+        _step(equipped_game, action)
+        slot = equipped_game.state.card_ids_in(
+            ZoneRef.equipment("p1", "weapon")
+        )
+        assert slot == (record.instance_id,), (
+            f"{record.instance_id}必须进入weapon槽"
+        )
+        assert record.instance_id not in equipped_game.state.card_ids_in(
+            ZoneRef.hand("p1")
+        ), f"{record.instance_id}必须从手牌离开"
+        equipped_events = _events_of(
+            equipped_game, EventType.EQUIPMENT_EQUIPPED
+        )
+        assert len(equipped_events) == 1
+        assert equipped_events[0].card_instance_id == record.instance_id, (
+            f"{record.instance_id}的equipment_equipped事件实体ID必须正确"
+        )
+        assert equipped_game.phase is ProductionPhase.PLAY
 
 
 def test_weapon_equip_uses_card_used_and_public_events() -> None:
@@ -1022,11 +1057,25 @@ def test_has_legal_slash_but_voluntarily_refuses() -> None:
     _use_jiedao(game)
     assert game.phase is ProductionPhase.BORROWED_SWORD_CHOICE
     assert _action(game, "choose_borrowed_sword_slash") is not None
+    # N3-A：拒绝前记录双方按角色出杀计数
+    counts_before = dict(game.runtime.slash_used_counts)
+    first_target_count_before = counts_before.get("p2", 0)
+    user_count_before = counts_before.get("p1", 0)
     _refuse_borrowed_slash(game)
     assert game.phase is ProductionPhase.PLAY
     assert weapon_id in game.state.card_ids_in(ZoneRef.hand("p1"))
     assert jiedao_id in game.state.card_ids_in(DISCARD_PILE)
     assert game.runtime.pending_borrowed_sword is None
+    # 拒绝与武器交付完成后，第一目标与借刀使用者计数均完全不变
+    counts_after = dict(game.runtime.slash_used_counts)
+    assert counts_after.get("p2", 0) == first_target_count_before
+    assert counts_after.get("p1", 0) == user_count_before
+    assert not any(
+        event.event_type is EventType.CARD_USED
+        and event.card_user == "p2"
+        and event.payload.get("forced_use_context") == "borrowed_sword"
+        for event in game.events
+    )
 
 
 def test_no_entity_slash_skips_window_and_delivers_weapon() -> None:
@@ -1602,6 +1651,29 @@ def _jiedao_refuse_record() -> ProductionReexecutionReplay:
     )
 
 
+def _jiedao_victory_fixture(game: ProductionBasicCardBatch) -> None:
+    _jiedao_replay_fixture(game)
+    _set_hp(game, "p1", 1)
+
+
+def _jiedao_victory_record() -> ProductionReexecutionReplay:
+    return record_reference_production_batch(
+        seed=3,
+        controller=ScriptedBatchController(
+            [
+                {"operation": "use_jiedao", "card_key": JIEDAO},
+                {"operation": "pass_trick_response"},
+                {"operation": "pass_trick_response"},
+                {"operation": "choose_borrowed_sword_slash"},
+                {"operation": "pass_slash_response"},
+                {"operation": "pass_rescue"},
+                {"operation": "pass_rescue"},
+            ]
+        ),
+        fixture=_jiedao_victory_fixture,
+    )
+
+
 def test_jiedao_use_slash_path_strictly_reexecutes() -> None:
     record = _jiedao_use_slash_record()
     assert record.header["fixture_applied"] is True
@@ -1644,6 +1716,178 @@ def test_jiedao_refuse_path_strictly_reexecutes() -> None:
     ]
     assert len(gained) == 1
     assert tuple(gained[0]["target_ids"]) == ("p1",)
+
+
+def test_jiedao_victory_cleanup_strictly_reexecutes() -> None:
+    # N3-B：借刀要求使用杀→子杀导致濒死→救援失败产生胜利的完整回放。
+    record = _jiedao_victory_record()
+    result = reexecute_production_replay(
+        record, fixture=_jiedao_victory_fixture
+    )
+    assert result.verified is True
+    assert result.winner_id == "p2"
+    assert result.final_game_state_hash == (
+        record.outcome["final_game_state_hash"]
+    )
+    assert result.final_execution_hash == (
+        record.outcome["final_execution_hash"]
+    )
+    assert result.event_count == len(record.events)
+    assert result.event_count == len(record.event_hash_chain)
+    record.verify_integrity()
+    assert record.outcome["event_chain_tip"] == record.event_hash_chain[-1]
+    roundtrip = ProductionReexecutionReplay.from_dict(record.to_dict())
+    roundtrip.verify_integrity()
+    again = reexecute_production_replay(
+        roundtrip, fixture=_jiedao_victory_fixture
+    )
+    assert again.verified is True
+    use_decision = next(
+        decision
+        for decision in record.decisions
+        if decision["chosen_action"].get("payload", {}).get("operation")
+        == "use_jiedao"
+    )
+    jiedao_id = use_decision["chosen_action"]["card_instance_id"]
+    jiedao_moves = [
+        event
+        for event in record.events
+        if event.get("event_type") == "card_moved"
+        and event.get("card_instance_id") == jiedao_id
+    ]
+    assert len(jiedao_moves) == 2  # 手牌→处理区、处理区→弃牌堆（只清理一次）
+    cleanup = [
+        event
+        for event in jiedao_moves
+        if event.get("payload", {}).get("reason")
+        == "jiedaosharen_victory_cleanup"
+    ]
+    assert len(cleanup) == 1
+    assert cleanup[0]["payload"]["destination"]["kind"] == "discard_pile"
+    # 不发生后续武器交付
+    assert not any(
+        event.get("event_type") == "card_gained"
+        and event.get("payload", {}).get("reason")
+        == "jiedaosharen_weapon_gain"
+        for event in record.events
+    )
+    # 终局挂起与牌区状态：真实运行同一控制器路径验证
+    live = ProductionBasicCardBatch(seed=3)
+    _jiedao_victory_fixture(live)
+    live.run(
+        ScriptedBatchController(
+            [
+                {"operation": "use_jiedao", "card_key": JIEDAO},
+                {"operation": "pass_trick_response"},
+                {"operation": "pass_trick_response"},
+                {"operation": "choose_borrowed_sword_slash"},
+                {"operation": "pass_slash_response"},
+                {"operation": "pass_rescue"},
+                {"operation": "pass_rescue"},
+            ]
+        )
+    )
+    assert live.is_finished
+    assert live.runtime.pending_borrowed_sword is None
+    assert jiedao_id in live.state.card_ids_in(DISCARD_PILE)
+    assert jiedao_id not in live.state.card_ids_in(PROCESSING_ZONE)
+    assert not live.state.card_ids_in(PROCESSING_ZONE)
+
+
+def test_tampered_no_weapon_to_transfer_flag_fails_closed() -> None:
+    # N3-C：合法录制“拒绝且武器存在”路径，其结束事件 no_weapon_to_transfer=False。
+    # 真实“第二次检测时已无武器”的确定性路径需要在无懈链期间移除武器，
+    # 当前回放夹具只在开局应用、严格重执行记录结构无法表达结算中途的状态
+    # 突变（真实缺口，见报告）；因此以等价单字段篡改验证该字段受事件链保护。
+    record = _jiedao_refuse_record()
+    finish_events = [
+        event
+        for event in record.events
+        if event.get("event_type") == "card_moved"
+        and event.get("payload", {}).get("destination", {}).get("kind")
+        == "discard_pile"
+        and event.get("payload", {}).get("no_weapon_to_transfer") is not None
+    ]
+    assert len(finish_events) == 1
+    assert finish_events[0]["payload"]["no_weapon_to_transfer"] is False
+    tampered = copy.deepcopy(record.to_dict())
+    target = next(
+        event
+        for event in tampered["events"]
+        if event.get("event_type") == "card_moved"
+        and event.get("payload", {}).get("destination", {}).get("kind")
+        == "discard_pile"
+        and event.get("payload", {}).get("no_weapon_to_transfer") is not None
+    )
+    target["payload"]["no_weapon_to_transfer"] = True
+    del tampered["record_sha256"]
+    with pytest.raises(ProductionReplayFormatError):
+        ProductionReexecutionReplay.from_dict(tampered)
+
+
+def test_second_target_never_gets_independent_wuxie_window_in_replay() -> None:
+    # N3-D：真实借刀回放中，所有借刀无懈响应决策的 pending_trick.target_id
+    # 始终是第一目标p2；不存在以第二目标p1为target的新pending_trick。
+    record = _jiedao_use_slash_record()
+    jiedao_pass_decisions = [
+        decision
+        for decision in record.decisions
+        if decision["chosen_action"].get("payload", {}).get("operation")
+        == "pass_trick_response"
+        and decision["context"]["metadata"]
+        .get("pending_trick", {})
+        .get("trick_key")
+        == JIEDAO
+    ]
+    assert len(jiedao_pass_decisions) == 2
+    for decision in jiedao_pass_decisions:
+        pending_trick = decision["context"]["metadata"]["pending_trick"]
+        assert pending_trick["target_id"] == "p2"
+        assert pending_trick["target_id"] != "p1"
+    assert not any(
+        (decision["context"]["metadata"].get("pending_trick") or {}).get(
+            "target_id"
+        )
+        == "p1"
+        for decision in record.decisions
+    )
+    # 伪造第二目标独立窗口：只篡改一个决策上下文的 pending_trick.target_id
+    tampered = copy.deepcopy(record.to_dict())
+    target_decision = next(
+        decision
+        for decision in tampered["decisions"]
+        if decision["chosen_action"].get("payload", {}).get("operation")
+        == "pass_trick_response"
+        and decision["context"]["metadata"]
+        .get("pending_trick", {})
+        .get("trick_key")
+        == JIEDAO
+    )
+    target_decision["context"]["metadata"]["pending_trick"]["target_id"] = "p1"
+    del tampered["record_sha256"]
+    rebuilt = ProductionReexecutionReplay.from_dict(tampered)
+    with pytest.raises(ProductionReplayDivergenceError):
+        reexecute_production_replay(rebuilt, fixture=_jiedao_replay_fixture)
+
+
+def test_second_target_only_participates_in_first_target_wuxie_chain() -> None:
+    # N3-D 实况路径：无懈链期间每次响应前 pending_trick 都只指向第一目标，
+    # 第二目标以同一响应链参与者身份出现，不产生第二套窗口。
+    game = ProductionBasicCardBatch(seed=3)
+    _jiedao_fixture(game)
+    _step(game, _action(game, "use_jiedao", card_key=JIEDAO))
+    assert game.phase is ProductionPhase.TRICK_RESPONSE
+    jiedao_id = game.runtime.pending_trick.trick_instance_id
+    for _ in range(2):
+        assert game.runtime.pending_trick is not None
+        assert game.runtime.pending_trick.target_id == "p2"
+        assert game.runtime.pending_trick.trick_instance_id == jiedao_id
+        assert game.runtime.trick_response_order == ("p1", "p2")
+        assert game.runtime.trick_direct_response_to == jiedao_id
+        _step(game, _action(game, "pass_trick_response"))
+    assert game.phase is ProductionPhase.BORROWED_SWORD_CHOICE
+    assert game.runtime.pending_trick is not None
+    assert game.runtime.pending_trick.target_id == "p2"
 
 
 def test_jiedao_nullified_path_strictly_reexecutes() -> None:
