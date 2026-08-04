@@ -36,6 +36,9 @@ class EventType(str, Enum):
     GROUP_TARGET_RESOLVED = "group_target_resolved"
     CHAINED_STATE = "chained_state"
     CARD_RECAST = "card_recast"
+    CHAIN_DAMAGE_STARTED = "chain_damage_started"
+    CHAIN_TARGET_RESOLVED = "chain_target_resolved"
+    CHAIN_DAMAGE_FINISHED = "chain_damage_finished"
 
 
 def _validate_id(value: object, field_name: str) -> None:
@@ -250,6 +253,49 @@ def validate_event_contract(event: GameEvent) -> GameEvent:
             raise ValueError("横置状态变化事件必须提供实体牌ID与card_key")
         if len(event.target_ids) != 1:
             raise ValueError("横置状态变化事件必须且只能指定一名目标角色")
+    if event.event_type is EventType.CHAIN_DAMAGE_STARTED:
+        if event.card_instance_id is None or event.card_key is None:
+            raise ValueError("传导开始事件必须提供根实体牌ID与card_key")
+        if len(event.target_ids) != 1:
+            raise ValueError("传导开始事件必须且只能指定原始受伤角色")
+        payload = event.payload
+        for key in (
+            "root_damage_event_id",
+            "damage_type",
+            "chain_base_damage",
+            "candidate_order",
+        ):
+            if key not in payload:
+                raise ValueError(f"传导开始事件缺少payload.{key}")
+    if event.event_type is EventType.CHAIN_TARGET_RESOLVED:
+        if event.card_instance_id is None or event.card_key is None:
+            raise ValueError("传导目标结算事件必须提供根实体牌ID与card_key")
+        if len(event.target_ids) != 1:
+            raise ValueError("传导目标结算事件必须且只能指定当前目标角色")
+        payload = event.payload
+        for key in (
+            "root_damage_event_id",
+            "target_index",
+            "result",
+            "chain_base_damage",
+            "actual_damage",
+            "chained_old",
+            "chained_new",
+        ):
+            if key not in payload:
+                raise ValueError(f"传导目标结算事件缺少payload.{key}")
+    if event.event_type is EventType.CHAIN_DAMAGE_FINISHED:
+        if event.card_instance_id is None or event.card_key is None:
+            raise ValueError("传导结束事件必须提供根实体牌ID与card_key")
+        payload = event.payload
+        for key in (
+            "root_damage_event_id",
+            "processed_targets",
+            "skipped_targets",
+            "stop_reason",
+        ):
+            if key not in payload:
+                raise ValueError(f"传导结束事件缺少payload.{key}")
     if event.event_type is EventType.CARD_RECAST:
         if event.card_instance_id is None or event.card_key is None:
             raise ValueError("重铸事件必须提供实体牌ID与card_key")

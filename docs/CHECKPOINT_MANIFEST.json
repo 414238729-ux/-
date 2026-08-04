@@ -51,7 +51,8 @@
     "hidden_handle_hmac_security_fix": true,
     "production_duel_fire_attack_batch": true,
     "production_group_target_trick_batch": true,
-    "production_remaining_ordinary_trick_batch": true
+    "production_remaining_ordinary_trick_batch": true,
+    "production_chain_damage_infrastructure": true
   },
   "stage_status": {
     "1_source_and_callchain_audit": "passed",
@@ -191,15 +192,28 @@
         "milestone_tag_note": "本次最终文档提交后由用户立即在外部PowerShell建立的标签名称；本轮未执行 git tag，未验证标签已存在；用户建立标签后该字段即与 Git 状态完全一致",
         "final_status": "audited"
       }
+    },
+    {
+      "id": "CP-04J-PRODUCTION-CHAIN-DAMAGE-INFRASTRUCTURE",
+      "status": "worktree_complete_pending_user_commit",
+      "commit": null,
+      "commit_note": "本批（横置角色火／雷属性伤害传导生产基础设施）工作树实现已完成但尚未由用户在外部提交：commit=null，不虚构提交哈希；统一传导入口已接通火杀、雷杀、火攻与通用伤害管线，CP-04I 临时属性伤害失败关闭门禁已移除；铁索连环完整语义完成（tiesuo_card_body_implemented=true、tiesuo_chain_damage_implemented=true、tiesuo_full_semantics_complete=true）；完整 pytest 1503 passed（失败0、跳过0），compileall 通过，源码完整性审计 scanned_file_count=116、defect_count=0、audit_item_count=55；独立审计尚未开始（independent_audit_done=false，audit_conclusion=NOT_AUDITED_YET），里程碑标签为 null，不得视为 audited。",
+      "evidence": "scripts/sgs_engine/production_batch.py、scripts/sgs_engine/events.py、scripts/sgs_engine/production_cards.py、tests/test_sgs_production_chain_damage.py；正式160张牌堆双人生产入口传导基础设施",
+      "scope": "formal；横置角色实际受到大于0点火／雷属性伤害后解除横置并按当前回合角色为锚点的座次递增顺序确定性传导；传导伤害继承原始来源、实体牌、伤害属性与使用记录；每名候选以根基数独立结算并完整处理伤害、濒死、救援与死亡；濒死期间挂起并在救援后恢复准确索引；胜利成立时确定性清理未开始目标；严格回放事件链与执行哈希接入；不包含新卡牌适配器、借刀杀人（CP-04K）、装备武器、延时锦囊、防具坐骑宝物、武将技能与三人以上正式生产入口（multi_player_production_proven=false）",
+      "audit": {
+        "independent_audit_done": false,
+        "audit_conclusion": "NOT_AUDITED_YET",
+        "milestone_tag": null
+      }
     }
   ],
   "final_verification": {
     "pytest": {
       "command": ".\\\\.venv\\\\Scripts\\\\python.exe -m pytest -q -p no:cacheprovider",
-      "passed": 1463,
+      "passed": 1503,
       "failed": 0,
       "skipped": 0,
-      "note": "1463=1454+9：CP-04I 审计三个非阻塞问题关闭新增的回归测试（清单状态、横置角色火／雷／火攻失败关闭原子性、无属性与未横置正常结算、五谷牌量不足原子性、铁索重铸空牌堆空弃牌堆成功重洗摸回、重铸牌参与重洗候选池）"
+      "note": "1503=1463+40：CP-04J 属性伤害传导基础设施新增 40 项生产路径测试（tests/test_sgs_production_chain_damage.py）；1463=1454+9 为 CP-04I 审计三个非阻塞问题关闭新增的回归测试"
     },
     "compileall": {
       "command": ".\\\\.venv\\\\Scripts\\\\python.exe -m compileall -q scripts tests",
@@ -207,9 +221,9 @@
     },
     "source_integrity": {
       "command": ".\\\\.venv\\\\Scripts\\\\python.exe -m scripts.sgs_source_integrity_audit . --fail-on-defect",
-      "scanned_python_files": 115,
+      "scanned_python_files": 116,
       "defect_count": 0,
-      "audit_item_count": 54
+      "audit_item_count": 55
     },
     "test_only_duel_status": {
       "test_only": true,
@@ -245,10 +259,10 @@
     "milestone_b_blockers": [
       "Knowledge未闭合正式160张无技能单挑的适用范围、同将许可与首轮摸牌修正（基本牌批次已锁定双人、先手摸2约定）",
       "AuthoritativeCoreSession.run_game仍明确抛出UnsupportedRuleError",
-      "借刀杀人仍无生产实现：依赖尚未实现的装备系统（武器牌适配器、装备攻击范围、正式装备状态注入边界），等待装备生产切片（CP-04K）；借刀出杀次数口径已于2026-08-04按用户移动版实测修正：响应借刀使用【杀】不受本出牌阶段已用杀次数的前置限制、该次使用成功后正常产生card_used并计入次数、仅次数用尽不构成无合法杀（CP-04K必测清单见Knowledge 4.6.2）；铁索属性伤害传导未实现（tiesuo_chain_damage_implemented=false，等待CP-04J），铁索完整语义未完成",
+      "借刀杀人仍无生产实现：依赖尚未实现的装备系统（武器牌适配器、装备攻击范围、正式装备状态注入边界），等待装备生产切片（CP-04K）；借刀出杀次数口径已于2026-08-04按用户移动版实测修正：响应借刀使用【杀】不受本出牌阶段已用杀次数的前置限制、该次使用成功后正常产生card_used并计入次数、仅次数用尽不构成无合法杀（CP-04K必测清单见Knowledge 4.6.2）；铁索连环完整语义（含属性伤害传导）已由CP-04J完成",
       "观看、亮牌及判定彻底耗尽仍是分析约定，不能用于approximation_count=0的正式入口",
       "尚无正式160张单挑100-seed验收运行器",
-      "38种正式卡牌定义中六种基本牌、【无中生有】／【无懈可击】／【过河拆桥】／【顺手牵羊】／【决斗】／【火攻】／【南蛮入侵】／【万箭齐发】／【桃园结义】／【五谷丰登】已建立生产规则适配器，【铁索连环】已接入牌本体（6张实体，属性传导未完成不计入完整实现）；其余21种（借刀、3种延时锦囊、17种装备）仍未建立",
+      "38种正式卡牌定义中六种基本牌、【无中生有】／【无懈可击】／【过河拆桥】／【顺手牵羊】／【决斗】／【火攻】／【南蛮入侵】／【万箭齐发】／【桃园结义】／【五谷丰登】已建立生产规则适配器，【铁索连环】已接入完整语义（6张实体，含属性伤害传导）；其余21种（借刀、3种延时锦囊、17种装备）仍未建立",
       "正式卡牌处理区与完整生命周期规则仅六种基本牌与九种普通锦囊接入，其余卡牌与整局重洗调度未接入"
     ],
     "not_configured": [
@@ -430,13 +444,13 @@
       "total_implemented_entities": 126,
       "total_deck_entities": 160,
       "remaining_unimplemented_card_keys": 21,
-      "remaining_unimplemented_normal_tricks": 2,
-      "complete_implemented_card_kinds": 16,
-      "complete_implemented_entities": 120,
-      "remaining_card_kinds": 22,
+      "remaining_unimplemented_normal_tricks": 1,
+      "complete_implemented_card_kinds": 17,
+      "complete_implemented_entities": 126,
+      "remaining_card_kinds": 21,
       "tiesuo_card_body_implemented": true,
-      "tiesuo_chain_damage_implemented": false,
-      "tiesuo_full_semantics_complete": false,
+      "tiesuo_chain_damage_implemented": true,
+      "tiesuo_full_semantics_complete": true,
       "wugu_pool_zone": "revealed",
       "wugu_remaining_to_discard": "全部剩余展示牌统一进入弃牌堆（CP-04I用户确认口径）",
       "wugu_early_end_cleanup": true,
@@ -457,21 +471,36 @@
       "multi_player_production_note": "当前正式生产入口原生仅支持双人会话；三人以上五谷展示数量与完整选择顺序、铁索目标顺序与多人属性伤害传导均未由正式生产入口证明（NOT PROVEN）",
       "worktree_commit_pending": false,
       "worktree_commit_pending_note": "实现提交 20cb1b1f766529a88aa5f3346a4761b77eca66b7 已存在；独立审计及审计收尾已完成（independent_audit_done=true，audit_conclusion=AUDIT_PASSED），不是待用户提交工作树；里程碑标签 milestone-b2-wugu-tiesuo-card-body-audited 由用户在本次最终文档提交后立即建立（本轮未执行 git tag）",
-      "chain_damage_runtime_gate": "unsupported_rule_error",
-      "chain_damage_runtime_gate_note": "CP-04J 前，横置角色受到火／雷属性伤害时，统一伤害前置校验在生产入口抛 UnsupportedRuleError 且当前动作未被提交（CP-04I 审计问题2关闭）；CP-04J 实现属性伤害传导后移除该临时门禁",
+      "chain_damage_runtime_gate": "implemented",
+      "chain_damage_runtime_gate_note": "CP-04J 统一属性伤害传导管线已接通火杀、雷杀、火攻与通用伤害入口；CP-04I 临时失败关闭门禁已移除，不再抛 UnsupportedRuleError",
       "tiesuo_recast_deck_insufficient_note": "正式语义下不可达：重铸铁索先进入弃牌堆，自身即构成至少1张可重洗实体；不按动作前旧牌量预检（避免错误排除重铸牌自身），也不声明铁索重铸牌量不足失败关闭能力",
       "independent_audit_done": true,
       "audit_conclusion": "AUDIT_PASSED",
       "initial_audit_conclusion": "AUDIT_PASSED_WITH_NONBLOCKING_ISSUES",
       "adapter_implemented_card_kinds": 17,
       "adapter_implemented_entities": 126
+    },
+    "production_chain_damage_infrastructure": {
+      "implemented": true,
+      "tested": true,
+      "worktree_commit_pending": true,
+      "worktree_commit_pending_note": "CP-04J 工作树实现完成但尚未由用户在外部提交：commit=null，不得虚构提交哈希；当前待用户在外部提交后回填",
+      "independent_audit_done": false,
+      "audit_conclusion": "NOT_AUDITED_YET",
+      "milestone_tag": null,
+      "chain_damage_runtime_gate": "implemented",
+      "chain_damage_runtime_gate_note": "CP-04I 临时失败关闭门禁已移除；统一属性伤害传导管线已接通火杀、雷杀、火攻与通用伤害入口",
+      "tiesuo_chain_damage_implemented": true,
+      "tiesuo_full_semantics_complete": true,
+      "multi_player_production_proven": false,
+      "approximation_count": 0
     }
   },
   "sha256": {
-    "docs/ENGINE_STATUS.md": "45d9ad7cd89d9a9f73e0c7d440e868ad4c78dc72e4d8cdc76b42ec5848b78c29",
-    "docs/IMPLEMENTATION_MATRIX.md": "dae600a20e1324fb70bf91e150fcddfd82133d33c548f80afcb09e3ad2fc3061",
+    "docs/ENGINE_STATUS.md": "c71809d4efd594280136dab30502faa66d5c98fd50868e34ee5f623a14484635",
+    "docs/IMPLEMENTATION_MATRIX.md": "4144eef01dcabb1032b7ababb337d02c4b3aa0246a816f4c79d8c38a72592fce",
     "docs/LEGACY_RESULTS_INVALID.md": "267d51329b65b4435ed770b9fe90a0d53148d17cc9b0dae3e6d3406b06c0c0cc",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "7e4d093b0f2e1a7f605e5314a52c03de005607aec0dee7bcf20ebc8b56efe029",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "a012f5694c47822085a5d11610c8a507d42a1e3fb2bef5f5b8e5c9c437d9699b",
     "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "23b56a0edf0c85657b332100538013de16be4d71ea6a8214ac862a6708105af6",
     "knowledge/三国杀牌堆数据.csv": "8cb8da4177f11962776ae0f7e0154ed4ce56e293e96ac457874d48650517de18",
     "scripts/sgs_dev_runner.py": "6f88baa78fc9c22106188defda7190cd2a4412325db46f3964d217fd0e61c755",
@@ -480,10 +509,10 @@
     "scripts/sgs_engine/duel.py": "4e2b716e68346948b8b50fc09bac2c0160f30f43410b09aa7e6f7caaebf01218",
     "scripts/sgs_engine/duel_replay.py": "99661777d171928d6c8c0a12ff45da7bf4b051a2f26a21ae78424068a1fc1231",
     "scripts/sgs_engine/engine.py": "1a983ef03cc607644d27ac1902c961e687f1eab254679c81a6ab2e5235d824c7",
-    "scripts/sgs_engine/events.py": "6e14c278f5c93b2eeaaf679acf6c03ed011c83710d5709cc629d3aca38483090",
+    "scripts/sgs_engine/events.py": "230c9fa034c64e2894659de6232a68760620536d6e22890bd35bbdb8e59f124a",
     "scripts/sgs_engine/model.py": "54e9ddaacbd57bed216e5a98cbfded9ce1b89fe5a94b8141e6d77c46d3d9f014",
-    "scripts/sgs_engine/production_batch.py": "85eab603670f13c459dc611e59f03317a62758332dce1e6f9f463e816ae08aea",
-    "scripts/sgs_engine/production_cards.py": "82d4240c44fb8312f3bd732733ff38c88279db0065f3da4b19325a185a0edc83",
+    "scripts/sgs_engine/production_batch.py": "888d1fe2469af050fdb3653511c227a49a8a57819668a85c9626dd7422a64df4",
+    "scripts/sgs_engine/production_cards.py": "6573535168377eec5f116e4f633de7d4410a9ffd1d16ee5a22401f64792b2f6a",
     "scripts/sgs_engine/production_replay.py": "ddafa7ddfb26cd097140d252ec3281cc5c4a04d77f5c271ac9827e78e5b45459",
     "scripts/sgs_engine/replay.py": "27cd09a98e9ea09d03a6de3542d13abc94341fde4d33a5fdc5e8bdc5497580b1",
     "scripts/sgs_engine/rng.py": "3cb67017556535802c2b323e8002217961955ffee7ff161de85d804d86d5ead6",
@@ -497,7 +526,8 @@
     "tests/test_sgs_production_single_target_tricks.py": "741db6fcd08db02de258215043c55aa7cc73248bdbca51e7ad827c54af5d2444",
     "tests/test_sgs_production_zone_target_tricks.py": "5be49acce056f9cd5d52fd06776523cab8ffa4b5979c6f954de3db0ffccfba37",
     "hash_note": "本表以Git跟踪内容的规范化blob字节为权威（UTF-8无BOM）；不以不同平台检出的CRLF/LF工作树原始字节为权威；Windows core.autocrlf导致的行尾差异不视为内容漂移；CHECKPOINT_MANIFEST.json不包含自身哈希；仅作状态记录，不参与门禁校验",
-    "tests/test_sgs_production_remaining_ordinary_tricks.py": "360f52c983d7c7d62e20072aad8f91b077326bf7f00545cd212171003a70e006",
+    "tests/test_sgs_production_chain_damage.py": "7e510ff7a5c374d30e51d738d6841e2e7b4201ae0ff86b3058504a344a2721f2",
+    "tests/test_sgs_production_remaining_ordinary_tricks.py": "fe1650350a56c228ed5e9cef41c4f294356d63e1fe898a71e2e4eb16470a6cdd",
     "knowledge/三国杀卡牌效果.md": "82399ca142cf3ccf9c0311b90b53938b864c79c3a0b2f8bc6578adb3545bdb60"
   }
 }

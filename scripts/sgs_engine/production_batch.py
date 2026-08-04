@@ -254,6 +254,33 @@ class _PendingWugu:
 
 
 @dataclass(frozen=True, slots=True)
+class _PendingChainDamage:
+    """属性伤害传导的统一确定性挂起结构。
+
+    原始横置角色实际受到大于0点火／雷属性伤害后建立；每名候选在真正
+    轮到时动态检查存活与横置状态，并按根基数继承原始来源、实体牌与
+    伤害属性。濒死救援期间保持挂起，救援结束后从准确索引恢复；胜利
+    成立时确定性清理全部未开始目标。
+    """
+
+    root_damage_event_id: str
+    root_damage_source_id: str | None
+    root_card_instance_id: str
+    root_card_key: str
+    root_card_user: str
+    damage_type: str
+    chain_base_damage: int
+    original_target_id: str
+    processed_target_ids: tuple[str, ...] = ()
+    candidate_order: tuple[str, ...] = ()
+    current_index: int = 0
+    current_target_id: str | None = None
+    pause_reason: str | None = None
+    parent: "_PendingChainDamage | None" = None
+    session_id: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class _BatchRuntime:
     current_player_id: str
     turn_number: int = 1
@@ -291,6 +318,7 @@ class _BatchRuntime:
     pending_damage_kill_credit: str | None = None
     pending_damage_rescue_reason: str | None = None
     pending_damage_death_reason: str | None = None
+    pending_chain: _PendingChainDamage | None = None
     winner_id: str | None = None
 
     def audit_value(self) -> dict[str, object]:
@@ -387,6 +415,7 @@ class _BatchRuntime:
             "pending_damage_kill_credit": self.pending_damage_kill_credit,
             "pending_damage_rescue_reason": self.pending_damage_rescue_reason,
             "pending_damage_death_reason": self.pending_damage_death_reason,
+            "pending_chain": self._pending_chain_value(self.pending_chain),
             "winner_id": self.winner_id,
         }
 
@@ -416,6 +445,35 @@ class _BatchRuntime:
             "reveal_window_id": fire.reveal_window_id,
             "revealed_instance_id": fire.revealed_instance_id,
             "revealed_suit": fire.revealed_suit,
+        }
+
+    @staticmethod
+    def _pending_chain_value(
+        chain: "_PendingChainDamage | None", depth: int = 0
+    ) -> dict[str, object] | None:
+        if chain is None:
+            return None
+        if depth > 8:
+            raise ProductionBatchError("传导挂起上下文嵌套超过安全上限")
+        parent = None
+        if chain.parent is not None:
+            parent = _BatchRuntime._pending_chain_value(chain.parent, depth + 1)
+        return {
+            "root_damage_event_id": chain.root_damage_event_id,
+            "root_damage_source_id": chain.root_damage_source_id,
+            "root_card_instance_id": chain.root_card_instance_id,
+            "root_card_key": chain.root_card_key,
+            "root_card_user": chain.root_card_user,
+            "damage_type": chain.damage_type,
+            "chain_base_damage": chain.chain_base_damage,
+            "original_target_id": chain.original_target_id,
+            "processed_target_ids": list(chain.processed_target_ids),
+            "candidate_order": list(chain.candidate_order),
+            "current_index": chain.current_index,
+            "current_target_id": chain.current_target_id,
+            "pause_reason": chain.pause_reason,
+            "parent": parent,
+            "session_id": chain.session_id,
         }
 
 
@@ -836,27 +894,94 @@ def _assert_deck_available(
         )
 
 
-def _assert_chain_damage_gate(
-    state: GameState, victim_id: str, damage_type: str
-) -> None:
-    """CP-04J 前的统一临时失败关闭门禁：横置角色受火／雷属性伤害一律拒绝。
+def _chain_trigger_conditions(
+    damage_type: str,
+    victim_chained: bool,
+    actual_damage: int,
+) -> bool:
+    """属性伤害传导的统一触发判定（纯函数）。
 
-    属性伤害传导尚未实现（tiesuo_chain_damage_implemented=false）。本门禁在
-    任何生命值、事件、挂起状态、RNG 或执行哈希变化前抛出
-    :class:`UnsupportedRuleError`，不允许生成“未传导但看似完整”的正式结果；
-    无属性伤害与未横置目标不受影响。CP-04J 实现传导后应移除本门禁。
+    只有火／雷属性伤害、原始角色横置且最终实际伤害大于0时才触发；无属性
+    伤害、未横置角色与实际伤害0均不触发，也不解除横置。
     """
 
     if damage_type not in ("火属性", "雷属性"):
-        return
-    victim = state.players_by_id[victim_id]
-    if not victim.chained:
-        return
-    raise UnsupportedRuleError(
-        f"角色{victim_id}处于横置状态且将受到{damage_type}伤害；"
-        "属性伤害传导尚未实现（铁索连环完整语义等待 CP-04J），"
-        "当前动作未被提交，生产入口失败关闭"
+        return False
+    if not victim_chained:
+        return False
+    if isinstance(actual_damage, bool) or not isinstance(actual_damage, int):
+        raise TypeError("实际伤害必须是整数")
+    return actual_damage > 0
+
+
+def _ordered_chain_candidate_ids(
+    players: Sequence[PlayerState],
+    anchor_id: str,
+    original_id: str,
+) -> tuple[str, ...]:
+    """以当前回合角色为锚点、按座次递增方向循环的确定性候选顺序。
+
+    原始受伤角色永久排除；死亡与中途解除横置者不在排序阶段剔除，而是由
+    逐名动态检查确定性跳过，保证顺序不依赖玩家提交。
+    """
+
+    if not players:
+        return ()
+    by_id = {player.player_id: player for player in players}
+    if anchor_id not in by_id:
+        raise ValueError(f"找不到传导顺序锚点角色{anchor_id!r}")
+    if original_id not in by_id:
+        raise ValueError(f"找不到原始受伤角色{original_id!r}")
+    anchor_seat = by_id[anchor_id].seat
+    total = len(players)
+    ordered = sorted(
+        (player for player in players if player.player_id != original_id),
+        key=lambda player: (player.seat - anchor_seat) % total,
     )
+    return tuple(player.player_id for player in ordered)
+
+
+def _chain_dynamic_skip_reason(*, alive: bool, chained: bool) -> str | None:
+    """传导候选轮到时动态检查：返回跳过标签或None表示需要结算。"""
+
+    if not isinstance(alive, bool) or not isinstance(chained, bool):
+        raise TypeError("存活与横置状态必须是布尔值")
+    if not alive:
+        return "skipped_dead"
+    if not chained:
+        return "skipped_unchained"
+    return None
+
+
+def _chain_recipient_outcome(actual_damage: int) -> tuple[bool, str]:
+    """传导目标实际伤害结果：返回（是否解除横置，结算结果标签）。"""
+
+    if isinstance(actual_damage, bool) or not isinstance(actual_damage, int):
+        raise TypeError("实际伤害必须是整数")
+    if actual_damage <= 0:
+        return False, "prevented_zero"
+    return True, "damaged"
+
+
+def _chain_recipient_base(
+    chain_base_damage: int,
+    previous_actual_damage: int | None,
+) -> int:
+    """每名候选都以根基数开始；局部修正不改变后续候选使用的基数。"""
+
+    if (
+        isinstance(chain_base_damage, bool)
+        or not isinstance(chain_base_damage, int)
+        or chain_base_damage <= 0
+    ):
+        raise ValueError("传导根基数必须是正整数")
+    if previous_actual_damage is not None and (
+        isinstance(previous_actual_damage, bool)
+        or not isinstance(previous_actual_damage, int)
+        or previous_actual_damage < 0
+    ):
+        raise ValueError("前一名目标实际伤害必须是非负整数")
+    return chain_base_damage
 
 
 class BatchActionIdController:
@@ -1916,7 +2041,481 @@ class ProductionBasicCardBatch:
             pending_damage_kill_credit=None,
             pending_damage_rescue_reason=None,
             pending_damage_death_reason=None,
+            pending_chain=None,
         )
+
+    # ------------------------------------------------------------------
+    # 属性伤害传导（CP-04J）：统一入口、挂起、恢复与确定性清理
+    # ------------------------------------------------------------------
+
+    def _chain_started_event(
+        self, chain: _PendingChainDamage
+    ) -> GameEvent:
+        return GameEvent(
+            event_type=EventType.CHAIN_DAMAGE_STARTED,
+            card_instance_id=chain.root_card_instance_id,
+            card_key=chain.root_card_key,
+            card_user=chain.root_card_user,
+            damage_source=chain.root_damage_source_id,
+            target_ids=(chain.original_target_id,),
+            payload={
+                "root_damage_event_id": chain.root_damage_event_id,
+                "source_id": chain.root_damage_source_id,
+                "original_target_id": chain.original_target_id,
+                "damage_type": chain.damage_type,
+                "root_card_instance_id": chain.root_card_instance_id,
+                "chain_base_damage": chain.chain_base_damage,
+                "candidate_order": list(chain.candidate_order),
+            },
+        )
+
+    def _chain_target_resolved_event(
+        self,
+        chain: _PendingChainDamage,
+        target_id: str,
+        target_index: int,
+        result: str,
+        *,
+        actual_damage: int,
+        chained_old: bool,
+        chained_new: bool,
+    ) -> GameEvent:
+        return GameEvent(
+            event_type=EventType.CHAIN_TARGET_RESOLVED,
+            card_instance_id=chain.root_card_instance_id,
+            card_key=chain.root_card_key,
+            card_user=chain.root_card_user,
+            damage_source=chain.root_damage_source_id,
+            target_ids=(target_id,),
+            payload={
+                "root_damage_event_id": chain.root_damage_event_id,
+                "target_id": target_id,
+                "target_index": target_index,
+                "result": result,
+                "chain_base_damage": chain.chain_base_damage,
+                "actual_damage": actual_damage,
+                "chained_old": chained_old,
+                "chained_new": chained_new,
+            },
+        )
+
+    def _chain_finished_event(
+        self,
+        chain: _PendingChainDamage,
+        processed_targets: Sequence[str],
+        skipped_targets: Sequence[str],
+        stop_reason: str,
+    ) -> GameEvent:
+        return GameEvent(
+            event_type=EventType.CHAIN_DAMAGE_FINISHED,
+            card_instance_id=chain.root_card_instance_id,
+            card_key=chain.root_card_key,
+            card_user=chain.root_card_user,
+            damage_source=chain.root_damage_source_id,
+            target_ids=(chain.original_target_id,),
+            payload={
+                "root_damage_event_id": chain.root_damage_event_id,
+                "processed_targets": list(processed_targets),
+                "skipped_targets": list(skipped_targets),
+                "stop_reason": stop_reason,
+            },
+        )
+
+    def _begin_chain(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        *,
+        victim_id: str,
+        damage_type: str,
+        chain_base_damage: int,
+        card_instance_id: str,
+        card_key: str,
+        card_user: str,
+        source_id: str | None,
+        root_damage_event_id: int,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """原始角色实际受到大于0点属性伤害后解除横置并建立传导根。"""
+
+        victim = state.players_by_id[victim_id]
+        if not _chain_trigger_conditions(
+            damage_type, victim.chained, chain_base_damage
+        ):
+            return state, runtime
+        next_state = _replace_player(state, victim_id, chained=False)
+        candidate_order = _ordered_chain_candidate_ids(
+            next_state.players, runtime.current_player_id, victim_id
+        )
+        chain = _PendingChainDamage(
+            root_damage_event_id=str(root_damage_event_id),
+            root_damage_source_id=source_id,
+            root_card_instance_id=card_instance_id,
+            root_card_key=card_key,
+            root_card_user=card_user,
+            damage_type=damage_type,
+            chain_base_damage=chain_base_damage,
+            original_target_id=victim_id,
+            candidate_order=candidate_order,
+            session_id=self._session_id,
+        )
+        self._events.extend(
+            (
+                GameEvent(
+                    event_type=EventType.CHAINED_STATE,
+                    card_instance_id=card_instance_id,
+                    card_key=card_key,
+                    card_user=card_user,
+                    target_ids=(victim_id,),
+                    payload={
+                        "old_value": True,
+                        "new_value": False,
+                        "reason": "chain_damage_original_unchained",
+                        "root_damage_event_id": str(root_damage_event_id),
+                    },
+                ),
+                self._chain_started_event(chain),
+            )
+        )
+        return next_state, replace(runtime, pending_chain=chain)
+
+    def _apply_damage_and_maybe_chain(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        *,
+        victim_id: str,
+        amount: int,
+        damage_type: str,
+        card_instance_id: str,
+        card_key: str,
+        card_user: str,
+        source_id: str | None,
+        kill_credit: str | None,
+        payload: Mapping[str, object] | None = None,
+        resolved_reason: str,
+        death_reason: str,
+        rescue_reason: str,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """统一正式伤害管线：原始伤害、横置解除、传导根与濒死挂起。"""
+
+        victim = state.players_by_id[victim_id]
+        next_state = _replace_player(state, victim_id, hp=victim.hp - amount)
+        damage_event = DamageEvent(
+            target_id=victim_id,
+            amount=amount,
+            damage_type=damage_type,
+            card_instance_id=card_instance_id,
+            card_key=card_key,
+            card_user=card_user,
+            damage_source=source_id,
+            kill_credit=kill_credit,
+            payload=dict(payload or {}),
+        )
+        (damage_event,) = self._events.extend((damage_event,))
+        next_runtime = runtime
+        if _chain_trigger_conditions(damage_type, victim.chained, amount):
+            next_state, next_runtime = self._begin_chain(
+                next_state,
+                runtime,
+                victim_id=victim_id,
+                damage_type=damage_type,
+                chain_base_damage=amount,
+                card_instance_id=card_instance_id,
+                card_key=card_key,
+                card_user=card_user,
+                source_id=source_id,
+                root_damage_event_id=damage_event.sequence,
+            )
+        runtime = next_runtime
+        if next_state.players_by_id[victim_id].hp <= 0:
+            dying_event = GameEvent(
+                event_type=EventType.DYING,
+                damage_source=source_id,
+                kill_credit=kill_credit,
+                target_ids=(victim_id,),
+            )
+            self._events.extend((dying_event,))
+            dying_sequence = self._events.snapshot()[-1].sequence
+            assert dying_sequence is not None
+            rescue_order = (
+                runtime.current_player_id,
+                self.opponent_of(runtime.current_player_id),
+            )
+            return next_state, replace(
+                runtime,
+                phase=ProductionPhase.DYING_RESCUE,
+                pending_dying_id=victim_id,
+                rescue_order=rescue_order,
+                rescue_index=0,
+                rescue_decision_count=0,
+                response_window_id=(
+                    f"dying:{runtime.turn_number}:{victim_id}"
+                    ":seat0:dec0"
+                ),
+                response_window_order=(rescue_order[0],),
+                response_window_source_sequence=dying_sequence,
+                pending_damage_card_id=card_instance_id,
+                pending_damage_source_id=source_id,
+                pending_damage_kill_credit=kill_credit,
+                pending_damage_rescue_reason=rescue_reason,
+                pending_damage_death_reason=death_reason,
+            )
+        next_state, finish_event = self._finish_processing(
+            next_state, card_instance_id, resolved_reason
+        )
+        self._events.extend((finish_event,))
+        if runtime.pending_chain is not None:
+            return self._advance_chain(next_state, runtime)
+        return next_state, self._return_to_play(runtime)
+
+    def _apply_chain_damage_to_target(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        chain: _PendingChainDamage,
+        target_id: str,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """对当前合法候选应用一条独立传导伤害事件。"""
+
+        if target_id in chain.processed_target_ids:
+            raise ProductionBatchError("传导目标被重复处理")
+        amount = _chain_recipient_base(chain.chain_base_damage, None)
+        victim = state.players_by_id[target_id]
+        next_state = _replace_player(state, target_id, hp=victim.hp - amount)
+        damage_event = DamageEvent(
+            target_id=target_id,
+            amount=amount,
+            damage_type=chain.damage_type,
+            card_instance_id=chain.root_card_instance_id,
+            card_key=chain.root_card_key,
+            card_user=chain.root_card_user,
+            damage_source=chain.root_damage_source_id,
+            kill_credit=chain.root_damage_source_id,
+            payload={
+                "is_chain_transmitted": True,
+                "root_damage_event_id": chain.root_damage_event_id,
+                "chain_base_damage": chain.chain_base_damage,
+                "chain_target_index": chain.current_index,
+            },
+        )
+        self._events.extend((damage_event,))
+        unchain, result = _chain_recipient_outcome(amount)
+        chained_old = victim.chained
+        if unchain:
+            next_state = _replace_player(next_state, target_id, chained=False)
+            self._events.extend(
+                (
+                    GameEvent(
+                        event_type=EventType.CHAINED_STATE,
+                        card_instance_id=chain.root_card_instance_id,
+                        card_key=chain.root_card_key,
+                        card_user=chain.root_card_user,
+                        target_ids=(target_id,),
+                        payload={
+                            "old_value": chained_old,
+                            "new_value": False,
+                            "reason": "chain_damage_target_unchained",
+                            "root_damage_event_id": (
+                                chain.root_damage_event_id
+                            ),
+                        },
+                    ),
+                    self._chain_target_resolved_event(
+                        chain,
+                        target_id,
+                        chain.current_index,
+                        result,
+                        actual_damage=amount,
+                        chained_old=chained_old,
+                        chained_new=False,
+                    ),
+                )
+            )
+        else:
+            self._events.extend(
+                (
+                    self._chain_target_resolved_event(
+                        chain,
+                        target_id,
+                        chain.current_index,
+                        result,
+                        actual_damage=0,
+                        chained_old=chained_old,
+                        chained_new=chained_old,
+                    ),
+                )
+            )
+            return self._finish_chain(
+                next_state, runtime, stop_reason="prevented_zero"
+            )
+
+        processed = chain.processed_target_ids + (target_id,)
+        next_chain = replace(
+            chain,
+            processed_target_ids=processed,
+            current_index=chain.current_index + 1,
+            current_target_id=None,
+            pause_reason=None,
+        )
+        next_runtime = replace(runtime, pending_chain=next_chain)
+        if next_state.players_by_id[target_id].hp <= 0:
+            dying_event = GameEvent(
+                event_type=EventType.DYING,
+                damage_source=chain.root_damage_source_id,
+                kill_credit=chain.root_damage_source_id,
+                target_ids=(target_id,),
+            )
+            self._events.extend((dying_event,))
+            dying_sequence = self._events.snapshot()[-1].sequence
+            assert dying_sequence is not None
+            rescue_order = (
+                runtime.current_player_id,
+                self.opponent_of(runtime.current_player_id),
+            )
+            return next_state, replace(
+                next_runtime,
+                phase=ProductionPhase.DYING_RESCUE,
+                pending_dying_id=target_id,
+                rescue_order=rescue_order,
+                rescue_index=0,
+                rescue_decision_count=0,
+                response_window_id=(
+                    f"dying:{runtime.turn_number}:{target_id}"
+                    ":seat0:dec0"
+                ),
+                response_window_order=(rescue_order[0],),
+                response_window_source_sequence=dying_sequence,
+                pending_damage_card_id=chain.root_card_instance_id,
+                pending_damage_source_id=chain.root_damage_source_id,
+                pending_damage_kill_credit=chain.root_damage_source_id,
+                pending_damage_rescue_reason=(
+                    "chain_damage_target_resolved_after_rescue"
+                ),
+                pending_damage_death_reason=(
+                    "chain_damage_target_resolved_with_death"
+                ),
+                pending_chain=replace(
+                    next_chain,
+                    current_target_id=target_id,
+                    pause_reason="recipient_dying",
+                ),
+            )
+        return next_state, next_runtime
+
+    def _finish_chain(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        *,
+        stop_reason: str,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """确定性结束传导根：记录结束原因并清理挂起状态。"""
+
+        chain = runtime.pending_chain
+        if chain is None:
+            raise ProductionBatchError("当前没有可结束的传导根")
+        processed = chain.processed_target_ids
+        skipped = tuple(
+            candidate
+            for candidate in chain.candidate_order[: chain.current_index]
+            if candidate not in processed
+        )
+        if stop_reason in ("prevented_zero", "winner"):
+            skipped = skipped + tuple(
+                chain.candidate_order[chain.current_index :]
+            )
+        self._events.extend(
+            (self._chain_finished_event(chain, processed, skipped, stop_reason),)
+        )
+        next_runtime = replace(runtime, pending_chain=None)
+        if stop_reason == "winner":
+            return state, next_runtime
+        return state, self._return_to_play(next_runtime)
+
+    def _advance_chain(
+        self, state: GameState, runtime: _BatchRuntime
+    ) -> tuple[GameState, _BatchRuntime]:
+        """从挂起索引继续处理传导候选；濒死时挂起等待救援恢复。"""
+
+        while True:
+            chain = runtime.pending_chain
+            if chain is None:
+                raise ProductionBatchError("当前没有挂起的传导根")
+            if runtime.winner_id is not None or (
+                runtime.phase is ProductionPhase.FINISHED
+            ):
+                return self._finish_chain(
+                    state, runtime, stop_reason="winner"
+                )
+            if not chain.candidate_order:
+                return self._finish_chain(
+                    state, runtime, stop_reason="no_candidates"
+                )
+            if chain.current_index >= len(chain.candidate_order):
+                return self._finish_chain(
+                    state, runtime, stop_reason="completed"
+                )
+            target_id = chain.candidate_order[chain.current_index]
+            target = state.players_by_id[target_id]
+            skip_reason = _chain_dynamic_skip_reason(
+                alive=target.alive, chained=target.chained
+            )
+            if skip_reason is not None:
+                self._events.extend(
+                    (
+                        self._chain_target_resolved_event(
+                            chain,
+                            target_id,
+                            chain.current_index,
+                            skip_reason,
+                            actual_damage=0,
+                            chained_old=target.chained,
+                            chained_new=target.chained,
+                        ),
+                    )
+                )
+                runtime = replace(
+                    runtime,
+                    pending_chain=replace(
+                        chain,
+                        current_index=chain.current_index + 1,
+                        current_target_id=None,
+                    ),
+                )
+                continue
+            next_state, next_runtime = self._apply_chain_damage_to_target(
+                state, runtime, chain, target_id
+            )
+            if (
+                next_runtime.pending_chain is not None
+                and next_runtime.phase is ProductionPhase.DYING_RESCUE
+            ):
+                return next_state, next_runtime
+            state, runtime = next_state, next_runtime
+
+    def _resume_chain_after_rescue(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        dying_id: str,
+        *,
+        rescued: bool,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """濒死救援结束后恢复传导：原始角色先完成根牌结算再继续。"""
+
+        chain = runtime.pending_chain
+        if chain is None:
+            raise ProductionBatchError("濒死救援完成但缺少传导挂起状态")
+        if dying_id == chain.original_target_id:
+            next_state, finish_event = self._finish_processing(
+                state,
+                self._pending_damage_card_id(runtime),
+                self._pending_damage_rescue_reason(runtime),
+            )
+            self._events.extend((finish_event,))
+            return self._advance_chain(next_state, runtime)
+        del rescued
+        return self._advance_chain(state, runtime)
 
     # ------------------------------------------------------------------
     # 卡牌与阶段结算（全部经过适配器路由，绝不直接修改状态）
@@ -2069,73 +2668,24 @@ class ProductionBasicCardBatch:
         adapter = self._formal_registry.adapter_for(slash.card_key)
         if not isinstance(adapter, SlashAdapter):
             raise InvalidActionError("【杀】伤害结算必须使用【杀】生产适配器")
-        # 统一属性伤害门禁：横置目标受火／雷属性伤害时在任何变化前失败关闭。
-        _assert_chain_damage_gate(
-            state, pending.target_id, adapter.damage_nature
-        )
         window = self._build_window(runtime)
         window.pass_response(context.actor_id)
 
-        amount = 2 if pending.boosted else 1
-        victim = state.players_by_id[pending.target_id]
-        next_state = _replace_player(
-            state, pending.target_id, hp=victim.hp - amount
-        )
-        damage_event = DamageEvent(
-            target_id=pending.target_id,
-            amount=amount,
+        next_state, next_runtime = self._apply_damage_and_maybe_chain(
+            state,
+            runtime,
+            victim_id=pending.target_id,
+            amount=2 if pending.boosted else 1,
             damage_type=adapter.damage_nature,
             card_instance_id=pending.slash_instance_id,
             card_key=slash.card_key,
             card_user=pending.attacker_id,
-            damage_source=pending.attacker_id,
+            source_id=pending.attacker_id,
             kill_credit=pending.attacker_id,
+            resolved_reason="slash_damage_resolved",
+            death_reason="slash_damage_resolved_with_death",
+            rescue_reason="slash_damage_resolved_after_rescue",
         )
-        if next_state.players_by_id[pending.target_id].hp <= 0:
-            dying_event = GameEvent(
-                event_type=EventType.DYING,
-                damage_source=pending.attacker_id,
-                kill_credit=pending.attacker_id,
-                target_ids=(pending.target_id,),
-            )
-            self._events.extend((damage_event, dying_event))
-            dying_sequence = self._events.snapshot()[-1].sequence
-            assert dying_sequence is not None
-            rescue_order = (
-                runtime.current_player_id,
-                self.opponent_of(runtime.current_player_id),
-            )
-            next_runtime = replace(
-                runtime,
-                phase=ProductionPhase.DYING_RESCUE,
-                pending_dying_id=pending.target_id,
-                rescue_order=rescue_order,
-                rescue_index=0,
-                rescue_decision_count=0,
-                response_window_id=(
-                    f"dying:{runtime.turn_number}:{pending.target_id}"
-                    ":seat0:dec0"
-                ),
-                response_window_order=(rescue_order[0],),
-                response_window_source_sequence=dying_sequence,
-                pending_damage_card_id=pending.slash_instance_id,
-                pending_damage_source_id=pending.attacker_id,
-                pending_damage_kill_credit=pending.attacker_id,
-                pending_damage_rescue_reason=(
-                    "slash_damage_resolved_after_rescue"
-                ),
-                pending_damage_death_reason=(
-                    "slash_damage_resolved_with_death"
-                ),
-            )
-        else:
-            next_state, finish_event = self._finish_processing(
-                next_state,
-                pending.slash_instance_id,
-                "slash_damage_resolved",
-            )
-            self._events.extend((damage_event, finish_event))
-            next_runtime = self._return_to_play(runtime)
         self._commit_runtime(runtime, next_runtime)
         return next_state
 
@@ -3522,9 +4072,6 @@ class ProductionBasicCardBatch:
             raise InvalidActionError("只有【火攻】使用者可以选择弃置")
         if fire.revealed_suit is None or fire.revealed_instance_id is None:
             raise InvalidActionError("【火攻】弃牌阶段缺少已展示牌信息")
-        # 统一属性伤害门禁：横置目标受火属性伤害时，在同花色弃置等任何
-        # 事件与状态变化前失败关闭。
-        _assert_chain_damage_gate(state, fire.target_id, "火属性")
         payload = action.payload
         if str(payload.get("operation", "")) != "discard_same_suit_for_fire_attack":
             raise InvalidActionError("【火攻】弃置动作负载无效")
@@ -4803,8 +5350,6 @@ class ProductionBasicCardBatch:
         current = group.target_sequence[group.current_target_index]
         if current != victim_id:
             raise ProductionBatchError("群体锦囊伤害目标不是当前目标")
-        # 统一属性伤害门禁（当前群体锦囊均为无属性伤害，保持统一入口）。
-        _assert_chain_damage_gate(state, victim_id, "无属性")
         victim = state.players_by_id[victim_id]
         next_state = _replace_player(state, victim_id, hp=victim.hp - 1)
         damage_event = DamageEvent(
@@ -5153,59 +5698,22 @@ class ProductionBasicCardBatch:
         通用伤害来源字段，救援完成或死亡时由救援流程完成原锦囊结算。
         """
         runtime = self._runtime
-        # 统一属性伤害门禁：在生命值、事件、RNG 与运行时变化前失败关闭。
-        _assert_chain_damage_gate(state, victim_id, damage_type)
-        victim = state.players_by_id[victim_id]
-        next_state = _replace_player(state, victim_id, hp=victim.hp - 1)
-        damage_event = DamageEvent(
-            target_id=victim_id,
+        next_state, next_runtime = self._apply_damage_and_maybe_chain(
+            state,
+            runtime,
+            victim_id=victim_id,
             amount=1,
             damage_type=damage_type,
             card_instance_id=card_instance_id,
             card_key=card_key,
             card_user=card_user,
-            damage_source=source_id,
+            source_id=source_id,
             kill_credit=source_id,
+            resolved_reason=resolved_reason,
+            death_reason=death_reason,
+            rescue_reason=rescue_reason,
         )
-        if next_state.players_by_id[victim_id].hp <= 0:
-            dying_event = GameEvent(
-                event_type=EventType.DYING,
-                damage_source=source_id,
-                kill_credit=source_id,
-                target_ids=(victim_id,),
-            )
-            self._events.extend((damage_event, dying_event))
-            dying_sequence = self._events.snapshot()[-1].sequence
-            assert dying_sequence is not None
-            rescue_order = (
-                runtime.current_player_id,
-                self.opponent_of(runtime.current_player_id),
-            )
-            next_runtime = replace(
-                runtime,
-                phase=ProductionPhase.DYING_RESCUE,
-                pending_dying_id=victim_id,
-                rescue_order=rescue_order,
-                rescue_index=0,
-                rescue_decision_count=0,
-                response_window_id=(
-                    f"dying:{runtime.turn_number}:{victim_id}"
-                    ":seat0:dec0"
-                ),
-                response_window_order=(rescue_order[0],),
-                response_window_source_sequence=dying_sequence,
-                pending_damage_card_id=card_instance_id,
-                pending_damage_source_id=source_id,
-                pending_damage_kill_credit=source_id,
-                pending_damage_rescue_reason=rescue_reason,
-                pending_damage_death_reason=death_reason,
-            )
-            return next_state, next_runtime
-        next_state, finish_event = self._finish_processing(
-            next_state, card_instance_id, resolved_reason
-        )
-        self._events.extend((damage_event, finish_event))
-        return next_state, self._return_to_play(runtime)
+        return next_state, next_runtime
 
     def apply_peach_self_heal(
         self,
@@ -5328,12 +5836,12 @@ class ProductionBasicCardBatch:
             return runtime.pending_damage_death_reason
         raise ProductionBatchError("濒死结算缺少死亡完成原因")
 
-    def _pending_damage_source(self, runtime: _BatchRuntime) -> str:
+    def _pending_damage_source(self, runtime: _BatchRuntime) -> str | None:
         if runtime.pending_slash is not None:
             return runtime.pending_slash.attacker_id
         if runtime.pending_damage_source_id is not None:
             return runtime.pending_damage_source_id
-        raise ProductionBatchError("濒死结算缺少伤害来源角色")
+        return None
 
     def _rescue_window_id(
         self, runtime: _BatchRuntime, seat: int, decision_count: int
@@ -5404,6 +5912,13 @@ class ProductionBasicCardBatch:
                 # 群体锦囊：救援完成后恢复逐目标队列，原锦囊继续留在
                 # 处理区，直到全部目标完成才进入弃牌堆。
                 next_state, next_runtime = self._resume_group_after_damage(
+                    next_state, runtime, dying_id, rescued=True
+                )
+            elif runtime.pending_chain is not None:
+                self._events.extend(pending_events)
+                # 属性伤害传导：原始角色或传导目标救援完成后，从准确索引
+                # 恢复传导；原始角色先完成根牌结算再继续。
+                next_state, next_runtime = self._resume_chain_after_rescue(
                     next_state, runtime, dying_id, rescued=True
                 )
             else:
@@ -5493,6 +6008,12 @@ class ProductionBasicCardBatch:
                 next_state, next_runtime = self._resume_group_after_damage(
                     next_state, runtime, dying_id, rescued=True
                 )
+            elif runtime.pending_chain is not None:
+                self._events.extend(pending_events)
+                # 属性伤害传导：救援完成后恢复挂起队列。
+                next_state, next_runtime = self._resume_chain_after_rescue(
+                    next_state, runtime, dying_id, rescued=True
+                )
             else:
                 next_state, finish_event = self._finish_processing(
                     next_state,
@@ -5559,6 +6080,13 @@ class ProductionBasicCardBatch:
                 )
                 self._commit_runtime(runtime, next_runtime)
                 return next_state
+            if runtime.pending_chain is not None:
+                # 属性伤害传导：救援完成后恢复挂起队列。
+                next_state, next_runtime = self._resume_chain_after_rescue(
+                    state, runtime, dying_id, rescued=True
+                )
+                self._commit_runtime(runtime, next_runtime)
+                return next_state
             next_state, finish_event = self._finish_processing(
                 state,
                 self._pending_damage_card_id(runtime),
@@ -5586,29 +6114,47 @@ class ProductionBasicCardBatch:
             self._events.extend((wugu_finish_event,))
         else:
             next_state = state
-        next_state, finish_event = self._finish_processing(
-            next_state,
-            self._pending_damage_card_id(runtime),
-            self._pending_damage_death_reason(runtime),
-        )
+        chain = runtime.pending_chain
+        if chain is not None and dying_id != chain.original_target_id:
+            # 传导目标死亡时根牌已完成结算，不再重复处理根牌。
+            finish_events: list[GameEvent] = []
+        else:
+            next_state, finish_event = self._finish_processing(
+                next_state,
+                self._pending_damage_card_id(runtime),
+                self._pending_damage_death_reason(runtime),
+            )
+            finish_events = [finish_event]
         next_state = _replace_player(next_state, dying_id, alive=False)
         winner = self.opponent_of(dying_id)
         damage_source = self._pending_damage_source(runtime)
-        self._events.extend(
-            (
-                finish_event,
-                GameEvent(
-                    event_type=EventType.DEATH,
-                    damage_source=damage_source,
-                    kill_credit=damage_source,
-                    target_ids=(dying_id,),
-                ),
-                GameEvent(
-                    event_type=EventType.VICTORY,
-                    target_ids=(winner,),
-                ),
+        final_events: list[GameEvent] = finish_events + [
+            GameEvent(
+                event_type=EventType.DEATH,
+                damage_source=damage_source,
+                kill_credit=damage_source,
+                target_ids=(dying_id,),
+            ),
+            GameEvent(
+                event_type=EventType.VICTORY,
+                target_ids=(winner,),
+            ),
+        ]
+        if chain is not None:
+            skipped = tuple(
+                candidate
+                for candidate in chain.candidate_order
+                if candidate not in chain.processed_target_ids
             )
-        )
+            final_events.append(
+                self._chain_finished_event(
+                    chain,
+                    chain.processed_target_ids,
+                    skipped,
+                    "winner",
+                )
+            )
+        self._events.extend(final_events)
         next_runtime = replace(
             runtime,
             phase=ProductionPhase.FINISHED,
@@ -5633,6 +6179,7 @@ class ProductionBasicCardBatch:
             pending_damage_card_id=None,
             pending_damage_source_id=None,
             pending_damage_kill_credit=None,
+            pending_chain=None,
         )
         self._commit_runtime(runtime, next_runtime)
         return next_state
@@ -5695,6 +6242,7 @@ class ProductionBasicCardBatch:
             group_response_handles=MappingProxyType({}),
             group_response_snapshot_digest=None,
             pending_wugu=None,
+            pending_chain=None,
         )
         self._commit_runtime(runtime, next_runtime)
         return next_state

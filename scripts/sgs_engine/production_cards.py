@@ -1259,8 +1259,10 @@ class TiesuoLianhuanAdapter(TrickCardAdapter):
     ``card_used``／``card_played``、不指定目标、不接受【无懈可击】，
     实体从手牌直接进入弃牌堆后通过正式摸牌接口摸 1 张。
 
-    本批只实现牌本体，不实现属性伤害传导：横置后的火／雷属性伤害传导
-    仍由伤害管线按后续批次处理，当前版本不会静默假装完成传导。
+    CP-04J 起完整语义已接入统一生产伤害管线：横置角色实际受到大于0点
+    火／雷属性伤害后解除横置并按当前回合角色为锚点的座次递增顺序建立
+    确定性传导，每名候选以根基数继承原始来源、实体牌与伤害属性，濒死
+    救援期间挂起，胜利成立时确定性清理未开始目标。
     """
 
     def __init__(
@@ -1269,6 +1271,10 @@ class TiesuoLianhuanAdapter(TrickCardAdapter):
         super().__init__(session)
         self.card_key = "sgs_trick_tiesuolianhuan"
         self.card_name = "铁索连环"
+
+    @property
+    def adapter_version(self) -> str:
+        return "production-basic-cards.sgs_trick_tiesuolianhuan.v2"
 
     def rule_spec(self) -> dict[str, object]:
         return {
@@ -1315,8 +1321,8 @@ class TiesuoLianhuanAdapter(TrickCardAdapter):
                 "no_card_used_or_played": True,
                 "draw_after_recast": 1,
             },
-            "chain_damage_implemented": False,
-            "full_semantics_complete": False,
+            "chain_damage_implemented": True,
+            "full_semantics_complete": True,
             "adapter_version": self.adapter_version,
             "implemented": self.implemented,
             "tested": self.tested,

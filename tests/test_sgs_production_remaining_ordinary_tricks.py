@@ -861,8 +861,8 @@ def test_tiesuo_registry_and_six_entities() -> None:
     adapter = registry.adapter_for(TIESUO)
     assert adapter.implemented is True and adapter.tested is True
     spec = registry.rule_spec_for(TIESUO)
-    assert spec["chain_damage_implemented"] is False
-    assert spec["full_semantics_complete"] is False
+    assert spec["chain_damage_implemented"] is True
+    assert spec["full_semantics_complete"] is True
     assert spec["recast"]["legal"] is True
     assert spec["recast"]["no_card_used_or_played"] is True
 
@@ -1363,7 +1363,7 @@ def test_tiesuo_recast_reshuffles_when_draw_pile_empty() -> None:
     )
 
 
-def test_checkpoint_manifest_worktree_commit_pending_false() -> None:
+def test_checkpoint_manifest_cp04i_audited() -> None:
     manifest_path = (
         Path(__file__).resolve().parents[1]
         / "docs"
@@ -1375,15 +1375,24 @@ def test_checkpoint_manifest_worktree_commit_pending_false() -> None:
     ]
     assert batch["worktree_commit_pending"] is False
     assert "worktree_commit_pending_note" in batch
+    assert batch["independent_audit_done"] is True
+    assert batch["audit_conclusion"] == "AUDIT_PASSED"
     checkpoint = next(
         item
         for item in manifest["checkpoints"]
         if item["id"] == "CP-04I-PRODUCTION-REMAINING-ORDINARY-TRICK-BATCH"
     )
-    assert checkpoint["status"] == "committed_pending_audit"
-    assert checkpoint["audit"]["independent_audit_done"] is False
-    assert checkpoint["audit"]["audit_conclusion"] == "NOT_AUDITED_YET"
-    assert checkpoint["audit"]["milestone_tag"] is None
+    assert checkpoint["status"] == "audited"
+    assert checkpoint["audit"]["conclusion"] == "AUDIT_PASSED"
+    assert (
+        checkpoint["audit"]["initial_conclusion"]
+        == "AUDIT_PASSED_WITH_NONBLOCKING_ISSUES"
+    )
+    assert checkpoint["audit"]["final_status"] == "audited"
+    assert (
+        checkpoint["audit"]["milestone_tag"]
+        == "milestone-b2-wugu-tiesuo-card-body-audited"
+    )
 
 
 # ----------------------------------------------------------------------
@@ -1417,11 +1426,10 @@ def test_chained_enters_state_snapshot_and_hash() -> None:
     assert chained_by_id[_other(game)] is True
 
 
-def test_chained_property_damage_fails_closed_not_silent() -> None:
+def test_chained_lightning_slash_damage_triggers_chain() -> None:
     game = _fresh(3)
     _stock_tricks(game)
     _stock_card_key_to_hand(game, "sgs_basic_leisha", _me(game))
-    # 横置对手后，雷杀伤害必须失败关闭，不允许生成静默未传导的正式结果
     _step(
         game,
         _action(
@@ -1432,23 +1440,36 @@ def test_chained_property_damage_fails_closed_not_silent() -> None:
         ),
     )
     _close_trick_window(game)
+    _step(
+        game,
+        _action(
+            game,
+            "use_tiesuo",
+            card_key=TIESUO,
+            targets=(_me(game),),
+        ),
+    )
+    _close_trick_window(game)
     assert game.state.players_by_id[_other(game)].chained is True
+    assert game.state.players_by_id[_me(game)].chained is True
     slash = _action(game, "use_slash", card_key="sgs_basic_leisha")
     assert slash is not None
     _step(game, slash)
-    before = _capture_step(game)
     pass_action = _action(game, "pass_slash_response")
     assert pass_action is not None
-    with pytest.raises(UnsupportedRuleError, match="CP-04J"):
-        _step(game, pass_action)
-    _assert_step_unchanged(game, before)
-    assert _events_of(game, EventType.DAMAGE) == []
-    spec = game.formal_registry.rule_spec_for(TIESUO)
-    assert spec["chain_damage_implemented"] is False
-    assert spec["full_semantics_complete"] is False
+    _step(game, pass_action)
+    assert game.phase is ProductionPhase.PLAY
+    damage = _events_of(game, EventType.DAMAGE)
+    assert len(damage) == 2
+    assert damage[1].damage_type == "雷属性"
+    assert damage[1].payload["is_chain_transmitted"] is True
+    assert game.state.players_by_id[_other(game)].chained is False
+    assert game.state.players_by_id[_me(game)].chained is False
+    assert _events_of(game, EventType.CHAIN_DAMAGE_STARTED)
+    assert _events_of(game, EventType.CHAIN_DAMAGE_FINISHED)
 
 
-def test_chained_fire_slash_damage_fails_closed_atomic() -> None:
+def test_chained_fire_slash_damage_triggers_chain() -> None:
     game = _fresh(3)
     _stock_tricks(game)
     _stock_card_key_to_hand(game, "sgs_basic_huosha", _me(game))
@@ -1462,43 +1483,33 @@ def test_chained_fire_slash_damage_fails_closed_atomic() -> None:
         ),
     )
     _close_trick_window(game)
-    slash = _action(game, "use_slash", card_key="sgs_basic_huosha")
-    assert slash is not None
-    _step(game, slash)
-    before = _capture_step(game)
-    pass_action = _action(game, "pass_slash_response")
-    assert pass_action is not None
-    with pytest.raises(UnsupportedRuleError, match="火属性|CP-04J"):
-        _step(game, pass_action)
-    _assert_step_unchanged(game, before)
-
-
-def test_chained_lightning_slash_damage_fails_closed_atomic() -> None:
-    game = _fresh(3)
-    _stock_tricks(game)
-    _stock_card_key_to_hand(game, "sgs_basic_leisha", _me(game))
     _step(
         game,
         _action(
             game,
             "use_tiesuo",
             card_key=TIESUO,
-            targets=(_other(game),),
+            targets=(_me(game),),
         ),
     )
     _close_trick_window(game)
-    slash = _action(game, "use_slash", card_key="sgs_basic_leisha")
+    slash = _action(game, "use_slash", card_key="sgs_basic_huosha")
     assert slash is not None
     _step(game, slash)
-    before = _capture_step(game)
     pass_action = _action(game, "pass_slash_response")
     assert pass_action is not None
-    with pytest.raises(UnsupportedRuleError, match="雷属性|CP-04J"):
-        _step(game, pass_action)
-    _assert_step_unchanged(game, before)
+    _step(game, pass_action)
+    assert game.phase is ProductionPhase.PLAY
+    damage = _events_of(game, EventType.DAMAGE)
+    assert len(damage) == 2
+    assert damage[1].damage_type == "火属性"
+    assert damage[1].card_instance_id == damage[0].card_instance_id
+    assert damage[1].damage_source == damage[0].damage_source
+    assert game.state.players_by_id[_other(game)].chained is False
+    assert game.state.players_by_id[_me(game)].chained is False
 
 
-def test_chained_fire_attack_damage_fails_closed_atomic() -> None:
+def test_chained_fire_attack_damage_triggers_chain() -> None:
     game = _fresh(3)
     _stock_tricks(game)
     _stock_card_key_to_hand(game, "sgs_trick_huogong", _me(game))
@@ -1509,6 +1520,16 @@ def test_chained_fire_attack_damage_fails_closed_atomic() -> None:
             "use_tiesuo",
             card_key=TIESUO,
             targets=(_other(game),),
+        ),
+    )
+    _close_trick_window(game)
+    _step(
+        game,
+        _action(
+            game,
+            "use_tiesuo",
+            card_key=TIESUO,
+            targets=(_me(game),),
         ),
     )
     _close_trick_window(game)
@@ -1538,10 +1559,47 @@ def test_chained_fire_attack_damage_fails_closed_atomic() -> None:
         _move_to_hand(game, same_suit, _me(game))
     discard = _action(game, "discard_same_suit_for_fire_attack")
     assert discard is not None
-    before = _capture_step(game)
-    with pytest.raises(UnsupportedRuleError, match="火属性|CP-04J"):
-        _step(game, discard)
-    _assert_step_unchanged(game, before)
+    _step(game, discard)
+    assert game.phase is ProductionPhase.PLAY
+    damage = _events_of(game, EventType.DAMAGE)
+    assert len(damage) == 2
+    assert damage[1].damage_type == "火属性"
+    assert damage[1].payload["is_chain_transmitted"] is True
+    assert game.state.players_by_id[_other(game)].chained is False
+    assert game.state.players_by_id[_me(game)].chained is False
+    assert _events_of(game, EventType.CHAIN_DAMAGE_STARTED)
+
+
+def test_chained_property_damage_no_longer_fails_closed() -> None:
+    import scripts.sgs_engine.production_batch as production_batch_mod
+
+    assert not hasattr(production_batch_mod, "_assert_chain_damage_gate")
+    game = _fresh(3)
+    _stock_tricks(game)
+    _stock_card_key_to_hand(game, "sgs_basic_huosha", _me(game))
+    _step(
+        game,
+        _action(
+            game,
+            "use_tiesuo",
+            card_key=TIESUO,
+            targets=(_other(game),),
+        ),
+    )
+    _close_trick_window(game)
+    slash = _action(game, "use_slash", card_key="sgs_basic_huosha")
+    assert slash is not None
+    _step(game, slash)
+    pass_action = _action(game, "pass_slash_response")
+    assert pass_action is not None
+    _step(game, pass_action)
+    assert game.phase is ProductionPhase.PLAY
+    damage = _events_of(game, EventType.DAMAGE)
+    assert len(damage) == 1
+    assert game.state.players_by_id[_other(game)].chained is False
+    spec = game.formal_registry.rule_spec_for(TIESUO)
+    assert spec["chain_damage_implemented"] is True
+    assert spec["full_semantics_complete"] is True
 
 
 def test_chained_no_attribute_damage_resolves_normally() -> None:
