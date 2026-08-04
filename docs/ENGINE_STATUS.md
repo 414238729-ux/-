@@ -1,7 +1,7 @@
 # 三国杀正式引擎状态
 
 > 更新日期：2026-08-04
-> 状态：已有权威核心 foundation、测试专用最小单挑纵向切片、正式160张牌堆上六种基本牌的生产适配器批次、最小普通锦囊垂直切片（【无中生有】、【无懈可击】），以及目标区域选牌批次（【过河拆桥】6张、【顺手牵羊】5张接入生产适配器），以及伤害型普通锦囊批次（【决斗】3张、【火攻】3张接入生产适配器，2026-08-03已通过独立只读审计AUDIT_PASSED_WITH_NONBLOCKING_ISSUES），以及群体普通锦囊批次（【南蛮入侵】3张、【万箭齐发】1张、【桃园结义】1张接入生产适配器并建立逐目标结算框架，已由用户在外部PowerShell提交（实现提交哈希 `5f2fbf27b7041bbf3010636de37306eea5da6256`），2026-08-03 完成独立只读审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED），以及剩余普通锦囊批次（【五谷丰登】2张完整生产语义＋【铁索连环】6张牌本体接入生产适配器，2026-08-04 工作树完成待用户提交，见 2.9 节）；但正式整局引擎仍未完成，正式入口继续失败关闭。
+> 状态：已有权威核心 foundation、测试专用最小单挑纵向切片、正式160张牌堆上六种基本牌的生产适配器批次、最小普通锦囊垂直切片（【无中生有】、【无懈可击】），以及目标区域选牌批次（【过河拆桥】6张、【顺手牵羊】5张接入生产适配器），以及伤害型普通锦囊批次（【决斗】3张、【火攻】3张接入生产适配器，2026-08-03已通过独立只读审计AUDIT_PASSED_WITH_NONBLOCKING_ISSUES），以及群体普通锦囊批次（【南蛮入侵】3张、【万箭齐发】1张、【桃园结义】1张接入生产适配器并建立逐目标结算框架，已由用户在外部PowerShell提交（实现提交哈希 `5f2fbf27b7041bbf3010636de37306eea5da6256`），2026-08-03 完成独立只读审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED），以及剩余普通锦囊批次（【五谷丰登】2张完整生产语义＋【铁索连环】6张牌本体接入生产适配器，已由用户在外部PowerShell提交，实现提交哈希 `20cb1b1f766529a88aa5f3346a4761b77eca66b7`，提交信息 feat: implement wugu and tiesuo card-body slice，尚未完成独立审计，见 2.9 节）；但正式整局引擎仍未完成，正式入口继续失败关闭。
 > 本文是运行能力状态页，不得用测试总数或文档完整度替换完整引擎验收。
 
 ## 0. 机器可读状态摘要
@@ -73,6 +73,8 @@ implemented=true
 tested=true
 card_types=2  # 【五谷丰登】2张（完整实现）、【铁索连环】6张（牌本体接入，属性传导未完成不计入完整实现）
 complete_card_kinds=16  # 完整实现卡牌种数：15+【五谷丰登】
+adapter_card_kinds=17  # 注册表口径：已接入生产适配器17种（含铁索牌本体6张，不计入完整实现）
+adapter_entities=126  # 注册表口径：已接入实体126张（铁索6张仅牌本体接入）
 complete_entities=120  # 完整实现实体牌：118+2
 remaining_card_kinds=22
 remaining_normal_tricks=2  # 借刀杀人、铁索连环（铁索完整语义等待CP-04J）
@@ -228,7 +230,7 @@ approximation_count=0
 
 ### 2.9 剩余普通锦囊批次：【五谷丰登】完整生产语义＋【铁索连环】牌本体
 
-正式160张牌堆上第五批普通锦囊生产适配器（CP-04I，2026-08-04 工作树完成待用户提交），继续复用同一 `GameState`／`CardInstance`／`ZoneRef`、事件队列、合法动作路由、【无懈可击】逐张响应链与群体锦囊逐目标结算框架，不建立第二套状态、牌区、事件或回放系统：
+正式160张牌堆上第五批普通锦囊生产适配器（CP-04I，2026-08-04 已由用户在外部PowerShell提交实现，提交哈希 `20cb1b1f766529a88aa5f3346a4761b77eca66b7`，尚未完成独立审计），继续复用同一 `GameState`／`CardInstance`／`ZoneRef`、事件队列、合法动作路由、【无懈可击】逐张响应链与群体锦囊逐目标结算框架，不建立第二套状态、牌区、事件或回放系统：
 
 - 模式 ID 仍为 `production_basic_cards_batch`（双人生产切片）；正式牌堆总实体牌数仍为160，实例ID唯一；【五谷丰登】2张（♥3、♥4，实例088／091）、【铁索连环】6张（♣10、♣J、♣Q、♣K、♠J、♠Q，实例071／074／077／080／154／157）真实读取牌堆CSV实体并绑定生产适配器，其余21种正式卡牌（含1种未实现普通锦囊：借刀杀人）继续失败关闭；
 - 【五谷丰登】使用时只提交使用动作、不提交目标列表：引擎按当前存活且仍在游戏中的角色数量快照目标序列（含使用者、按行动顺序、跳过已死亡角色），并一次性从牌堆展示等量实体牌到公共 `ZoneKind.REVEALED` 区域；牌堆不足时复用正式重洗与确定性 RNG 逻辑，合计仍不足则 `ProductionBatchDeckExhaustedError` 失败关闭；`CARD_REVEALED` 事件公开实体ID、card_key、牌名、花色、点数与展示池顺序；
@@ -379,7 +381,7 @@ AI合法动作枚举完整
 - 群体普通锦囊批次（`CP-04H-PRODUCTION-GROUP-TARGET-TRICK-BATCH`）：【南蛮入侵】3张、【万箭齐发】1张、【桃园结义】1张接入生产适配器并建立逐目标结算框架（见 2.8 节）；已由用户在外部PowerShell提交（实现提交哈希 `5f2fbf27b7041bbf3010636de37306eea5da6256`，feat: implement production group-target trick slice，完整 pytest `1403 passed`）；基线提交 `7414b0661a5cd7599d392f5ae5b287a7147438ac`，检查点文档提交 `8d68231e336dbe213ffad1c5aaa3101896fe5f2f`；2026-08-03 独立只读审计完成：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES（问题修复提交 `ef98245aef32848468c7b2c4a7821ec9ae65146b`，test: close group-target trick audit gaps），最终独立复审结论 AUDIT_PASSED（复审残项关闭提交 `d2e4f49925c0bb285d44092821c3a85c496571ef`，test: complete group-target trick reaudit closure）；里程碑标签待用户提交文档后建立。
 
 里程碑 A 的提交只证明隔离三牌切片，不证明正式160张牌无技能单挑完成。
-- 剩余普通锦囊批次（`CP-04I-PRODUCTION-REMAINING-ORDINARY-TRICK-BATCH`）：【五谷丰登】2张完整生产语义＋【铁索连环】6张牌本体接入生产适配器（见 2.9 节）；2026-08-04 工作树完成待用户提交，基线提交 `6af30432993d908546d7cec114fd78ae62798ad5`（里程碑标签 `milestone-b2-group-target-tricks-audited` 指向该提交），实现与文档提交由用户在外部提交后回填，不在此虚构提交哈希。
+- 剩余普通锦囊批次（`CP-04I-PRODUCTION-REMAINING-ORDINARY-TRICK-BATCH`）：【五谷丰登】2张完整生产语义＋【铁索连环】6张牌本体接入生产适配器（见 2.9 节）；已由用户在外部PowerShell提交实现（实现提交哈希 `20cb1b1f766529a88aa5f3346a4761b77eca66b7`，提交信息 feat: implement wugu and tiesuo card-body slice）；基线提交 `6af30432993d908546d7cec114fd78ae62798ad5`（里程碑标签 `milestone-b2-group-target-tricks-audited` 指向该提交）；尚未完成独立审计，不得视为 audited。
 
 ## 9. 下一可验收版本
 

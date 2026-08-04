@@ -34,7 +34,9 @@
     "group_target_trick_audit_close_note": "群体普通锦囊批次（【南蛮入侵】、【万箭齐发】、【桃园结义】）已完成最终独立复审：初次独立只读审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES（2026-08-03），首次审计问题修复提交 ef98245aef32848468c7b2c4a7821ec9ae65146b（test: close group-target trick audit gaps）；最终独立复审在专用复审分支上执行，结论 AUDIT_PASSED，复审残项关闭真实提交 d2e4f49925c0bb285d44092821c3a85c496571ef（test: complete group-target trick reaudit closure）；里程碑标签待用户提交文档后建立",
     "group_target_trick_audit_close_commit": "d2e4f49925c0bb285d44092821c3a85c496571ef",
     "remaining_ordinary_tricks_worktree_branch": "deepseek-remaining-ordinary-tricks",
-    "remaining_ordinary_tricks_worktree_branch_note": "本批（【五谷丰登】完整生产语义＋【铁索连环】牌本体）实现所在分支；基线提交 6af30432993d908546d7cec114fd78ae62798ad5（docs: finalize group-target trick audit milestone，里程碑标签 milestone-b2-group-target-tricks-audited 为该提交的注解标签）；实现与文档提交由用户在外部提交后回填，不在此虚构提交哈希"
+    "remaining_ordinary_tricks_worktree_branch_note": "本批（【五谷丰登】完整生产语义＋【铁索连环】牌本体）实现所在分支；基线提交 6af30432993d908546d7cec114fd78ae62798ad5（docs: finalize group-target trick audit milestone，里程碑标签 milestone-b2-group-target-tricks-audited 为该提交的注解标签）；实现与文档提交由用户在外部提交后回填，不在此虚构提交哈希",
+    "remaining_ordinary_tricks_implement_commit": "20cb1b1f766529a88aa5f3346a4761b77eca66b7",
+    "remaining_ordinary_tricks_implement_commit_note": "剩余普通锦囊批次（CP-04I：【五谷丰登】完整生产语义＋【铁索连环】牌本体）已由用户在外部PowerShell提交，提交信息为 feat: implement wugu and tiesuo card-body slice，完整提交哈希为 20cb1b1f766529a88aa5f3346a4761b77eca66b7；尚未完成独立审计（independent_audit_done=false，audit_conclusion=NOT_AUDITED_YET），不得视为 audited；remaining_ordinary_tricks_worktree_branch 保留原含义，指工作树实现验证所基于的分支"
   },
   "feature_status": {
     "authoritative_core_foundation": true,
@@ -171,9 +173,9 @@
     },
     {
       "id": "CP-04I-PRODUCTION-REMAINING-ORDINARY-TRICK-BATCH",
-      "status": "worktree_complete_pending_user_commit",
-      "commit": null,
-      "commit_note": "本批（【五谷丰登】完整生产语义＋【铁索连环】牌本体）实现已完成于工作树，未执行任何Git写操作；完整 pytest 1454 passed；实现与文档提交由用户在外部提交后回填，不在此虚构本检查点的提交哈希或里程碑标签。",
+      "status": "committed_pending_audit",
+      "commit": "20cb1b1f766529a88aa5f3346a4761b77eca66b7",
+      "commit_note": "本批（【五谷丰登】完整生产语义＋【铁索连环】牌本体）已由用户在外部PowerShell创建真实实现提交：提交信息为 feat: implement wugu and tiesuo card-body slice，完整提交哈希为 20cb1b1f766529a88aa5f3346a4761b77eca66b7；完整 pytest 1454 passed；尚未完成独立审计（independent_audit_done=false，audit_conclusion=NOT_AUDITED_YET），不得视为 audited；文档提交与里程碑标签待后续收尾。",
       "evidence": "scripts/sgs_engine/model.py、scripts/sgs_engine/engine.py、scripts/sgs_engine/events.py、scripts/sgs_engine/production_cards.py、scripts/sgs_engine/production_batch.py、tests/test_sgs_production_remaining_ordinary_tricks.py；正式160张牌堆剩余普通锦囊批次（五谷＋铁索牌本体）",
       "scope": "formal；【五谷丰登】2张完整生产语义（公共REVEALED展示池、按存活角色数量快照展示、逐目标独立【无懈可击】窗口、公开展示池选牌、剩余展示牌统一弃置、提前结束确定性清理、严格回放与玩家可见边界）；【铁索连环】6张牌本体（一至二目标、可含使用者、无距离、服务器规范化目标顺序、逐目标独立【无懈可击】、横置状态切换chained_state事件、重铸card_recast＋正式摸牌接口）；明确不包含属性伤害传导（tiesuo_chain_damage_implemented=false，等待CP-04J）与借刀杀人（等待装备生产切片CP-04K）；三人以上五谷／铁索目标顺序未由正式生产入口证明（NOT PROVEN）；不构成普通锦囊批次、正式单挑或里程碑B完成",
       "audit": {
@@ -196,7 +198,7 @@
     },
     "source_integrity": {
       "command": ".\\\\.venv\\\\Scripts\\\\python.exe -m scripts.sgs_source_integrity_audit . --fail-on-defect",
-      "scanned_python_files": 114,
+      "scanned_python_files": 115,
       "defect_count": 0,
       "audit_item_count": 54
     },
@@ -446,14 +448,16 @@
       "multi_player_production_note": "当前正式生产入口原生仅支持双人会话；三人以上五谷展示数量与完整选择顺序、铁索目标顺序与多人属性伤害传导均未由正式生产入口证明（NOT PROVEN）",
       "worktree_commit_pending": true,
       "independent_audit_done": false,
-      "audit_conclusion": "NOT_AUDITED_YET"
+      "audit_conclusion": "NOT_AUDITED_YET",
+      "adapter_implemented_card_kinds": 17,
+      "adapter_implemented_entities": 126
     }
   },
   "sha256": {
-    "docs/ENGINE_STATUS.md": "804d36e0282599ba235ad604b7ca7e3c4b24e93929d8b8581e80b8250a2f61cf",
+    "docs/ENGINE_STATUS.md": "c4f321d402e2d8d77a15caa3196e3a11918191f59c2e1efd78f0d8a7623bb0bc",
     "docs/IMPLEMENTATION_MATRIX.md": "8ac727a80d18d4dd0a9ede74cd83590859b6f96159949934920e173793480888",
     "docs/LEGACY_RESULTS_INVALID.md": "267d51329b65b4435ed770b9fe90a0d53148d17cc9b0dae3e6d3406b06c0c0cc",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "da6bc1109d44837067543ed64b6aa1cbecebe143aad6fd726385d277210330dd",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "30b5343d1ac42f42d5812883e17a68526c5f208f472f0d94179c7c676a9ec6e8",
     "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "23b56a0edf0c85657b332100538013de16be4d71ea6a8214ac862a6708105af6",
     "knowledge/三国杀牌堆数据.csv": "8cb8da4177f11962776ae0f7e0154ed4ce56e293e96ac457874d48650517de18",
     "scripts/sgs_dev_runner.py": "6f88baa78fc9c22106188defda7190cd2a4412325db46f3964d217fd0e61c755",
