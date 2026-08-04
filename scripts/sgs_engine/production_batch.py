@@ -253,6 +253,14 @@ class _PendingWugu:
     window_id: str | None = None
 
 
+class _ChainStepOutcome(str, Enum):
+    """传导目标结算后的明确控制流结果。"""
+
+    CONTINUE = "continue_chain"
+    FINISHED = "chain_finished"
+    PAUSED = "paused_for_rescue"
+
+
 @dataclass(frozen=True, slots=True)
 class _PendingChainDamage:
     """属性伤害传导的统一确定性挂起结构。
@@ -2274,13 +2282,53 @@ class ProductionBasicCardBatch:
         runtime: _BatchRuntime,
         chain: _PendingChainDamage,
         target_id: str,
-    ) -> tuple[GameState, _BatchRuntime]:
-        """对当前合法候选应用一条独立传导伤害事件。"""
+        *,
+        amount: int | None = None,
+    ) -> tuple[GameState, _BatchRuntime, _ChainStepOutcome]:
+        """对当前合法候选应用一条独立传导伤害事件。
+
+        返回明确的控制流结果：``continue_chain``／``chain_finished``／
+        ``paused_for_rescue``。``amount`` 仅供状态机单元测试注入最终实际
+        伤害（正式调用不传，自动按根基数计算），用于在没有减伤机制时验证
+        ``prevented_zero`` 分支；注入负值一律拒绝。
+        """
 
         if target_id in chain.processed_target_ids:
             raise ProductionBatchError("传导目标被重复处理")
-        amount = _chain_recipient_base(chain.chain_base_damage, None)
+        if amount is None:
+            amount = _chain_recipient_base(chain.chain_base_damage, None)
+        else:
+            if isinstance(amount, bool) or not isinstance(amount, int):
+                raise TypeError("注入的传导目标伤害必须是整数")
+            if amount < 0:
+                raise ValueError("注入的传导目标伤害不能为负数")
         victim = state.players_by_id[target_id]
+        chained_old = victim.chained
+        unchain, result = _chain_recipient_outcome(amount)
+        if not unchain:
+            # 最终伤害为0／被防止：不产生伤害事件，记录结果并结束传导根。
+            self._events.extend(
+                (
+                    self._chain_target_resolved_event(
+                        chain,
+                        target_id,
+                        chain.current_index,
+                        result,
+                        actual_damage=0,
+                        chained_old=chained_old,
+                        chained_new=chained_old,
+                    ),
+                )
+            )
+            finished_state, finished_runtime = self._finish_chain(
+                state, runtime, stop_reason="prevented_zero"
+            )
+            return (
+                finished_state,
+                finished_runtime,
+                _ChainStepOutcome.FINISHED,
+            )
+
         next_state = _replace_player(state, target_id, hp=victim.hp - amount)
         damage_event = DamageEvent(
             target_id=target_id,
@@ -2299,8 +2347,6 @@ class ProductionBasicCardBatch:
             },
         )
         self._events.extend((damage_event,))
-        unchain, result = _chain_recipient_outcome(amount)
-        chained_old = victim.chained
         if unchain:
             next_state = _replace_player(next_state, target_id, chained=False)
             self._events.extend(
@@ -2330,23 +2376,6 @@ class ProductionBasicCardBatch:
                         chained_new=False,
                     ),
                 )
-            )
-        else:
-            self._events.extend(
-                (
-                    self._chain_target_resolved_event(
-                        chain,
-                        target_id,
-                        chain.current_index,
-                        result,
-                        actual_damage=0,
-                        chained_old=chained_old,
-                        chained_new=chained_old,
-                    ),
-                )
-            )
-            return self._finish_chain(
-                next_state, runtime, stop_reason="prevented_zero"
             )
 
         processed = chain.processed_target_ids + (target_id,)
@@ -2399,8 +2428,8 @@ class ProductionBasicCardBatch:
                     current_target_id=target_id,
                     pause_reason="recipient_dying",
                 ),
-            )
-        return next_state, next_runtime
+            ), _ChainStepOutcome.PAUSED
+        return next_state, next_runtime, _ChainStepOutcome.CONTINUE
 
     def _finish_chain(
         self,
@@ -2433,9 +2462,19 @@ class ProductionBasicCardBatch:
         return state, self._return_to_play(next_runtime)
 
     def _advance_chain(
-        self, state: GameState, runtime: _BatchRuntime
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        *,
+        amount_override: int | None = None,
     ) -> tuple[GameState, _BatchRuntime]:
-        """从挂起索引继续处理传导候选；濒死时挂起等待救援恢复。"""
+        """从挂起索引继续处理传导候选；濒死时挂起等待救援恢复。
+
+        子调用返回 ``chain_finished`` 时立即返回（不再次进入循环、不重复
+        产生结束事件）；返回 ``paused_for_rescue`` 时立即返回等待救援。
+        ``amount_override`` 仅供状态机单元测试注入（prevented_zero 分支），
+        正式调用不得传入。
+        """
 
         while True:
             chain = runtime.pending_chain
@@ -2483,13 +2522,29 @@ class ProductionBasicCardBatch:
                     ),
                 )
                 continue
-            next_state, next_runtime = self._apply_chain_damage_to_target(
-                state, runtime, chain, target_id
+            next_state, next_runtime, outcome = (
+                self._apply_chain_damage_to_target(
+                    state,
+                    runtime,
+                    chain,
+                    target_id,
+                    amount=amount_override,
+                )
             )
-            if (
-                next_runtime.pending_chain is not None
-                and next_runtime.phase is ProductionPhase.DYING_RESCUE
-            ):
+            if outcome is _ChainStepOutcome.FINISHED:
+                if next_runtime.pending_chain is not None:
+                    raise ProductionBatchError(
+                        "传导结束结果仍残留挂起状态"
+                    )
+                return next_state, next_runtime
+            if outcome is _ChainStepOutcome.PAUSED:
+                if (
+                    next_runtime.pending_chain is None
+                    or next_runtime.phase is not ProductionPhase.DYING_RESCUE
+                ):
+                    raise ProductionBatchError(
+                        "传导暂停结果与挂起状态不一致"
+                    )
                 return next_state, next_runtime
             state, runtime = next_state, next_runtime
 

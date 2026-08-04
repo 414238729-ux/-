@@ -409,3 +409,298 @@ def test_response_window_snapshot_is_immutable_and_detached() -> None:
     assert snapshot.decisions["P1"] is ResponseDecision.WAITING
     assert window.snapshot().current_responder == "P2"
     assert window.snapshot().decisions["P1"] is ResponseDecision.PASSED
+
+
+# ----------------------------------------------------------------------
+# 属性伤害传导链事件契约（CP-04J 审计残项 N2）
+# ----------------------------------------------------------------------
+
+
+def _chain_started_payload() -> dict[str, object]:
+    return {
+        "root_damage_event_id": "42",
+        "source_id": "甲",
+        "original_target_id": "乙",
+        "damage_type": "火属性",
+        "root_card_instance_id": "铁索-1",
+        "chain_base_damage": 1,
+        "candidate_order": ["甲"],
+    }
+
+
+def _chain_resolved_payload(
+    *,
+    result: str = "damaged",
+    actual: int = 1,
+    old: bool = True,
+    new: bool = False,
+) -> dict[str, object]:
+    return {
+        "root_damage_event_id": "42",
+        "target_id": "乙",
+        "target_index": 0,
+        "result": result,
+        "chain_base_damage": 1,
+        "actual_damage": actual,
+        "chained_old": old,
+        "chained_new": new,
+    }
+
+
+def _chain_finished_payload(
+    stop_reason: str = "completed",
+) -> dict[str, object]:
+    return {
+        "root_damage_event_id": "42",
+        "processed_targets": ["乙"],
+        "skipped_targets": [],
+        "stop_reason": stop_reason,
+    }
+
+
+def _chain_event(
+    event_type: EventType, payload: dict[str, object]
+) -> GameEvent:
+    return GameEvent(
+        event_type=event_type,
+        card_instance_id="铁索-1",
+        card_key="sgs_trick_tiesuolianhuan",
+        target_ids=("乙",),
+        payload=payload,
+    )
+
+
+def test_chain_damage_started_valid_contract() -> None:
+    event = _chain_event(
+        EventType.CHAIN_DAMAGE_STARTED, _chain_started_payload()
+    )
+    assert event.payload["damage_type"] == "火属性"
+    assert event.payload["candidate_order"] == ("甲",)
+
+
+@pytest.mark.parametrize(
+    ("result", "actual", "old", "new"),
+    [
+        ("damaged", 1, True, False),
+        ("skipped_dead", 0, True, True),
+        ("skipped_unchained", 0, False, False),
+        ("prevented_zero", 0, True, True),
+    ],
+)
+def test_chain_target_resolved_valid_contracts(
+    result: str, actual: int, old: bool, new: bool
+) -> None:
+    event = _chain_event(
+        EventType.CHAIN_TARGET_RESOLVED,
+        _chain_resolved_payload(
+            result=result, actual=actual, old=old, new=new
+        ),
+    )
+    assert event.payload["result"] == result
+
+
+@pytest.mark.parametrize(
+    "stop_reason",
+    ["completed", "prevented_zero", "winner", "no_candidates"],
+)
+def test_chain_damage_finished_valid_contracts(stop_reason: str) -> None:
+    event = _chain_event(
+        EventType.CHAIN_DAMAGE_FINISHED,
+        _chain_finished_payload(stop_reason),
+    )
+    assert event.payload["stop_reason"] == stop_reason
+
+
+@pytest.mark.parametrize(
+    ("event_type", "factory", "missing"),
+    [
+        (
+            EventType.CHAIN_DAMAGE_STARTED,
+            _chain_started_payload,
+            "chain_base_damage",
+        ),
+        (
+            EventType.CHAIN_TARGET_RESOLVED,
+            _chain_resolved_payload,
+            "result",
+        ),
+        (
+            EventType.CHAIN_DAMAGE_FINISHED,
+            _chain_finished_payload,
+            "stop_reason",
+        ),
+    ],
+)
+def test_chain_events_reject_missing_field(
+    event_type: EventType,
+    factory: object,
+    missing: str,
+) -> None:
+    payload = factory()  # type: ignore[operator]
+    del payload[missing]
+    with pytest.raises(ValueError, match="字段必须恰好"):
+        _chain_event(event_type, payload)
+
+
+@pytest.mark.parametrize(
+    ("event_type", "factory", "override", "match"),
+    [
+        (
+            EventType.CHAIN_DAMAGE_STARTED,
+            _chain_started_payload,
+            {"chain_base_damage": "abc"},
+            "chain_base_damage必须是正整数",
+        ),
+        (
+            EventType.CHAIN_DAMAGE_STARTED,
+            _chain_started_payload,
+            {"candidate_order": "甲"},
+            "不能是单个字符串",
+        ),
+        (
+            EventType.CHAIN_DAMAGE_STARTED,
+            _chain_started_payload,
+            {"candidate_order": ["甲", "甲"]},
+            "不能包含重复元素",
+        ),
+        (
+            EventType.CHAIN_DAMAGE_STARTED,
+            _chain_started_payload,
+            {"damage_type": "无属性"},
+            "只能是火属性或雷属性",
+        ),
+        (
+            EventType.CHAIN_DAMAGE_STARTED,
+            _chain_started_payload,
+            {"root_damage_event_id": ""},
+            "非空字符串",
+        ),
+        (
+            EventType.CHAIN_DAMAGE_STARTED,
+            _chain_started_payload,
+            {"source_id": 123},
+            "source_id必须是非空字符串",
+        ),
+        (
+            EventType.CHAIN_DAMAGE_STARTED,
+            _chain_started_payload,
+            {"original_target_id": "丙"},
+            "必须与target_ids一致",
+        ),
+        (
+            EventType.CHAIN_TARGET_RESOLVED,
+            _chain_resolved_payload,
+            {"target_index": "x"},
+            "target_index必须是整数",
+        ),
+        (
+            EventType.CHAIN_TARGET_RESOLVED,
+            _chain_resolved_payload,
+            {"chained_old": 1},
+            "chained_old必须是布尔值",
+        ),
+        (
+            EventType.CHAIN_TARGET_RESOLVED,
+            _chain_resolved_payload,
+            {"actual_damage": -1},
+            "actual_damage必须大于等于0",
+        ),
+        (
+            EventType.CHAIN_TARGET_RESOLVED,
+            _chain_resolved_payload,
+            {"chain_base_damage": "abc"},
+            "chain_base_damage必须是正整数",
+        ),
+        (
+            EventType.CHAIN_TARGET_RESOLVED,
+            _chain_resolved_payload,
+            {"result": "stopped_winner"},
+            "stopped_winner不是生产实现值",
+        ),
+        (
+            EventType.CHAIN_TARGET_RESOLVED,
+            _chain_resolved_payload,
+            {"result": "bogus"},
+            "result只能是",
+        ),
+        (
+            EventType.CHAIN_TARGET_RESOLVED,
+            _chain_resolved_payload,
+            {"target_id": "丙"},
+            "必须与target_ids一致",
+        ),
+        (
+            EventType.CHAIN_TARGET_RESOLVED,
+            lambda: _chain_resolved_payload(),
+            {"actual_damage": 0},
+            "damaged结果必须满足",
+        ),
+        (
+            EventType.CHAIN_TARGET_RESOLVED,
+            lambda: _chain_resolved_payload(
+                result="prevented_zero", actual=0, old=True, new=True
+            ),
+            {"chained_new": False},
+            "prevented_zero结果必须满足",
+        ),
+        (
+            EventType.CHAIN_TARGET_RESOLVED,
+            lambda: _chain_resolved_payload(
+                result="skipped_unchained", actual=0, old=False, new=False
+            ),
+            {"chained_new": True},
+            "跳过结果必须满足",
+        ),
+        (
+            EventType.CHAIN_DAMAGE_FINISHED,
+            _chain_finished_payload,
+            {"stop_reason": "not-a-real-reason"},
+            "stop_reason只能是",
+        ),
+        (
+            EventType.CHAIN_DAMAGE_FINISHED,
+            _chain_finished_payload,
+            {"processed_targets": "乙"},
+            "不能是单个字符串",
+        ),
+        (
+            EventType.CHAIN_DAMAGE_FINISHED,
+            _chain_finished_payload,
+            {"skipped_targets": ["乙", "乙"]},
+            "不能包含重复元素",
+        ),
+        (
+            EventType.CHAIN_DAMAGE_FINISHED,
+            _chain_finished_payload,
+            {"processed_targets": ["乙"], "skipped_targets": ["乙"]},
+            "不能包含同一角色",
+        ),
+    ],
+)
+def test_chain_events_reject_invalid_values(
+    event_type: EventType,
+    factory: object,
+    override: dict[str, object],
+    match: str,
+) -> None:
+    payload = factory()  # type: ignore[operator]
+    payload.update(override)
+    with pytest.raises(ValueError, match=match):
+        _chain_event(event_type, payload)
+
+
+@pytest.mark.parametrize(
+    ("event_type", "factory"),
+    [
+        (EventType.CHAIN_DAMAGE_STARTED, _chain_started_payload),
+        (EventType.CHAIN_TARGET_RESOLVED, _chain_resolved_payload),
+        (EventType.CHAIN_DAMAGE_FINISHED, _chain_finished_payload),
+    ],
+)
+def test_chain_events_reject_extra_field(
+    event_type: EventType, factory: object
+) -> None:
+    payload = factory()  # type: ignore[operator]
+    payload["extra"] = "多余字段"
+    with pytest.raises(ValueError, match="字段必须恰好"):
+        _chain_event(event_type, payload)

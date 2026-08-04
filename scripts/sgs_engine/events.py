@@ -200,6 +200,96 @@ class DamageEvent(GameEvent):
         return payload
 
 
+_CHAIN_DAMAGE_TYPES: tuple[str, ...] = ("火属性", "雷属性")
+_CHAIN_TARGET_RESULT_VALUES: frozenset[str] = frozenset(
+    {"damaged", "skipped_dead", "skipped_unchained", "prevented_zero"}
+)
+_CHAIN_STOP_REASONS: frozenset[str] = frozenset(
+    {"completed", "prevented_zero", "winner", "no_candidates"}
+)
+_CHAIN_STARTED_FIELDS: frozenset[str] = frozenset(
+    {
+        "root_damage_event_id",
+        "source_id",
+        "original_target_id",
+        "damage_type",
+        "root_card_instance_id",
+        "chain_base_damage",
+        "candidate_order",
+    }
+)
+_CHAIN_TARGET_RESOLVED_FIELDS: frozenset[str] = frozenset(
+    {
+        "root_damage_event_id",
+        "target_id",
+        "target_index",
+        "result",
+        "chain_base_damage",
+        "actual_damage",
+        "chained_old",
+        "chained_new",
+    }
+)
+_CHAIN_FINISHED_FIELDS: frozenset[str] = frozenset(
+    {
+        "root_damage_event_id",
+        "processed_targets",
+        "skipped_targets",
+        "stop_reason",
+    }
+)
+
+
+def _validate_nonempty_text(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{label}必须是非空字符串")
+    return value.strip()
+
+
+def _validate_chain_event_id(value: object, label: str) -> None:
+    """根伤害事件ID：非空字符串或仓库既有正整数事件ID。"""
+
+    if isinstance(value, bool):
+        raise ValueError(f"{label}必须是事件ID字符串或正整数")
+    if isinstance(value, int):
+        if value <= 0:
+            raise ValueError(f"{label}必须是正整数事件ID")
+        return
+    _validate_nonempty_text(value, label)
+
+
+def _validate_strict_int(
+    value: object, label: str, *, minimum: int
+) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{label}必须是整数")
+    if value < minimum:
+        raise ValueError(f"{label}必须大于等于{minimum}")
+    return value
+
+
+def _validate_boolean(value: object, label: str) -> None:
+    if not isinstance(value, bool):
+        raise ValueError(f"{label}必须是布尔值")
+
+
+def _validate_string_sequence(
+    value: object, label: str, *, unique: bool
+) -> tuple[str, ...]:
+    if isinstance(value, (str, bytes)):
+        raise ValueError(f"{label}必须是字符串序列，不能是单个字符串")
+    try:
+        items = tuple(value)  # type: ignore[arg-type]
+    except TypeError as exc:
+        raise ValueError(f"{label}必须是字符串序列") from exc
+    for item in items:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"{label}中的元素必须是非空字符串")
+    if unique and len(items) != len(set(items)):
+        raise ValueError(f"{label}不能包含重复元素")
+    return items
+
+
 def validate_event_contract(event: GameEvent) -> GameEvent:
     """检查跨模块必须一致的基础事件契约并返回原事件。"""
 
@@ -259,43 +349,137 @@ def validate_event_contract(event: GameEvent) -> GameEvent:
         if len(event.target_ids) != 1:
             raise ValueError("传导开始事件必须且只能指定原始受伤角色")
         payload = event.payload
-        for key in (
-            "root_damage_event_id",
-            "damage_type",
-            "chain_base_damage",
-            "candidate_order",
-        ):
-            if key not in payload:
-                raise ValueError(f"传导开始事件缺少payload.{key}")
+        if set(payload) != _CHAIN_STARTED_FIELDS:
+            raise ValueError(
+                "传导开始事件payload字段必须恰好为root_damage_event_id、"
+                "source_id、original_target_id、damage_type、"
+                "root_card_instance_id、chain_base_damage、candidate_order"
+            )
+        _validate_chain_event_id(
+            payload["root_damage_event_id"], "传导开始事件root_damage_event_id"
+        )
+        source_id = payload["source_id"]
+        if source_id is not None:
+            _validate_nonempty_text(source_id, "传导开始事件source_id")
+        original = _validate_nonempty_text(
+            payload["original_target_id"], "传导开始事件original_target_id"
+        )
+        if original != event.target_ids[0]:
+            raise ValueError(
+                "传导开始事件original_target_id必须与target_ids一致"
+            )
+        if payload["damage_type"] not in _CHAIN_DAMAGE_TYPES:
+            raise ValueError("传导开始事件damage_type只能是火属性或雷属性")
+        root_card = payload["root_card_instance_id"]
+        if root_card is not None:
+            _validate_nonempty_text(
+                root_card, "传导开始事件root_card_instance_id"
+            )
+        base = payload["chain_base_damage"]
+        if isinstance(base, bool) or not isinstance(base, int) or base <= 0:
+            raise ValueError("传导开始事件chain_base_damage必须是正整数")
+        _validate_string_sequence(
+            payload["candidate_order"],
+            "传导开始事件candidate_order",
+            unique=True,
+        )
     if event.event_type is EventType.CHAIN_TARGET_RESOLVED:
         if event.card_instance_id is None or event.card_key is None:
             raise ValueError("传导目标结算事件必须提供根实体牌ID与card_key")
         if len(event.target_ids) != 1:
             raise ValueError("传导目标结算事件必须且只能指定当前目标角色")
         payload = event.payload
-        for key in (
-            "root_damage_event_id",
-            "target_index",
-            "result",
-            "chain_base_damage",
-            "actual_damage",
-            "chained_old",
-            "chained_new",
-        ):
-            if key not in payload:
-                raise ValueError(f"传导目标结算事件缺少payload.{key}")
+        if set(payload) != _CHAIN_TARGET_RESOLVED_FIELDS:
+            raise ValueError(
+                "传导目标结算事件payload字段必须恰好为root_damage_event_id、"
+                "target_id、target_index、result、chain_base_damage、"
+                "actual_damage、chained_old、chained_new"
+            )
+        _validate_chain_event_id(
+            payload["root_damage_event_id"],
+            "传导目标结算事件root_damage_event_id",
+        )
+        target_id = _validate_nonempty_text(
+            payload["target_id"], "传导目标结算事件target_id"
+        )
+        if target_id != event.target_ids[0]:
+            raise ValueError("传导目标结算事件target_id必须与target_ids一致")
+        _validate_strict_int(
+            payload["target_index"],
+            "传导目标结算事件target_index",
+            minimum=0,
+        )
+        result = payload["result"]
+        if result not in _CHAIN_TARGET_RESULT_VALUES:
+            raise ValueError(
+                "传导目标结算事件result只能是damaged、skipped_dead、"
+                "skipped_unchained或prevented_zero；"
+                "stopped_winner不是生产实现值"
+            )
+        base = payload["chain_base_damage"]
+        if isinstance(base, bool) or not isinstance(base, int) or base <= 0:
+            raise ValueError(
+                "传导目标结算事件chain_base_damage必须是正整数"
+            )
+        actual = _validate_strict_int(
+            payload["actual_damage"],
+            "传导目标结算事件actual_damage",
+            minimum=0,
+        )
+        chained_old = payload["chained_old"]
+        chained_new = payload["chained_new"]
+        _validate_boolean(chained_old, "传导目标结算事件chained_old")
+        _validate_boolean(chained_new, "传导目标结算事件chained_new")
+        if result == "damaged":
+            if actual <= 0 or chained_old is not True or chained_new is not False:
+                raise ValueError(
+                    "damaged结果必须满足actual_damage>0、"
+                    "chained_old=True且chained_new=False"
+                )
+        elif result == "prevented_zero":
+            if actual != 0 or chained_old is not True or chained_new is not True:
+                raise ValueError(
+                    "prevented_zero结果必须满足actual_damage=0、"
+                    "chained_old=True且chained_new=True"
+                )
+        else:
+            if actual != 0 or chained_old != chained_new:
+                raise ValueError(
+                    "跳过结果必须满足actual_damage=0且chained_old==chained_new"
+                )
     if event.event_type is EventType.CHAIN_DAMAGE_FINISHED:
         if event.card_instance_id is None or event.card_key is None:
             raise ValueError("传导结束事件必须提供根实体牌ID与card_key")
         payload = event.payload
-        for key in (
-            "root_damage_event_id",
-            "processed_targets",
-            "skipped_targets",
-            "stop_reason",
-        ):
-            if key not in payload:
-                raise ValueError(f"传导结束事件缺少payload.{key}")
+        if set(payload) != _CHAIN_FINISHED_FIELDS:
+            raise ValueError(
+                "传导结束事件payload字段必须恰好为root_damage_event_id、"
+                "processed_targets、skipped_targets、stop_reason"
+            )
+        _validate_chain_event_id(
+            payload["root_damage_event_id"],
+            "传导结束事件root_damage_event_id",
+        )
+        processed = _validate_string_sequence(
+            payload["processed_targets"],
+            "传导结束事件processed_targets",
+            unique=True,
+        )
+        skipped = _validate_string_sequence(
+            payload["skipped_targets"],
+            "传导结束事件skipped_targets",
+            unique=True,
+        )
+        if set(processed) & set(skipped):
+            raise ValueError(
+                "传导结束事件processed_targets与skipped_targets"
+                "不能包含同一角色"
+            )
+        if payload["stop_reason"] not in _CHAIN_STOP_REASONS:
+            raise ValueError(
+                "传导结束事件stop_reason只能是completed、prevented_zero、"
+                "winner或no_candidates"
+            )
     if event.event_type is EventType.CARD_RECAST:
         if event.card_instance_id is None or event.card_key is None:
             raise ValueError("重铸事件必须提供实体牌ID与card_key")

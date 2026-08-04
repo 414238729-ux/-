@@ -199,7 +199,7 @@
       "id": "CP-04J-PRODUCTION-CHAIN-DAMAGE-INFRASTRUCTURE",
       "status": "committed_pending_audit",
       "commit": "c094bff5dab127917e8d0b9a2d3422e3ab736783",
-      "commit_note": "本批（横置角色火／雷属性伤害传导生产基础设施）已由用户在外部PowerShell创建真实实现提交：提交信息为 feat: implement production chain damage infrastructure，完整提交哈希为 c094bff5dab127917e8d0b9a2d3422e3ab736783；统一传导入口已接通火杀、雷杀、火攻与通用伤害管线，CP-04I 临时属性伤害失败关闭门禁已移除；铁索连环完整语义完成（tiesuo_card_body_implemented=true、tiesuo_chain_damage_implemented=true、tiesuo_full_semantics_complete=true）；完整 pytest 1503 passed（失败0、跳过0），compileall 通过，源码完整性审计 scanned_file_count=116、defect_count=0、audit_item_count=55；当前尚未完成独立审计（independent_audit_done=false，audit_conclusion=NOT_AUDITED_YET），里程碑标签为 null，该提交不得视为 audited。",
+      "commit_note": "本批（横置角色火／雷属性伤害传导生产基础设施）已由用户在外部PowerShell创建真实实现提交：提交信息为 feat: implement production chain damage infrastructure，完整提交哈希为 c094bff5dab127917e8d0b9a2d3422e3ab736783；统一传导入口已接通火杀、雷杀、火攻与通用伤害管线，CP-04I 临时属性伤害失败关闭门禁已移除；铁索连环完整语义完成（tiesuo_card_body_implemented=true、tiesuo_chain_damage_implemented=true、tiesuo_full_semantics_complete=true）；实现提交时完整 pytest 1503 passed（失败0、跳过0），compileall 通过，源码完整性审计 scanned_file_count=116、defect_count=0、audit_item_count=55；当前尚未完成独立审计（independent_audit_done=false，audit_conclusion=NOT_AUDITED_YET），里程碑标签为 null，该提交不得视为 audited；独立审计残项 N1-N4 已在本工作树关闭（待用户提交）：stopped_winner 不再列为合法 result、链事件契约完整校验、prevented_zero 控制流修复、Knowledge 保留 CP-04I 历史并追加 CP-04J 说明，审计残项关闭后完整 pytest 1543 passed。",
       "evidence": "scripts/sgs_engine/production_batch.py、scripts/sgs_engine/events.py、scripts/sgs_engine/production_cards.py、tests/test_sgs_production_chain_damage.py；正式160张牌堆双人生产入口传导基础设施",
       "scope": "formal；横置角色实际受到大于0点火／雷属性伤害后解除横置并按当前回合角色为锚点的座次递增顺序确定性传导；传导伤害继承原始来源、实体牌、伤害属性与使用记录；每名候选以根基数独立结算并完整处理伤害、濒死、救援与死亡；濒死期间挂起并在救援后恢复准确索引；胜利成立时确定性清理未开始目标；严格回放事件链与执行哈希接入；不包含新卡牌适配器、借刀杀人（CP-04K）、装备武器、延时锦囊、防具坐骑宝物、武将技能与三人以上正式生产入口（multi_player_production_proven=false）",
       "audit": {
@@ -212,10 +212,10 @@
   "final_verification": {
     "pytest": {
       "command": ".\\\\.venv\\\\Scripts\\\\python.exe -m pytest -q -p no:cacheprovider",
-      "passed": 1503,
+      "passed": 1543,
       "failed": 0,
       "skipped": 0,
-      "note": "1503=1463+40：CP-04J 属性伤害传导基础设施新增 40 项生产路径测试（tests/test_sgs_production_chain_damage.py）；1463=1454+9 为 CP-04I 审计三个非阻塞问题关闭新增的回归测试"
+      "note": "1543=1503+40：CP-04J 审计残项关闭新增40项（tests/test_sgs_engine_events.py 链事件契约36项、tests/test_sgs_production_chain_damage.py prevented_zero 控制流与文档检查4项）；1503=1463+40 为 CP-04J 实现提交时验收；1463=1454+9 为 CP-04I 审计三个非阻塞问题关闭新增的回归测试"
     },
     "compileall": {
       "command": ".\\\\.venv\\\\Scripts\\\\python.exe -m compileall -q scripts tests",
@@ -495,11 +495,12 @@
       "tiesuo_chain_damage_implemented": true,
       "tiesuo_full_semantics_complete": true,
       "multi_player_production_proven": false,
-      "approximation_count": 0
+      "approximation_count": 0,
+      "audit_residual_note": "N1-N4 已在本工作树关闭（待用户提交）：stopped_winner 非合法 result；链事件契约完整校验；prevented_zero 控制流修复；Knowledge 保留 CP-04I 历史并追加 CP-04J 说明"
     }
   },
   "sha256": {
-    "docs/ENGINE_STATUS.md": "fdda08324a3681fea2147f75bd6be9974d8d64e2d2fe5386ccdcb7fde49709af",
+    "docs/ENGINE_STATUS.md": "762fbb0625a7908e22295240fae51fad372281a6082446b06b3de343da19ccc3",
     "docs/IMPLEMENTATION_MATRIX.md": "4144eef01dcabb1032b7ababb337d02c4b3aa0246a816f4c79d8c38a72592fce",
     "docs/LEGACY_RESULTS_INVALID.md": "267d51329b65b4435ed770b9fe90a0d53148d17cc9b0dae3e6d3406b06c0c0cc",
     "docs/MASTER_IMPLEMENTATION_PLAN.md": "1a7cf7b2a2a83c4a11025075cbf02283b23e9865e1afff4c24fd155863ab560d",
@@ -511,9 +512,9 @@
     "scripts/sgs_engine/duel.py": "4e2b716e68346948b8b50fc09bac2c0160f30f43410b09aa7e6f7caaebf01218",
     "scripts/sgs_engine/duel_replay.py": "99661777d171928d6c8c0a12ff45da7bf4b051a2f26a21ae78424068a1fc1231",
     "scripts/sgs_engine/engine.py": "1a983ef03cc607644d27ac1902c961e687f1eab254679c81a6ab2e5235d824c7",
-    "scripts/sgs_engine/events.py": "230c9fa034c64e2894659de6232a68760620536d6e22890bd35bbdb8e59f124a",
+    "scripts/sgs_engine/events.py": "a3fb22b0a7b1b4e821a47e84246cfa44a48b885872f2c473174e929b839f0f07",
     "scripts/sgs_engine/model.py": "54e9ddaacbd57bed216e5a98cbfded9ce1b89fe5a94b8141e6d77c46d3d9f014",
-    "scripts/sgs_engine/production_batch.py": "888d1fe2469af050fdb3653511c227a49a8a57819668a85c9626dd7422a64df4",
+    "scripts/sgs_engine/production_batch.py": "11f700d6c902058f1fc8b11a12fdcdce51a046f502750808e398621bc0979b69",
     "scripts/sgs_engine/production_cards.py": "6573535168377eec5f116e4f633de7d4410a9ffd1d16ee5a22401f64792b2f6a",
     "scripts/sgs_engine/production_replay.py": "ddafa7ddfb26cd097140d252ec3281cc5c4a04d77f5c271ac9827e78e5b45459",
     "scripts/sgs_engine/replay.py": "27cd09a98e9ea09d03a6de3542d13abc94341fde4d33a5fdc5e8bdc5497580b1",
@@ -528,8 +529,8 @@
     "tests/test_sgs_production_single_target_tricks.py": "741db6fcd08db02de258215043c55aa7cc73248bdbca51e7ad827c54af5d2444",
     "tests/test_sgs_production_zone_target_tricks.py": "5be49acce056f9cd5d52fd06776523cab8ffa4b5979c6f954de3db0ffccfba37",
     "hash_note": "本表以Git跟踪内容的规范化blob字节为权威（UTF-8无BOM）；不以不同平台检出的CRLF/LF工作树原始字节为权威；Windows core.autocrlf导致的行尾差异不视为内容漂移；CHECKPOINT_MANIFEST.json不包含自身哈希；仅作状态记录，不参与门禁校验",
-    "tests/test_sgs_production_chain_damage.py": "7e510ff7a5c374d30e51d738d6841e2e7b4201ae0ff86b3058504a344a2721f2",
+    "tests/test_sgs_production_chain_damage.py": "bde1176d5495556efc77db02ff21b48d53313a8f350647b760f584bd4b328811",
     "tests/test_sgs_production_remaining_ordinary_tricks.py": "fe1650350a56c228ed5e9cef41c4f294356d63e1fe898a71e2e4eb16470a6cdd",
-    "knowledge/三国杀卡牌效果.md": "82399ca142cf3ccf9c0311b90b53938b864c79c3a0b2f8bc6578adb3545bdb60"
+    "knowledge/三国杀卡牌效果.md": "329ffdfb21a990a029fca82d856ae06c68701284a6654ce06e642d1d653c272b"
   }
 }

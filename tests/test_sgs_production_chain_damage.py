@@ -11,6 +11,7 @@ monkeypatch、skip 或 xfail。双人正式入口只能证明最多一名其他�
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 import json
 from pathlib import Path
 
@@ -40,6 +41,8 @@ from scripts.sgs_engine.production_batch import (
     ProductionBatchError,
     ProductionPhase,
     ScriptedBatchController,
+    _ChainStepOutcome,
+    _PendingChainDamage,
     _chain_dynamic_skip_reason,
     _chain_recipient_base,
     _chain_recipient_outcome,
@@ -635,6 +638,12 @@ def test_victory_stops_unstarted_chain() -> None:
     assert finished[0].payload["stop_reason"] == "winner"
     assert _me(game) in finished[0].payload["skipped_targets"]
     assert game.runtime.pending_chain is None
+    # N1：winner 终止不产生 stopped_winner 目标结算事件
+    resolved = _events_of(game, EventType.CHAIN_TARGET_RESOLVED)
+    assert not any(
+        event.payload.get("result") == "stopped_winner"
+        for event in resolved
+    )
 
 
 def test_unchained_target_is_skipped_deterministically() -> None:
@@ -672,6 +681,123 @@ def test_original_target_is_not_reprocessed() -> None:
     damage = _events_of(game, EventType.DAMAGE)
     assert len(damage) == 2
     assert [event.target_id for event in damage] == [_other(game), _me(game)]
+
+
+def test_prevented_zero_step_returns_finished_outcome() -> None:
+    game = _fresh(73)
+    _stock_tricks(game)
+    me, other = _me(game), _other(game)
+    game._state = _replace_player(game.state, me, chained=True)
+    game._state = _replace_player(game.state, other, chained=True)
+    root_card = next(iter(game.state.card_ids_in(ZoneRef.hand(me))))
+    chain = _PendingChainDamage(
+        root_damage_event_id="1",
+        root_damage_source_id=me,
+        root_card_instance_id=root_card,
+        root_card_key=TIESUO,
+        root_card_user=me,
+        damage_type="火属性",
+        chain_base_damage=1,
+        original_target_id=other,
+        candidate_order=(me, other),
+        session_id=game.session_id,
+    )
+    runtime = replace(game._runtime, pending_chain=chain)
+    hp_before = game.state.players_by_id[me].hp
+    finished_before = len(_events_of(game, EventType.CHAIN_DAMAGE_FINISHED))
+    next_state, next_runtime, outcome = (
+        game._apply_chain_damage_to_target(
+            game.state, runtime, chain, me, amount=0
+        )
+    )
+    assert outcome is _ChainStepOutcome.FINISHED
+    assert next_runtime.pending_chain is None
+    finished = _events_of(game, EventType.CHAIN_DAMAGE_FINISHED)
+    assert len(finished) == finished_before + 1
+    assert finished[-1].payload["stop_reason"] == "prevented_zero"
+    assert next_state.players_by_id[me].hp == hp_before
+    assert next_state.players_by_id[me].chained is True
+
+
+def test_prevented_zero_finishes_chain_without_loop_or_double_event() -> None:
+    game = _fresh(79)
+    _stock_tricks(game)
+    me, other = _me(game), _other(game)
+    game._state = _replace_player(game.state, me, chained=True)
+    game._state = _replace_player(game.state, other, chained=True)
+    root_card = next(iter(game.state.card_ids_in(ZoneRef.hand(me))))
+    chain = _PendingChainDamage(
+        root_damage_event_id="1",
+        root_damage_source_id=me,
+        root_card_instance_id=root_card,
+        root_card_key=TIESUO,
+        root_card_user=me,
+        damage_type="雷属性",
+        chain_base_damage=1,
+        original_target_id=other,
+        candidate_order=(me, other),
+        session_id=game.session_id,
+    )
+    runtime = replace(game._runtime, pending_chain=chain)
+    hp_before = {
+        player_id: game.state.players_by_id[player_id].hp
+        for player_id in (me, other)
+    }
+    finished_before = len(_events_of(game, EventType.CHAIN_DAMAGE_FINISHED))
+    resolved_before = len(_events_of(game, EventType.CHAIN_TARGET_RESOLVED))
+    # 第一个候选归零后必须立即结束：不得再次进入循环、不得访问已清理的
+    # pending_chain、不得处理后续尚未开始目标、不得抛 ProductionBatchError。
+    next_state, next_runtime = game._advance_chain(
+        game.state, runtime, amount_override=0
+    )
+    assert next_runtime.pending_chain is None
+    assert next_runtime.phase is ProductionPhase.PLAY
+    finished = _events_of(game, EventType.CHAIN_DAMAGE_FINISHED)
+    assert len(finished) == finished_before + 1
+    assert finished[-1].payload["stop_reason"] == "prevented_zero"
+    assert finished[-1].payload["processed_targets"] == ()
+    resolved = _events_of(game, EventType.CHAIN_TARGET_RESOLVED)
+    assert len(resolved) == resolved_before + 1
+    assert resolved[-1].payload["result"] == "prevented_zero"
+    assert resolved[-1].payload["target_index"] == 0
+    assert resolved[-1].payload["actual_damage"] == 0
+    assert resolved[-1].payload["chained_old"] is True
+    assert resolved[-1].payload["chained_new"] is True
+    # 后续尚未开始目标未被处理：体力与横置均不变。
+    for player_id in (me, other):
+        assert next_state.players_by_id[player_id].hp == hp_before[player_id]
+        assert next_state.players_by_id[player_id].chained is True
+    assert len(_events_of(game, EventType.DAMAGE)) == 0
+
+
+def test_chain_step_amount_injection_rejects_negative() -> None:
+    game = _fresh(83)
+    _stock_tricks(game)
+    me, other = _me(game), _other(game)
+    game._state = _replace_player(game.state, me, chained=True)
+    game._state = _replace_player(game.state, other, chained=True)
+    root_card = next(iter(game.state.card_ids_in(ZoneRef.hand(me))))
+    chain = _PendingChainDamage(
+        root_damage_event_id="1",
+        root_damage_source_id=me,
+        root_card_instance_id=root_card,
+        root_card_key=TIESUO,
+        root_card_user=me,
+        damage_type="火属性",
+        chain_base_damage=1,
+        original_target_id=other,
+        candidate_order=(me,),
+        session_id=game.session_id,
+    )
+    runtime = replace(game._runtime, pending_chain=chain)
+    with pytest.raises(ValueError, match="不能为负数"):
+        game._apply_chain_damage_to_target(
+            game.state, runtime, chain, me, amount=-1
+        )
+    with pytest.raises(TypeError, match="必须是整数"):
+        game._apply_chain_damage_to_target(
+            game.state, runtime, chain, me, amount=True  # type: ignore[arg-type]
+        )
 
 
 # ----------------------------------------------------------------------
@@ -992,3 +1118,24 @@ def test_no_attribute_damage_keeps_chained_and_no_chain() -> None:
     _step(game, pass_action)
     assert game.state.players_by_id[_other(game)].chained is True
     assert _events_of(game, EventType.CHAIN_DAMAGE_STARTED) == []
+
+
+def test_docs_do_not_declare_stopped_winner_as_legal_result() -> None:
+    """N1：文档不得把 stopped_winner 列为合法 result 枚举。"""
+
+    root = Path(__file__).resolve().parents[1]
+    for doc_path in (
+        root / "docs" / "ENGINE_STATUS.md",
+        root / "docs" / "IMPLEMENTATION_MATRIX.md",
+        root / "docs" / "MASTER_IMPLEMENTATION_PLAN.md",
+        root / "docs" / "CHECKPOINT_MANIFEST.json",
+    ):
+        text = doc_path.read_text(encoding="utf-8")
+        # 只禁止“合法枚举列表”形式的声明（damaged|...|stopped_winner）；
+        # “不产生 stopped_winner／不是生产实现值”等否定表述允许保留。
+        assert "|stopped_winner" not in text, (
+            f"{doc_path.name} 中不得把 stopped_winner 声明为合法枚举"
+        )
+        assert "stopped_winner|" not in text, (
+            f"{doc_path.name} 中不得把 stopped_winner 声明为合法枚举"
+        )
