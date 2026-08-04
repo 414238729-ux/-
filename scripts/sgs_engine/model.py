@@ -38,6 +38,7 @@ class ZoneKind(str, Enum):
     DISCARD_PILE = "discard_pile"
     PROCESSING = "processing"
     REMOVED_FROM_GAME = "removed_from_game"
+    REVEALED = "revealed"
     HAND = "hand"
     EQUIPMENT = "equipment"
     JUDGMENT = "judgment"
@@ -58,6 +59,7 @@ GLOBAL_ZONE_KINDS: frozenset[ZoneKind] = frozenset(
         ZoneKind.DISCARD_PILE,
         ZoneKind.PROCESSING,
         ZoneKind.REMOVED_FROM_GAME,
+        ZoneKind.REVEALED,
     }
 )
 PLAYER_ZONE_KINDS: frozenset[ZoneKind] = frozenset(
@@ -168,6 +170,7 @@ DRAW_PILE = ZoneRef.global_zone(ZoneKind.DRAW_PILE)
 DISCARD_PILE = ZoneRef.global_zone(ZoneKind.DISCARD_PILE)
 PROCESSING_ZONE = ZoneRef.global_zone(ZoneKind.PROCESSING)
 REMOVED_FROM_GAME = ZoneRef.global_zone(ZoneKind.REMOVED_FROM_GAME)
+REVEALED_ZONE = ZoneRef.global_zone(ZoneKind.REVEALED)
 
 
 @dataclass(frozen=True, slots=True)
@@ -276,6 +279,7 @@ class PlayerState:
     hp: int
     max_hp: int
     alive: bool = True
+    chained: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "player_id", _nonempty_text(self.player_id, "玩家ID"))
@@ -293,6 +297,8 @@ class PlayerState:
             raise ModelValidationError("存活状态必须是布尔值")
         if not self.alive and hp > 0:
             raise ModelValidationError("已确认死亡的角色当前体力不能大于0")
+        if not isinstance(self.chained, bool):
+            raise ModelValidationError("横置状态必须是布尔值")
         object.__setattr__(self, "hp", hp)
         object.__setattr__(self, "max_hp", max_hp)
 
@@ -657,6 +663,7 @@ __all__ = [
     "PLAYER_ZONE_KINDS",
     "PROCESSING_ZONE",
     "REMOVED_FROM_GAME",
+    "REVEALED_ZONE",
     "CardInstance",
     "GameState",
     "ModelValidationError",

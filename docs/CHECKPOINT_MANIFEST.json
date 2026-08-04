@@ -1,6 +1,6 @@
 {
   "schema_version": "1.1",
-  "generated_on": "2026-08-03",
+  "generated_on": "2026-08-04",
   "git": {
     "available": true,
     "implementation_branch": "deepseek-single-target-tricks",
@@ -32,7 +32,9 @@
     "milestone_b2_group_target_trick_batch_commit": "5f2fbf27b7041bbf3010636de37306eea5da6256",
     "milestone_b2_group_target_trick_batch_commit_note": "群体普通锦囊批次（【南蛮入侵】、【万箭齐发】、【桃园结义】）已由用户在外部PowerShell提交，实现提交哈希 5f2fbf27b7041bbf3010636de37306eea5da6256（feat: implement production group-target trick slice）",
     "group_target_trick_audit_close_note": "群体普通锦囊批次（【南蛮入侵】、【万箭齐发】、【桃园结义】）已完成最终独立复审：初次独立只读审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES（2026-08-03），首次审计问题修复提交 ef98245aef32848468c7b2c4a7821ec9ae65146b（test: close group-target trick audit gaps）；最终独立复审在专用复审分支上执行，结论 AUDIT_PASSED，复审残项关闭真实提交 d2e4f49925c0bb285d44092821c3a85c496571ef（test: complete group-target trick reaudit closure）；里程碑标签待用户提交文档后建立",
-    "group_target_trick_audit_close_commit": "d2e4f49925c0bb285d44092821c3a85c496571ef"
+    "group_target_trick_audit_close_commit": "d2e4f49925c0bb285d44092821c3a85c496571ef",
+    "remaining_ordinary_tricks_worktree_branch": "deepseek-remaining-ordinary-tricks",
+    "remaining_ordinary_tricks_worktree_branch_note": "本批（【五谷丰登】完整生产语义＋【铁索连环】牌本体）实现所在分支；基线提交 6af30432993d908546d7cec114fd78ae62798ad5（docs: finalize group-target trick audit milestone，里程碑标签 milestone-b2-group-target-tricks-audited 为该提交的注解标签）；实现与文档提交由用户在外部提交后回填，不在此虚构提交哈希"
   },
   "feature_status": {
     "authoritative_core_foundation": true,
@@ -46,7 +48,8 @@
     "production_zone_target_trick_batch": true,
     "hidden_handle_hmac_security_fix": true,
     "production_duel_fire_attack_batch": true,
-    "production_group_target_trick_batch": true
+    "production_group_target_trick_batch": true,
+    "production_remaining_ordinary_trick_batch": true
   },
   "stage_status": {
     "1_source_and_callchain_audit": "passed",
@@ -148,29 +151,42 @@
       "id": "CP-04H-PRODUCTION-GROUP-TARGET-TRICK-BATCH",
       "status": "audited",
       "commit": "5f2fbf27b7041bbf3010636de37306eea5da6256",
-      "commit_note": "本批（【南蛮入侵】、【万箭齐发】、【桃园结义】）基线提交 7414b0661a5cd7599d392f5ae5b287a7147438ac（docs: finalize duel and fire attack audit milestone）；实现提交 5f2fbf27b7041bbf3010636de37306eea5da6256（feat: implement production group-target trick slice）；检查点文档提交 8d68231e336dbe213ffad1c5aaa3101896fe5f2f（docs: record group-target trick checkpoint）。2026-08-03 完成独立只读审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，首次审计问题修复提交 ef98245aef32848468c7b2c4a7821ec9ae65146b（test: close group-target trick audit gaps）；最终独立复审在专用复审分支上执行，复审残项关闭提交 d2e4f49925c0bb285d44092821c3a85c496571ef（test: complete group-target trick reaudit closure），最终结论 AUDIT_PASSED；未发现规则、隐藏信息、回放、第二套引擎或虚假测试阻塞问题。本文档为最终状态回填，里程碑标签待用户提交文档后建立；文档提交自身哈希由用户提交后确认，不在此虚构",
+      "commit_note": "本批（【南蛮入侵】、【万箭齐发】、【桃园结义】）基线提交 7414b0661a5cd7599d392f5ae5b287a7147438ac（docs: finalize duel and fire attack audit milestone）；实现提交 5f2fbf27b7041bbf3010636de37306eea5da6256（feat: implement production group-target trick slice）；检查点文档提交 8d68231e336dbe213ffad1c5aaa3101896fe5f2f（docs: record group-target trick checkpoint）。2026-08-03 完成独立只读审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，首次审计问题修复提交 ef98245aef32848468c7b2c4a7821ec9ae65146b（test: close group-target trick audit gaps）；最终独立复审在专用复审分支上执行，复审残项关闭提交 d2e4f49925c0bb285d44092821c3a85c496571ef（test: complete group-target trick reaudit closure），最终结论 AUDIT_PASSED；未发现规则、隐藏信息、回放、第二套引擎或虚假测试阻塞问题。本文档为最终状态回填，里程碑标签待用户提交文档后建立；文档提交自身哈希由用户提交后确认，不在此虚构；2026-08-04 回填：里程碑标签 milestone-b2-group-target-tricks-audited 已由用户真实建立（指向基线提交 6af30432993d908546d7cec114fd78ae62798ad5 的注解标签）",
       "evidence": "scripts/sgs_engine/production_cards.py、scripts/sgs_engine/production_batch.py、scripts/sgs_engine/events.py、scripts/sgs_engine/__init__.py、tests/test_sgs_production_group_target_tricks.py；正式160张牌堆群体普通锦囊批次",
       "scope": "formal；【南蛮入侵】3张、【万箭齐发】1张与【桃园结义】1张接入生产注册表与权威核心；建立群体普通锦囊按行动顺序逐目标结算框架（服务器自动目标序列、逐目标独立【无懈可击】窗口、当前目标响应或受伤／回复、濒死救援期间队列暂停与恢复）；当前正式生产入口仅支持双人会话，三人以上目标顺序未由正式生产入口证明（NOT PROVEN）；不构成普通锦囊批次、多人响应链、正式单挑或里程碑B完成",
       "audit": {
         "conclusion": "AUDIT_PASSED",
         "initial_conclusion": "AUDIT_PASSED_WITH_NONBLOCKING_ISSUES",
         "audited_at": "2026-08-03",
-        "auditor_note": "最终独立复审；初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，首次审计问题修复提交 ef98245aef32848468c7b2c4a7821ec9ae65146b（test: close group-target trick audit gaps）；复审残项关闭提交 d2e4f49925c0bb285d44092821c3a85c496571ef（test: complete group-target trick reaudit closure）；无规则、隐藏信息、回放、第二套引擎或虚假测试阻塞问题",
+        "auditor_note": "最终独立复审；初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，首次审计问题修复提交 ef98245aef32848468c7b2c4a7821ec9ae65146b（test: close group-target trick audit gaps）；复审残项关闭提交 d2e4f49925c0bb285d44092821c3a85c496571ef（test: complete group-target trick reaudit closure）；无规则、隐藏信息、回放、第二套引擎或虚假测试阻塞问题；里程碑标签 milestone-b2-group-target-tricks-audited 已真实建立并于 2026-08-04 回填",
         "closed_test_gaps": [
           "test_nanman_forged_responder_index_window_and_hash_fail",
           "test_wanjian_forged_responder_index_window_and_hash_fail"
         ],
         "audit_close_commit": "d2e4f49925c0bb285d44092821c3a85c496571ef",
         "audit_close_commit_message": "test: complete group-target trick reaudit closure",
-        "milestone_tag": null,
+        "milestone_tag": "milestone-b2-group-target-tricks-audited",
         "final_status": "audited"
+      }
+    },
+    {
+      "id": "CP-04I-PRODUCTION-REMAINING-ORDINARY-TRICK-BATCH",
+      "status": "worktree_complete_pending_user_commit",
+      "commit": null,
+      "commit_note": "本批（【五谷丰登】完整生产语义＋【铁索连环】牌本体）实现已完成于工作树，未执行任何Git写操作；完整 pytest 1454 passed；实现与文档提交由用户在外部提交后回填，不在此虚构本检查点的提交哈希或里程碑标签。",
+      "evidence": "scripts/sgs_engine/model.py、scripts/sgs_engine/engine.py、scripts/sgs_engine/events.py、scripts/sgs_engine/production_cards.py、scripts/sgs_engine/production_batch.py、tests/test_sgs_production_remaining_ordinary_tricks.py；正式160张牌堆剩余普通锦囊批次（五谷＋铁索牌本体）",
+      "scope": "formal；【五谷丰登】2张完整生产语义（公共REVEALED展示池、按存活角色数量快照展示、逐目标独立【无懈可击】窗口、公开展示池选牌、剩余展示牌统一弃置、提前结束确定性清理、严格回放与玩家可见边界）；【铁索连环】6张牌本体（一至二目标、可含使用者、无距离、服务器规范化目标顺序、逐目标独立【无懈可击】、横置状态切换chained_state事件、重铸card_recast＋正式摸牌接口）；明确不包含属性伤害传导（tiesuo_chain_damage_implemented=false，等待CP-04J）与借刀杀人（等待装备生产切片CP-04K）；三人以上五谷／铁索目标顺序未由正式生产入口证明（NOT PROVEN）；不构成普通锦囊批次、正式单挑或里程碑B完成",
+      "audit": {
+        "independent_audit_done": false,
+        "audit_conclusion": "NOT_AUDITED_YET",
+        "milestone_tag": null
       }
     }
   ],
   "final_verification": {
     "pytest": {
       "command": ".\\\\.venv\\\\Scripts\\\\python.exe -m pytest -q -p no:cacheprovider",
-      "passed": 1403,
+      "passed": 1454,
       "failed": 0,
       "skipped": 0
     },
@@ -218,10 +234,10 @@
     "milestone_b_blockers": [
       "Knowledge未闭合正式160张无技能单挑的适用范围、同将许可与首轮摸牌修正（基本牌批次已锁定双人、先手摸2约定）",
       "AuthoritativeCoreSession.run_game仍明确抛出UnsupportedRuleError",
-      "五谷丰登部分牌去向、其余锦囊事件映射等边界尚未闭合（【无懈可击】响应事件已闭合：生成card_used、不生成普通card_played、计入使用或打出总数）",
+      "借刀杀人仍无生产实现：依赖尚未实现的装备系统（武器牌适配器、装备攻击范围、正式装备状态注入边界），等待装备生产切片（CP-04K）；借刀出杀次数口径已于2026-08-04按用户移动版实测修正：响应借刀使用【杀】不受本出牌阶段已用杀次数的前置限制、该次使用成功后正常产生card_used并计入次数、仅次数用尽不构成无合法杀（CP-04K必测清单见Knowledge 4.6.2）；铁索属性伤害传导未实现（tiesuo_chain_damage_implemented=false，等待CP-04J），铁索完整语义未完成",
       "观看、亮牌及判定彻底耗尽仍是分析约定，不能用于approximation_count=0的正式入口",
       "尚无正式160张单挑100-seed验收运行器",
-      "38种正式卡牌定义中六种基本牌、【无中生有】／【无懈可击】／【过河拆桥】／【顺手牵羊】／【决斗】／【火攻】／【南蛮入侵】／【万箭齐发】／【桃园结义】已建立生产规则适配器；其余23种（普通／延时锦囊、武器、防具、坐骑）仍未建立",
+      "38种正式卡牌定义中六种基本牌、【无中生有】／【无懈可击】／【过河拆桥】／【顺手牵羊】／【决斗】／【火攻】／【南蛮入侵】／【万箭齐发】／【桃园结义】／【五谷丰登】已建立生产规则适配器，【铁索连环】已接入牌本体（6张实体，属性传导未完成不计入完整实现）；其余21种（借刀、3种延时锦囊、17种装备）仍未建立",
       "正式卡牌处理区与完整生命周期规则仅六种基本牌与九种普通锦囊接入，其余卡牌与整局重洗调度未接入"
     ],
     "not_configured": [
@@ -391,13 +407,53 @@
         "test_nanman_forged_responder_index_window_and_hash_fail",
         "test_wanjian_forged_responder_index_window_and_hash_fail"
       ]
+    },
+    "production_remaining_ordinary_trick_batch": {
+      "implemented": true,
+      "tested": true,
+      "card_types": 2,
+      "entity_counts_by_key": {
+        "sgs_trick_wugufengdeng": 2,
+        "sgs_trick_tiesuolianhuan": 6
+      },
+      "total_implemented_entities": 126,
+      "total_deck_entities": 160,
+      "remaining_unimplemented_card_keys": 21,
+      "remaining_unimplemented_normal_tricks": 2,
+      "complete_implemented_card_kinds": 16,
+      "complete_implemented_entities": 120,
+      "remaining_card_kinds": 22,
+      "tiesuo_card_body_implemented": true,
+      "tiesuo_chain_damage_implemented": false,
+      "tiesuo_full_semantics_complete": false,
+      "wugu_pool_zone": "revealed",
+      "wugu_remaining_to_discard": "全部剩余展示牌统一进入弃牌堆（CP-04I用户确认口径）",
+      "wugu_early_end_cleanup": true,
+      "recast_event": "card_recast",
+      "recast_draw_reason": "tiesuo_recast",
+      "chained_state_event": "chained_state",
+      "test_only_adapters_in_production_registry": false,
+      "fallback_for_unimplemented": false,
+      "unsupported_rules": 1,
+      "approximation_count": 0,
+      "reexecution_replay_supported": true,
+      "formal_result": false,
+      "milestone_b_complete": false,
+      "authoritative_full_game_core": false,
+      "formal_run_ready": false,
+      "formal_duel_no_skill_ready": false,
+      "multi_player_production_proven": false,
+      "multi_player_production_note": "当前正式生产入口原生仅支持双人会话；三人以上五谷展示数量与完整选择顺序、铁索目标顺序与多人属性伤害传导均未由正式生产入口证明（NOT PROVEN）",
+      "worktree_commit_pending": true,
+      "independent_audit_done": false,
+      "audit_conclusion": "NOT_AUDITED_YET"
     }
   },
   "sha256": {
-    "docs/ENGINE_STATUS.md": "589018bf93be7b8b8bfd7f757bdf038afbca6f3ba8fa21d26e159de353c1908e",
-    "docs/IMPLEMENTATION_MATRIX.md": "cd58946251a6658328c12325b5830393728e7f7f3ac75123f0c83ef265fd2d57",
+    "docs/ENGINE_STATUS.md": "804d36e0282599ba235ad604b7ca7e3c4b24e93929d8b8581e80b8250a2f61cf",
+    "docs/IMPLEMENTATION_MATRIX.md": "8ac727a80d18d4dd0a9ede74cd83590859b6f96159949934920e173793480888",
     "docs/LEGACY_RESULTS_INVALID.md": "267d51329b65b4435ed770b9fe90a0d53148d17cc9b0dae3e6d3406b06c0c0cc",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "9ba94951d1cbc000a06a968003857ebf51ccd102a89cdc6bfe9a49fee6dace37",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "da6bc1109d44837067543ed64b6aa1cbecebe143aad6fd726385d277210330dd",
     "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "23b56a0edf0c85657b332100538013de16be4d71ea6a8214ac862a6708105af6",
     "knowledge/三国杀牌堆数据.csv": "8cb8da4177f11962776ae0f7e0154ed4ce56e293e96ac457874d48650517de18",
     "scripts/sgs_dev_runner.py": "6f88baa78fc9c22106188defda7190cd2a4412325db46f3964d217fd0e61c755",
@@ -405,11 +461,11 @@
     "scripts/sgs_engine/actions.py": "92c76be32afa52a79f76e8439ec95a1dff04e1df2592966b461681ae7b346fff",
     "scripts/sgs_engine/duel.py": "4e2b716e68346948b8b50fc09bac2c0160f30f43410b09aa7e6f7caaebf01218",
     "scripts/sgs_engine/duel_replay.py": "99661777d171928d6c8c0a12ff45da7bf4b051a2f26a21ae78424068a1fc1231",
-    "scripts/sgs_engine/engine.py": "b8f9f46381d245dbddcebab9dab8977f61af52a32be34579705531483e74d4de",
-    "scripts/sgs_engine/events.py": "23494ae3daeaf43d2e25e0cb95396f4c8b26afae438dee19fc6e19f9789bdd4c",
-    "scripts/sgs_engine/model.py": "8f7ffba33068978cfb319176dd466c93dd9a8814e6767824fe678e7c28f4a540",
-    "scripts/sgs_engine/production_batch.py": "12658265e8a2ab12398090ee788230cb14d5d2ce6fe6710d556f5beb6d6c051f",
-    "scripts/sgs_engine/production_cards.py": "03214c87348a5f44ac9e4b01b75a86840d55b95c83f3db36e9d045a85c05cc16",
+    "scripts/sgs_engine/engine.py": "1a983ef03cc607644d27ac1902c961e687f1eab254679c81a6ab2e5235d824c7",
+    "scripts/sgs_engine/events.py": "6e14c278f5c93b2eeaaf679acf6c03ed011c83710d5709cc629d3aca38483090",
+    "scripts/sgs_engine/model.py": "54e9ddaacbd57bed216e5a98cbfded9ce1b89fe5a94b8141e6d77c46d3d9f014",
+    "scripts/sgs_engine/production_batch.py": "1f8f2db142dd3411e41a5b4379f7de43c2d85814a8946b329c77c313e610ab9d",
+    "scripts/sgs_engine/production_cards.py": "82d4240c44fb8312f3bd732733ff38c88279db0065f3da4b19325a185a0edc83",
     "scripts/sgs_engine/production_replay.py": "ddafa7ddfb26cd097140d252ec3281cc5c4a04d77f5c271ac9827e78e5b45459",
     "scripts/sgs_engine/replay.py": "27cd09a98e9ea09d03a6de3542d13abc94341fde4d33a5fdc5e8bdc5497580b1",
     "scripts/sgs_engine/rng.py": "3cb67017556535802c2b323e8002217961955ffee7ff161de85d804d86d5ead6",
@@ -417,11 +473,13 @@
     "scripts/sgs_formal_runner.py": "840aa483354a80bcb8867c197352d34f32f985a92cb2287dc2593812c0260be2",
     "scripts/sgs_source_integrity_audit.py": "046aa2a68ed3c3da6df0e8ee9389fe27f8ff4120bc4475f8317fec5a899d8909",
     "tests/test_sgs_production_basic_cards.py": "948bbea68f4a44ffea198db8d4f23a82140f11a40945e6ba5d7ac7411beb6095",
-    "tests/test_sgs_production_duel_fire_attack.py": "ca47868d7f21a6b5ed089ae47962f47d6d81096cf3bb42b66a4bf5a8172cba97",
-    "tests/test_sgs_production_group_target_tricks.py": "7efede52ec680fa04540126c27afcb1de7a56c37e74c2b17e579f52bb80f7481",
+    "tests/test_sgs_production_duel_fire_attack.py": "07cca8acbde155cca4cf2463fb95c153e29111eb7d6b81587875d4f85817fde5",
+    "tests/test_sgs_production_group_target_tricks.py": "60e98647fb67ab9d69b8058835585040502abb814e11b51e4bad15237ca0ac00",
     "tests/test_sgs_production_hidden_handle_security.py": "ff372c1e5a3005a680e05eb8f34025f18962a0384caacc919574197e8dbb7f4f",
-    "tests/test_sgs_production_single_target_tricks.py": "affd65a4e4adc59c514ebfa9c9807c08225ab06e00c25ced1979efe572fb4a94",
-    "tests/test_sgs_production_zone_target_tricks.py": "25afc008a5ca470c6540025be7a70fafa70c9eea2edc8088c6215f46e2c62e32",
-    "hash_note": "本表以Git跟踪内容的规范化blob字节为权威（UTF-8无BOM）；不以不同平台检出的CRLF/LF工作树原始字节为权威；Windows core.autocrlf导致的行尾差异不视为内容漂移；CHECKPOINT_MANIFEST.json不包含自身哈希；仅作状态记录，不参与门禁校验"
+    "tests/test_sgs_production_single_target_tricks.py": "741db6fcd08db02de258215043c55aa7cc73248bdbca51e7ad827c54af5d2444",
+    "tests/test_sgs_production_zone_target_tricks.py": "5be49acce056f9cd5d52fd06776523cab8ffa4b5979c6f954de3db0ffccfba37",
+    "hash_note": "本表以Git跟踪内容的规范化blob字节为权威（UTF-8无BOM）；不以不同平台检出的CRLF/LF工作树原始字节为权威；Windows core.autocrlf导致的行尾差异不视为内容漂移；CHECKPOINT_MANIFEST.json不包含自身哈希；仅作状态记录，不参与门禁校验",
+    "tests/test_sgs_production_remaining_ordinary_tricks.py": "7ea14321d7e9a92b78f32c0f1993ecc460406d1145e94c879e623ca24e625e3b",
+    "knowledge/三国杀卡牌效果.md": "82399ca142cf3ccf9c0311b90b53938b864c79c3a0b2f8bc6578adb3545bdb60"
   }
 }

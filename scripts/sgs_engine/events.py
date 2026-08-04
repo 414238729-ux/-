@@ -34,6 +34,8 @@ class EventType(str, Enum):
     DEATH = "death"
     VICTORY = "victory"
     GROUP_TARGET_RESOLVED = "group_target_resolved"
+    CHAINED_STATE = "chained_state"
+    CARD_RECAST = "card_recast"
 
 
 def _validate_id(value: object, field_name: str) -> None:
@@ -243,6 +245,18 @@ def validate_event_contract(event: GameEvent) -> GameEvent:
             raise ValueError("群体锦囊逐目标结算事件必须提供根锦囊实体牌ID")
         if len(event.target_ids) != 1:
             raise ValueError("群体锦囊逐目标结算事件必须且只能指定当前目标角色")
+    if event.event_type is EventType.CHAINED_STATE:
+        if event.card_instance_id is None or event.card_key is None:
+            raise ValueError("横置状态变化事件必须提供实体牌ID与card_key")
+        if len(event.target_ids) != 1:
+            raise ValueError("横置状态变化事件必须且只能指定一名目标角色")
+    if event.event_type is EventType.CARD_RECAST:
+        if event.card_instance_id is None or event.card_key is None:
+            raise ValueError("重铸事件必须提供实体牌ID与card_key")
+        if event.card_user is None:
+            raise ValueError("重铸事件必须提供执行重铸的card_user")
+        if event.target_ids:
+            raise ValueError("重铸事件不能指定目标")
     if event.event_type in (EventType.DYING, EventType.DEATH) and len(event.target_ids) != 1:
         raise ValueError("濒死或死亡事件必须且只能指定一名目标角色")
     if event.event_type is EventType.VICTORY and not event.target_ids:

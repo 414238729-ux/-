@@ -58,6 +58,7 @@ from .model import (
     DISCARD_PILE,
     DRAW_PILE,
     PROCESSING_ZONE,
+    REVEALED_ZONE,
     CardInstance,
     GameState,
     PlayerState,
@@ -66,7 +67,6 @@ from .model import (
 )
 from .production_cards import (
     FormalCardRegistry,
-    GROUP_TRICK_KEYS,
     GroupTargetTrickAdapter,
     GuoheChaiqiaoAdapter,
     HuogongAdapter,
@@ -75,13 +75,16 @@ from .production_cards import (
     ShunshouQianyangAdapter,
     SlashAdapter,
     TaoyuanJieyiAdapter,
+    TiesuoLianhuanAdapter,
     WanjianQifaAdapter,
+    WugufengdengAdapter,
     WuxiekejiAdapter,
     WuzhongshengyouAdapter,
     SLASH_CARD_KEYS,
     has_target_zone_cards,
     is_valid_shunshou_target,
     is_valid_slash_target,
+    normalize_target_order,
     target_zone_refs,
 )
 from .replay import canonical_json, sha256_value, state_sha256
@@ -101,6 +104,7 @@ class ProductionPhase(str, Enum):
     FIRE_ATTACK_DISCARD = "fire_attack_discard"
     NANMAN_RESPONSE = "nanman_response"
     WANJIAN_RESPONSE = "wanjian_response"
+    WUGU_PICK = "wugu_pick"
     DYING_RESCUE = "dying_rescue"
     END = "end"
     FINISHED = "finished"
@@ -116,6 +120,7 @@ BATCH_PHASES: tuple[ProductionPhase, ...] = (
     ProductionPhase.FIRE_ATTACK_DISCARD,
     ProductionPhase.NANMAN_RESPONSE,
     ProductionPhase.WANJIAN_RESPONSE,
+    ProductionPhase.WUGU_PICK,
     ProductionPhase.DYING_RESCUE,
     ProductionPhase.END,
 )
@@ -228,6 +233,27 @@ class _PendingGroupTrick:
 
 
 @dataclass(frozen=True, slots=True)
+class _PendingWugu:
+    """五谷丰登公开展示池与逐目标选择状态机。
+
+    展示池实体以公共 REVEALED 区域的权威顺序为唯一事实，``pool_digest``
+    是使用时与每次选牌后更新的一次性有序摘要；公共选择动作必须同时绑定
+    会话、当前窗口、根锦囊实例、当前选择目标、当前目标索引、展示池有序
+    摘要与状态哈希，任何过期、跨窗口或伪造选择都会失败关闭。
+    """
+
+    user_id: str
+    trick_instance_id: str
+    trick_key: str
+    pool: tuple[str, ...]
+    pool_digest: str
+    target_sequence: tuple[str, ...]
+    current_target_index: int = 0
+    completed_target_ids: tuple[str, ...] = ()
+    window_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class _BatchRuntime:
     current_player_id: str
     turn_number: int = 1
@@ -259,6 +285,7 @@ class _BatchRuntime:
     pending_group_trick: _PendingGroupTrick | None = None
     group_response_handles: Mapping[str, str] = MappingProxyType({})
     group_response_snapshot_digest: str | None = None
+    pending_wugu: _PendingWugu | None = None
     pending_damage_card_id: str | None = None
     pending_damage_source_id: str | None = None
     pending_damage_kill_credit: str | None = None
@@ -307,6 +334,20 @@ class _BatchRuntime:
                 "completed_target_ids": list(group.completed_target_ids),
                 "responder_id": group.responder_id,
             }
+        pending_wugu = None
+        if self.pending_wugu is not None:
+            wugu = self.pending_wugu
+            pending_wugu = {
+                "user_id": wugu.user_id,
+                "trick_instance_id": wugu.trick_instance_id,
+                "trick_key": wugu.trick_key,
+                "pool": list(wugu.pool),
+                "pool_digest": wugu.pool_digest,
+                "target_sequence": list(wugu.target_sequence),
+                "current_target_index": wugu.current_target_index,
+                "completed_target_ids": list(wugu.completed_target_ids),
+                "window_id": wugu.window_id,
+            }
         return {
             "current_player_id": self.current_player_id,
             "turn_number": self.turn_number,
@@ -340,6 +381,7 @@ class _BatchRuntime:
             "group_response_snapshot_digest": (
                 self.group_response_snapshot_digest
             ),
+            "pending_wugu": pending_wugu,
             "pending_damage_card_id": self.pending_damage_card_id,
             "pending_damage_source_id": self.pending_damage_source_id,
             "pending_damage_kill_credit": self.pending_damage_kill_credit,
@@ -750,6 +792,7 @@ def _replace_player(
     *,
     hp: int | None = None,
     alive: bool | None = None,
+    chained: bool | None = None,
 ) -> GameState:
     """只由批处理会话调用的不可变玩家状态事务。"""
 
@@ -765,6 +808,7 @@ def _replace_player(
                 player,
                 hp=player.hp if hp is None else hp,
                 alive=player.alive if alive is None else alive,
+                chained=player.chained if chained is None else chained,
             )
         )
     if not found:
@@ -1174,6 +1218,17 @@ class ProductionBasicCardBatch:
             if runtime.pending_fire_attack is None:
                 raise ProductionBatchError("【火攻】弃牌阶段缺少结算状态")
             return runtime.pending_fire_attack.user_id
+        if runtime.phase is ProductionPhase.WUGU_PICK:
+            if runtime.pending_wugu is None:
+                raise ProductionBatchError("五谷选牌阶段缺少选牌状态")
+            if (
+                runtime.pending_wugu.current_target_index
+                >= len(runtime.pending_wugu.target_sequence)
+            ):
+                raise ProductionBatchError("五谷目标索引越界")
+            return runtime.pending_wugu.target_sequence[
+                runtime.pending_wugu.current_target_index
+            ]
         if runtime.phase in (
             ProductionPhase.NANMAN_RESPONSE,
             ProductionPhase.WANJIAN_RESPONSE,
@@ -1262,6 +1317,29 @@ class ProductionBasicCardBatch:
                         "responder_id": (
                             runtime.pending_group_trick.responder_id
                         ),
+                    }
+                ),
+                "pending_wugu": (
+                    None
+                    if runtime.pending_wugu is None
+                    else {
+                        "user_id": runtime.pending_wugu.user_id,
+                        "trick_instance_id": (
+                            runtime.pending_wugu.trick_instance_id
+                        ),
+                        "trick_key": runtime.pending_wugu.trick_key,
+                        "pool": list(runtime.pending_wugu.pool),
+                        "pool_digest": runtime.pending_wugu.pool_digest,
+                        "target_sequence": list(
+                            runtime.pending_wugu.target_sequence
+                        ),
+                        "current_target_index": (
+                            runtime.pending_wugu.current_target_index
+                        ),
+                        "completed_target_ids": list(
+                            runtime.pending_wugu.completed_target_ids
+                        ),
+                        "window_id": runtime.pending_wugu.window_id,
                     }
                 ),
                 "trick_effect_active": runtime.trick_effect_active,
@@ -1490,6 +1568,9 @@ class ProductionBasicCardBatch:
                     payload={"operation": "pass_wanjian_jink"},
                 )
             )
+        elif self.phase is ProductionPhase.WUGU_PICK:
+            for adapter in self._formal_registry.adapters.values():
+                actions.extend(adapter.enumerate_legal_actions(state, context))
         elif self.phase is ProductionPhase.DYING_RESCUE:
             for adapter in self._formal_registry.adapters.values():
                 actions.extend(adapter.enumerate_legal_actions(state, context))
@@ -1561,6 +1642,18 @@ class ProductionBasicCardBatch:
             if operation == "use_taoyuan":
                 return self._formal_registry.adapter_for(
                     "sgs_trick_taoyuanjieyi"
+                ).apply_action(state, context, action)
+            if operation == "use_tiesuo":
+                return self._formal_registry.adapter_for(
+                    "sgs_trick_tiesuolianhuan"
+                ).apply_action(state, context, action)
+            if operation == "recast_tiesuo":
+                return self._formal_registry.adapter_for(
+                    "sgs_trick_tiesuolianhuan"
+                ).apply_action(state, context, action)
+            if operation == "use_wugu":
+                return self._formal_registry.adapter_for(
+                    "sgs_trick_wugufengdeng"
                 ).apply_action(state, context, action)
             if action.action_type is ActionType.PASS and operation == (
                 "end_play_phase"
@@ -1675,6 +1768,13 @@ class ProductionBasicCardBatch:
                 return self.apply_pass_wanjian_jink(state, context, action)
             raise InvalidActionError("【万箭齐发】响应阶段不支持当前动作")
 
+        if self.phase is ProductionPhase.WUGU_PICK:
+            if operation == "pick_wugu_card":
+                return self._formal_registry.adapter_for(
+                    "sgs_trick_wugufengdeng"
+                ).apply_action(state, context, action)
+            raise InvalidActionError("五谷选牌阶段不支持当前动作")
+
         raise ProductionBatchError(
             f"阶段{self.phase.value!r}不能应用动作"
         )
@@ -1766,6 +1866,7 @@ class ProductionBasicCardBatch:
             pending_group_trick=None,
             group_response_handles=MappingProxyType({}),
             group_response_snapshot_digest=None,
+            pending_wugu=None,
             pending_damage_card_id=None,
             pending_damage_source_id=None,
             pending_damage_kill_credit=None,
@@ -2218,7 +2319,7 @@ class ProductionBasicCardBatch:
                     next_state, next_runtime = self._open_fire_attack(
                         state, runtime, trick
                     )
-                elif trick.trick_key in GROUP_TRICK_KEYS:
+                elif runtime.pending_group_trick is not None:
                     next_state, next_runtime = (
                         self._resolve_group_trick_target(state, runtime, trick)
                     )
@@ -3760,6 +3861,14 @@ class ProductionBasicCardBatch:
             return self._taoyuan_resolve_target(
                 state, runtime, group, current
             )
+        if group.trick_key == "sgs_trick_wugufengdeng":
+            return self._open_wugu_pick_phase(
+                state, runtime, group, current
+            )
+        if group.trick_key == "sgs_trick_tiesuolianhuan":
+            return self._tiesuo_resolve_target(
+                state, runtime, group, current
+            )
         if group.trick_key in (
             "sgs_trick_nanmanruqin",
             "sgs_trick_wanjianqifa",
@@ -3853,15 +3962,36 @@ class ProductionBasicCardBatch:
 
         completed = (*group.completed_target_ids, resolved_target)
         next_index = group.current_target_index + 1
+        wugu = runtime.pending_wugu
+        next_wugu = wugu
+        if wugu is not None and wugu.trick_instance_id == group.trick_instance_id:
+            current_pool = tuple(state.card_ids_in(REVEALED_ZONE))
+            next_wugu = replace(
+                wugu,
+                pool=current_pool,
+                pool_digest=sha256_value(current_pool),
+                current_target_index=next_index,
+                completed_target_ids=completed,
+                window_id=None,
+            )
         if next_index >= len(group.target_sequence):
             # 全部目标完成：原锦囊此时才从处理区进入弃牌堆。
+            next_state = state
+            if next_wugu is not None:
+                next_state, discard_events = self._discard_revealed_pool(
+                    next_state,
+                    next_wugu,
+                    reason="wugu_remaining_to_discard",
+                )
+                self._events.extend(discard_events)
             next_state, finish_event = self._finish_processing(
-                state,
+                next_state,
                 group.trick_instance_id,
                 f"{group.trick_key}_all_targets_resolved",
             )
             self._events.extend((finish_event,))
-            return next_state, self._return_to_play(runtime)
+            next_runtime = self._return_to_play(runtime)
+            return next_state, replace(next_runtime, pending_wugu=None)
         next_target = group.target_sequence[next_index]
         order = (
             runtime.current_player_id,
@@ -3879,6 +4009,7 @@ class ProductionBasicCardBatch:
             runtime,
             phase=ProductionPhase.TRICK_RESPONSE,
             pending_group_trick=next_group,
+            pending_wugu=next_wugu,
             pending_trick=_PendingTrick(
                 group.user_id,
                 next_target,
@@ -3943,6 +4074,663 @@ class ProductionBasicCardBatch:
         return self._advance_group_target(
             next_state, runtime, group, target_id
         )
+
+    def _tiesuo_resolve_target(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        group: _PendingGroupTrick,
+        target_id: str,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """【铁索连环】当前目标生效：切换横置状态并记录状态事件。"""
+
+        player = state.players_by_id[target_id]
+        old_value = player.chained
+        new_value = not old_value
+        next_state = _replace_player(
+            state, target_id, chained=new_value
+        )
+        self._events.extend(
+            (
+                GameEvent(
+                    event_type=EventType.CHAINED_STATE,
+                    card_instance_id=group.trick_instance_id,
+                    card_key=group.trick_key,
+                    card_user=group.user_id,
+                    target_ids=(target_id,),
+                    payload={
+                        "actor": group.user_id,
+                        "target": target_id,
+                        "old_value": old_value,
+                        "new_value": new_value,
+                        "root_card_instance_id": group.trick_instance_id,
+                        "reason": "tiesuolianhuan_toggle",
+                        "target_index": group.current_target_index,
+                        "target_count": len(group.target_sequence),
+                    },
+                ),
+                self._group_resolved_event(
+                    next_state,
+                    group,
+                    target_id,
+                    result="toggled",
+                ),
+            )
+        )
+        return self._advance_group_target(
+            next_state, runtime, group, target_id
+        )
+
+    def _discard_revealed_pool(
+        self,
+        state: GameState,
+        wugu: _PendingWugu,
+        *,
+        reason: str,
+    ) -> tuple[GameState, tuple[GameEvent, ...]]:
+        """把公共展示池剩余实体按权威顺序统一置入弃牌堆。"""
+
+        pool = tuple(state.card_ids_in(REVEALED_ZONE))
+        if not pool:
+            return state, ()
+        next_state = state.move_cards(
+            {instance_id: DISCARD_PILE for instance_id in pool}
+        )
+        events = tuple(
+            GameEvent(
+                event_type=EventType.CARD_MOVED,
+                card_instance_id=instance_id,
+                card_key=_card_key(next_state, instance_id),
+                card_user=wugu.user_id,
+                payload={
+                    "source": _zone_payload(REVEALED_ZONE),
+                    "destination": _zone_payload(DISCARD_PILE),
+                    "reason": reason,
+                    "root_trick_instance_id": wugu.trick_instance_id,
+                },
+            )
+            for instance_id in pool
+        )
+        return next_state, events
+
+    def _reveal_cards(
+        self,
+        state: GameState,
+        count: int,
+        *,
+        user_id: str,
+        trick_instance_id: str,
+        window_id: str,
+        reason: str,
+    ) -> tuple[GameState, tuple[GameEvent, ...]]:
+        """从牌堆顶展示指定数量实体牌到公共 REVEALED 区域。
+
+        复用正式摸牌同一套确定性 RNG 消费与弃牌重洗逻辑：牌堆不足时把
+        弃牌堆洗入牌堆再继续，合计仍不足则失败关闭；不建立另一套补牌
+        逻辑。
+        """
+
+        if (
+            len(state.card_ids_in(DRAW_PILE))
+            + len(state.card_ids_in(DISCARD_PILE))
+            < count
+        ):
+            raise ProductionBatchDeckExhaustedError(
+                f"仍需展示{count}张牌，但牌堆与可重洗弃牌堆合计不足；"
+                "生产批处理会话失败关闭"
+            )
+        next_state = state
+        events: list[GameEvent] = []
+        for pool_index in range(count):
+            if not next_state.card_ids_in(DRAW_PILE):
+                discard_ids = list(next_state.card_ids_in(DISCARD_PILE))
+                self._rng.shuffle(discard_ids)
+                sources = {
+                    instance_id: next_state.location_of(instance_id)
+                    for instance_id in discard_ids
+                }
+                next_state = next_state.move_cards(
+                    {instance_id: DRAW_PILE for instance_id in discard_ids}
+                )
+                events.extend(
+                    GameEvent(
+                        event_type=EventType.CARD_MOVED,
+                        card_instance_id=instance_id,
+                        card_key=_card_key(next_state, instance_id),
+                        payload={
+                            "source": _zone_payload(sources[instance_id]),
+                            "destination": _zone_payload(DRAW_PILE),
+                            "reason": "reshuffle",
+                        },
+                    )
+                    for instance_id in discard_ids
+                )
+            instance_id = next_state.card_ids_in(DRAW_PILE)[0]
+            source = next_state.location_of(instance_id)
+            next_state = next_state.move_card(instance_id, REVEALED_ZONE)
+            card = next_state.cards_by_id[instance_id]
+            events.extend(
+                (
+                    GameEvent(
+                        event_type=EventType.CARD_MOVED,
+                        card_instance_id=instance_id,
+                        card_key=card.card_key,
+                        card_user=user_id,
+                        payload={
+                            "source": _zone_payload(source),
+                            "destination": _zone_payload(REVEALED_ZONE),
+                            "reason": reason,
+                        },
+                    ),
+                    GameEvent(
+                        event_type=EventType.CARD_REVEALED,
+                        card_instance_id=instance_id,
+                        card_key=card.card_key,
+                        card_user=user_id,
+                        target_ids=tuple(
+                            player.player_id
+                            for player in next_state.players
+                            if player.alive
+                        ),
+                        payload={
+                            "reason": reason,
+                            "card_name": card.card_name,
+                            "suit": card.suit,
+                            "rank": card.rank,
+                            "pool_index": pool_index,
+                            "pool_size": count,
+                            "root_trick_instance_id": trick_instance_id,
+                            "trick_instance_id": trick_instance_id,
+                            "window_id": window_id,
+                        },
+                    ),
+                )
+            )
+        return next_state, tuple(events)
+
+    def apply_wugu_use(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: WugufengdengAdapter,
+    ) -> GameState:
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.PLAY:
+            raise InvalidActionError("【五谷丰登】只能在出牌阶段使用")
+        if context.actor_id != runtime.current_player_id:
+            raise InvalidActionError("只有当前回合角色可以使用【五谷丰登】")
+        if action.card_instance_id is None:
+            raise InvalidActionError("使用【五谷丰登】必须指定实体牌")
+        card = state.cards_by_id[action.card_instance_id]
+        if card.card_key != adapter.card_key:
+            raise InvalidActionError(
+                "【五谷丰登】动作的实体牌与适配器卡牌键不一致"
+            )
+        if str(action.payload.get("card_key", "")) != adapter.card_key:
+            raise InvalidActionError(
+                "【五谷丰登】动作负载与适配器卡牌键不一致"
+            )
+        if action.target_ids:
+            raise InvalidActionError(
+                "【五谷丰登】的目标集合由服务器自动生成，"
+                "不接受玩家提交、删减或重排的目标"
+            )
+        if state.location_of(action.card_instance_id) != ZoneRef.hand(
+            context.actor_id
+        ):
+            raise InvalidActionError("只能使用行动角色真实手牌中的实体牌")
+
+        sequence = self._group_target_sequence(
+            state, context.actor_id, adapter
+        )
+        if not sequence:
+            raise InvalidActionError(
+                "【五谷丰登】当前没有合法目标，不能使用"
+            )
+
+        next_state, move_event = self._move_to_processing(
+            state,
+            action.card_instance_id,
+            context.actor_id,
+            "wugufengdeng_use",
+        )
+        used_event = GameEvent(
+            event_type=EventType.CARD_USED,
+            card_instance_id=action.card_instance_id,
+            card_key=adapter.card_key,
+            card_user=context.actor_id,
+            target_ids=sequence,
+            payload={
+                "purpose": "wugu_sequential_public_pool_pick",
+                "card_name": adapter.card_name,
+                "pool_size": len(sequence),
+            },
+        )
+        queued = self._events.extend((used_event, move_event))
+        used_sequence = queued[0].sequence
+        assert used_sequence is not None
+
+        reveal_window_id = (
+            f"wugu-reveal:{runtime.turn_number}:"
+            f"{action.card_instance_id}"
+        )
+        pool_state, reveal_events = self._reveal_cards(
+            next_state,
+            len(sequence),
+            user_id=context.actor_id,
+            trick_instance_id=action.card_instance_id,
+            window_id=reveal_window_id,
+            reason="wugu_reveal",
+        )
+        self._events.extend(reveal_events)
+        pool = tuple(pool_state.card_ids_in(REVEALED_ZONE))
+        if len(pool) != len(sequence):
+            raise ProductionBatchError(
+                "五谷展示池数量与目标序列不一致"
+            )
+        pool_digest = sha256_value(pool)
+
+        group = _PendingGroupTrick(
+            user_id=context.actor_id,
+            trick_instance_id=action.card_instance_id,
+            trick_key=adapter.card_key,
+            target_sequence=sequence,
+        )
+        first_target = sequence[0]
+        order = (
+            runtime.current_player_id,
+            self.opponent_of(runtime.current_player_id),
+        )
+        next_runtime = replace(
+            runtime,
+            phase=ProductionPhase.TRICK_RESPONSE,
+            pending_group_trick=group,
+            pending_wugu=_PendingWugu(
+                user_id=context.actor_id,
+                trick_instance_id=action.card_instance_id,
+                trick_key=adapter.card_key,
+                pool=pool,
+                pool_digest=pool_digest,
+                target_sequence=sequence,
+            ),
+            pending_trick=_PendingTrick(
+                context.actor_id,
+                first_target,
+                action.card_instance_id,
+                adapter.card_key,
+            ),
+            trick_effect_active=True,
+            trick_consecutive_passes=0,
+            trick_response_order=order,
+            trick_response_index=0,
+            trick_decision_count=0,
+            trick_direct_response_to=action.card_instance_id,
+            response_window_id=(
+                f"trick:{runtime.turn_number}:"
+                f"{action.card_instance_id}:gt0:dec0"
+            ),
+            response_window_order=(order[0],),
+            response_window_source_sequence=used_sequence,
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return pool_state
+
+    def _open_wugu_pick_phase(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        group: _PendingGroupTrick,
+        target_id: str,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """当前目标无懈链结束后：进入公共展示池选牌阶段。"""
+
+        wugu = runtime.pending_wugu
+        if wugu is None or wugu.trick_instance_id != group.trick_instance_id:
+            raise ProductionBatchError("五谷结算缺少展示池状态")
+        if wugu.current_target_index >= len(wugu.target_sequence):
+            raise ProductionBatchError("五谷目标索引越界")
+        if wugu.target_sequence[wugu.current_target_index] != target_id:
+            raise ProductionBatchError(
+                "五谷当前目标与选牌窗口目标不一致"
+            )
+        current_pool = tuple(state.card_ids_in(REVEALED_ZONE))
+        if sha256_value(current_pool) != wugu.pool_digest:
+            raise ProductionBatchError("五谷展示池摘要与结算状态不一致")
+        window_id = (
+            f"wugu-pick:{runtime.turn_number}:"
+            f"{group.trick_instance_id}:gt{wugu.current_target_index}"
+        )
+        next_runtime = replace(
+            runtime,
+            phase=ProductionPhase.WUGU_PICK,
+            pending_wugu=replace(wugu, window_id=window_id),
+            pending_trick=None,
+            trick_effect_active=False,
+            trick_consecutive_passes=0,
+            trick_response_order=(),
+            trick_response_index=0,
+            trick_decision_count=0,
+            trick_direct_response_to=None,
+            response_window_id=None,
+            response_window_order=(),
+            response_window_source_sequence=None,
+        )
+        return state, next_runtime
+
+    def enumerate_wugu_pick_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        """枚举五谷当前目标的公开展示池选择动作。
+
+        展示池全部公开，候选直接携带公开实体ID；动作同时绑定会话、当前
+        窗口、根锦囊、当前目标与索引、展示池有序摘要和状态哈希。
+        """
+
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.WUGU_PICK:
+            raise ProductionBatchError("五谷选牌动作只能在选牌阶段枚举")
+        group = runtime.pending_group_trick
+        wugu = runtime.pending_wugu
+        if group is None or wugu is None:
+            raise ProductionBatchError("五谷选牌阶段缺少结算状态")
+        if (
+            group.trick_key != wugu.trick_key
+            or group.trick_instance_id != wugu.trick_instance_id
+        ):
+            raise ProductionBatchError("五谷选牌阶段状态不一致")
+        if wugu.current_target_index >= len(wugu.target_sequence):
+            raise ProductionBatchError("五谷目标索引越界")
+        current_target = wugu.target_sequence[wugu.current_target_index]
+        if context.actor_id != current_target:
+            return ()
+        if wugu.window_id is None:
+            raise ProductionBatchError("五谷选牌窗口未建立")
+        if state.location_of(wugu.trick_instance_id) != PROCESSING_ZONE:
+            raise ProductionBatchError(
+                "原五谷已不在处理区，选牌窗口不能继续枚举动作"
+            )
+        state_hash = state_sha256(canonical_state_snapshot(state))
+        actions: list[LegalAction] = []
+        pool = state.card_ids_in(REVEALED_ZONE)
+        for pool_index, instance_id in enumerate(pool):
+            card = state.cards_by_id[instance_id]
+            actions.append(
+                LegalAction(
+                    action_type=ActionType.MOVE_CARD,
+                    actor_id=context.actor_id,
+                    card_instance_id=instance_id,
+                    target_ids=(current_target,),
+                    payload={
+                        "operation": "pick_wugu_card",
+                        "card_key": card.card_key,
+                        "trick_instance_id": wugu.trick_instance_id,
+                        "root_trick_instance_id": wugu.trick_instance_id,
+                        "user_id": wugu.user_id,
+                        "target_id": current_target,
+                        "target_index": wugu.current_target_index,
+                        "pool_index": pool_index,
+                        "window_id": wugu.window_id,
+                        "pool_digest": wugu.pool_digest,
+                        "state_hash": state_hash,
+                        "card_instance_id": instance_id,
+                    },
+                )
+            )
+        return tuple(actions)
+
+    def apply_wugu_pick(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: object,
+    ) -> GameState:
+        del adapter
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.WUGU_PICK:
+            raise InvalidActionError("五谷选牌只能在选牌阶段进行")
+        group = runtime.pending_group_trick
+        wugu = runtime.pending_wugu
+        if group is None or wugu is None:
+            raise InvalidActionError("当前没有进行中的五谷选牌")
+        if group.trick_instance_id != wugu.trick_instance_id:
+            raise InvalidActionError("五谷选牌状态与当前结算不一致")
+        if wugu.current_target_index >= len(wugu.target_sequence):
+            raise InvalidActionError("五谷目标索引越界")
+        current_target = wugu.target_sequence[wugu.current_target_index]
+        if context.actor_id != current_target:
+            raise InvalidActionError("只有当前五谷目标可以选择展示牌")
+        payload = action.payload
+        if str(payload.get("operation", "")) != "pick_wugu_card":
+            raise InvalidActionError("五谷选牌动作负载无效")
+        if payload.get("trick_instance_id") != wugu.trick_instance_id:
+            raise InvalidActionError("选牌动作绑定的锦囊与当前结算不一致")
+        if payload.get("root_trick_instance_id") != wugu.trick_instance_id:
+            raise InvalidActionError("选牌动作绑定的根锦囊与当前结算不一致")
+        if payload.get("user_id") != wugu.user_id:
+            raise InvalidActionError("选牌动作绑定的使用者与当前结算不一致")
+        if payload.get("target_id") != current_target:
+            raise InvalidActionError(
+                "选牌动作绑定的目标不是当前五谷目标"
+            )
+        if payload.get("target_index") != wugu.current_target_index:
+            raise InvalidActionError("选牌动作绑定的目标索引已过期")
+        if payload.get("window_id") != wugu.window_id:
+            raise InvalidActionError("选牌动作绑定的选择窗口已过期")
+        current_digest = sha256_value(
+            tuple(state.card_ids_in(REVEALED_ZONE))
+        )
+        if current_digest != wugu.pool_digest:
+            raise InvalidActionError("五谷展示池摘要已过期")
+        if payload.get("pool_digest") != wugu.pool_digest:
+            raise InvalidActionError("选牌动作绑定的展示池摘要已过期")
+        if payload.get("state_hash") != state_sha256(
+            canonical_state_snapshot(state)
+        ):
+            raise InvalidActionError(
+                "选牌动作绑定的状态哈希与当前状态不一致"
+            )
+        if action.card_instance_id is None:
+            raise InvalidActionError("五谷选牌必须指定展示池中的实体牌")
+        picked = action.card_instance_id
+        if picked != payload.get("card_instance_id"):
+            raise InvalidActionError("选牌动作负载与实体牌不一致")
+        if state.location_of(picked) != REVEALED_ZONE:
+            raise InvalidActionError("只能选择当前展示池中的实体牌")
+        if state.location_of(wugu.trick_instance_id) != PROCESSING_ZONE:
+            raise InvalidActionError("原五谷已不在处理区，选牌不能继续")
+
+        next_state = state.move_card(picked, ZoneRef.hand(current_target))
+        card = next_state.cards_by_id[picked]
+        self._events.extend(
+            (
+                GameEvent(
+                    event_type=EventType.CARD_MOVED,
+                    card_instance_id=picked,
+                    card_key=card.card_key,
+                    card_user=wugu.user_id,
+                    payload={
+                        "source": _zone_payload(REVEALED_ZONE),
+                        "destination": _zone_payload(
+                            ZoneRef.hand(current_target)
+                        ),
+                        "reason": "wugu_pick",
+                        "root_trick_instance_id": wugu.trick_instance_id,
+                        "target_index": wugu.current_target_index,
+                        "target_count": len(wugu.target_sequence),
+                    },
+                ),
+                GameEvent(
+                    event_type=EventType.CARD_GAINED,
+                    card_instance_id=picked,
+                    card_key=card.card_key,
+                    card_user=wugu.user_id,
+                    target_ids=(current_target,),
+                    payload={
+                        "reason": "wugu_pick",
+                        "root_trick_instance_id": wugu.trick_instance_id,
+                        "target_index": wugu.current_target_index,
+                    },
+                ),
+            )
+        )
+        resolved = self._group_resolved_event(
+            next_state, group, current_target, result="picked"
+        )
+        self._events.extend((resolved,))
+        next_state, next_runtime = self._advance_group_target(
+            next_state, runtime, group, current_target
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def apply_tiesuo_use(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: TiesuoLianhuanAdapter,
+    ) -> GameState:
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.PLAY:
+            raise InvalidActionError("【铁索连环】只能在出牌阶段使用")
+        if context.actor_id != runtime.current_player_id:
+            raise InvalidActionError("只有当前回合角色可以使用【铁索连环】")
+        if action.card_instance_id is None:
+            raise InvalidActionError("使用【铁索连环】必须指定实体牌")
+        card = state.cards_by_id[action.card_instance_id]
+        if card.card_key != adapter.card_key:
+            raise InvalidActionError(
+                "【铁索连环】动作的实体牌与适配器卡牌键不一致"
+            )
+        if str(action.payload.get("card_key", "")) != adapter.card_key:
+            raise InvalidActionError(
+                "【铁索连环】动作负载与适配器卡牌键不一致"
+            )
+        if len(action.target_ids) not in (1, 2):
+            raise InvalidActionError(
+                "【铁索连环】必须指定一名或两名互不相同的目标"
+            )
+        if len(set(action.target_ids)) != len(action.target_ids):
+            raise InvalidActionError("【铁索连环】不能重复指定同一名目标")
+        for target_id in action.target_ids:
+            player = state.players_by_id.get(target_id)
+            if player is None:
+                raise InvalidActionError(f"目标角色{target_id!r}不存在")
+            if not player.alive:
+                raise InvalidActionError(
+                    f"目标角色{target_id!r}已死亡，不能成为目标"
+                )
+        if state.location_of(action.card_instance_id) != ZoneRef.hand(
+            context.actor_id
+        ):
+            raise InvalidActionError("只能使用行动角色真实手牌中的实体牌")
+
+        sequence = normalize_target_order(
+            state, context.actor_id, action.target_ids
+        )
+        next_state, move_event = self._move_to_processing(
+            state,
+            action.card_instance_id,
+            context.actor_id,
+            "tiesuolianhuan_use",
+        )
+        used_event = GameEvent(
+            event_type=EventType.CARD_USED,
+            card_instance_id=action.card_instance_id,
+            card_key=adapter.card_key,
+            card_user=context.actor_id,
+            target_ids=sequence,
+            payload={
+                "purpose": "tiesuo_sequential_chain_toggle",
+                "card_name": adapter.card_name,
+            },
+        )
+        queued = self._events.extend((used_event, move_event))
+        used_sequence = queued[0].sequence
+        assert used_sequence is not None
+        group = _PendingGroupTrick(
+            user_id=context.actor_id,
+            trick_instance_id=action.card_instance_id,
+            trick_key=adapter.card_key,
+            target_sequence=sequence,
+        )
+        first_target = sequence[0]
+        order = (
+            runtime.current_player_id,
+            self.opponent_of(runtime.current_player_id),
+        )
+        next_runtime = replace(
+            runtime,
+            phase=ProductionPhase.TRICK_RESPONSE,
+            pending_group_trick=group,
+            pending_trick=_PendingTrick(
+                context.actor_id,
+                first_target,
+                action.card_instance_id,
+                adapter.card_key,
+            ),
+            trick_effect_active=True,
+            trick_consecutive_passes=0,
+            trick_response_order=order,
+            trick_response_index=0,
+            trick_decision_count=0,
+            trick_direct_response_to=action.card_instance_id,
+            response_window_id=(
+                f"trick:{runtime.turn_number}:"
+                f"{action.card_instance_id}:gt0:dec0"
+            ),
+            response_window_order=(order[0],),
+            response_window_source_sequence=used_sequence,
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def apply_tiesuo_recast(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: TiesuoLianhuanAdapter,
+    ) -> GameState:
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.PLAY:
+            raise InvalidActionError("【铁索连环】重铸只能在出牌阶段进行")
+        if context.actor_id != runtime.current_player_id:
+            raise InvalidActionError("只有当前回合角色可以重铸【铁索连环】")
+        if action.card_instance_id is None:
+            raise InvalidActionError("重铸【铁索连环】必须指定实体牌")
+        card = state.cards_by_id[action.card_instance_id]
+        if card.card_key != adapter.card_key:
+            raise InvalidActionError("重铸动作的实体牌必须属于【铁索连环】")
+        if action.target_ids:
+            raise InvalidActionError("重铸不能指定目标")
+        if state.location_of(action.card_instance_id) != ZoneRef.hand(
+            context.actor_id
+        ):
+            raise InvalidActionError("只能重铸自己手牌中的【铁索连环】")
+
+        source = state.location_of(action.card_instance_id)
+        next_state = state.move_card(action.card_instance_id, DISCARD_PILE)
+        recast_event = GameEvent(
+            event_type=EventType.CARD_RECAST,
+            card_instance_id=action.card_instance_id,
+            card_key=card.card_key,
+            card_user=context.actor_id,
+            payload={
+                "source": _zone_payload(source),
+                "destination": _zone_payload(DISCARD_PILE),
+                "reason": "recast",
+                "recast_by": context.actor_id,
+            },
+        )
+        self._events.extend((recast_event,))
+        next_state, draw_events = self._draw_cards(
+            next_state, context.actor_id, 1, reason="tiesuo_recast"
+        )
+        self._events.extend(draw_events)
+        return next_state
 
     def _apply_group_trick_damage(
         self,
@@ -4723,8 +5511,26 @@ class ProductionBasicCardBatch:
             next_runtime = self._return_to_play(runtime)
             self._commit_runtime(runtime, next_runtime)
             return next_state
+        if runtime.pending_wugu is not None:
+            # 胜利成立前若仍有进行中的五谷结算：按确定性顺序清理展示池
+            # 与原五谷，不允许实体滞留在临时区域。当前正式卡牌组合下
+            # 五谷／铁索结算不产生伤害，此分支是面向未来的引擎不变量。
+            next_state, pool_events = self._discard_revealed_pool(
+                state,
+                runtime.pending_wugu,
+                reason="wugu_early_end_remaining_to_discard",
+            )
+            self._events.extend(pool_events)
+            next_state, wugu_finish_event = self._finish_processing(
+                next_state,
+                runtime.pending_wugu.trick_instance_id,
+                "wugu_early_end_cleared",
+            )
+            self._events.extend((wugu_finish_event,))
+        else:
+            next_state = state
         next_state, finish_event = self._finish_processing(
-            state,
+            next_state,
             self._pending_damage_card_id(runtime),
             self._pending_damage_death_reason(runtime),
         )
@@ -4766,6 +5572,7 @@ class ProductionBasicCardBatch:
             pending_group_trick=None,
             group_response_handles=MappingProxyType({}),
             group_response_snapshot_digest=None,
+            pending_wugu=None,
             pending_damage_card_id=None,
             pending_damage_source_id=None,
             pending_damage_kill_credit=None,
@@ -4830,6 +5637,7 @@ class ProductionBasicCardBatch:
             pending_group_trick=None,
             group_response_handles=MappingProxyType({}),
             group_response_snapshot_digest=None,
+            pending_wugu=None,
         )
         self._commit_runtime(runtime, next_runtime)
         return next_state
@@ -4909,6 +5717,8 @@ class ProductionBasicCardBatch:
         state: GameState,
         player_id: str,
         count: int,
+        *,
+        reason: str = "draw_phase",
     ) -> tuple[GameState, tuple[GameEvent, ...]]:
         if (
             len(state.card_ids_in(DRAW_PILE))
@@ -4961,7 +5771,7 @@ class ProductionBasicCardBatch:
                             "destination": _zone_payload(
                                 ZoneRef.hand(player_id)
                             ),
-                            "reason": "draw_phase",
+                            "reason": reason,
                         },
                     ),
                     GameEvent(
@@ -4969,7 +5779,7 @@ class ProductionBasicCardBatch:
                         card_instance_id=instance_id,
                         card_key=_card_key(next_state, instance_id),
                         target_ids=(player_id,),
-                        payload={"reason": "draw_phase"},
+                        payload={"reason": reason},
                     ),
                 )
             )

@@ -834,11 +834,7 @@ def test_wuzhong_draw_reshuffles_when_draw_pile_exhausted() -> None:
 def test_other_normal_tricks_stay_fail_closed() -> None:
     game = ProductionBasicCardBatch(seed=3)
     registry = game.formal_registry
-    for key in (
-        "sgs_trick_jiedaosharen",
-        "sgs_trick_wugufengdeng",
-        "sgs_trick_tiesuolianhuan",
-    ):
+    for key in ("sgs_trick_jiedaosharen",):
         assert key in registry.unimplemented_card_keys
         with pytest.raises(UnsupportedRuleError):
             registry.adapter_for(key)

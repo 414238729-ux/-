@@ -18,6 +18,7 @@ Knowledge（《三国杀卡牌效果》《三国杀卡牌使用方式》《三�
 
 from __future__ import annotations
 
+import itertools
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Mapping, Sequence
@@ -59,6 +60,8 @@ CARD_NAMES_BY_KEY: Mapping[str, str] = {
     "sgs_trick_nanmanruqin": "南蛮入侵",
     "sgs_trick_wanjianqifa": "万箭齐发",
     "sgs_trick_taoyuanjieyi": "桃园结义",
+    "sgs_trick_tiesuolianhuan": "铁索连环",
+    "sgs_trick_wugufengdeng": "五谷丰登",
 }
 
 SLASH_CARD_KEYS: tuple[str, ...] = (
@@ -79,6 +82,8 @@ PRODUCTION_TRICK_KEYS: tuple[str, ...] = (
     "sgs_trick_nanmanruqin",
     "sgs_trick_wanjianqifa",
     "sgs_trick_taoyuanjieyi",
+    "sgs_trick_tiesuolianhuan",
+    "sgs_trick_wugufengdeng",
 )
 
 GROUP_TRICK_KEYS: tuple[str, ...] = (
@@ -130,6 +135,31 @@ def is_valid_slash_target(state: GameState, attacker_id: str, target_id: str) ->
         return False
     return actual_distance(state, attacker_id, target_id) <= attack_range_of(
         state, attacker_id
+    )
+
+
+def normalize_target_order(
+    state: GameState,
+    user_id: str,
+    target_ids: Iterable[str],
+) -> tuple[str, ...]:
+    """以使用者为锚点按行动顺序规范化目标结算顺序。
+
+    与群体锦囊目标序列同一口径：从使用者开始沿当前座次数字递增方向
+    循环（基础术语第4.1节）。玩家提交的目标集合不因提交顺序改变结算
+    顺序，服务器始终按本函数生成固定序列。
+    """
+
+    user_seat = state.players_by_id[user_id].seat
+    ring_size = max(1, len(state.players))
+    return tuple(
+        sorted(
+            target_ids,
+            key=lambda player_id: (
+                state.players_by_id[player_id].seat - user_seat
+            )
+            % ring_size,
+        )
     )
 
 
@@ -1218,6 +1248,264 @@ class HuogongAdapter(TrickCardAdapter):
         raise InvalidActionError("【火攻】生产适配器不能处理当前阶段的动作")
 
 
+class TiesuoLianhuanAdapter(TrickCardAdapter):
+    """【铁索连环】牌本体的生产适配器。
+
+    正常使用选择一名或两名互不相同的角色（可包含使用者，无距离限制）；
+    目标结算顺序由服务器以使用者为锚点按行动顺序规范化，不信任玩家提交
+    顺序。原锦囊保持在处理区直到全部目标结算完成；每名目标拥有独立
+    【无懈可击】窗口，未被无懈的目标切换横置状态并产生可审计的
+    ``chained_state`` 事件。重铸不是使用也不是打出：不产生普通
+    ``card_used``／``card_played``、不指定目标、不接受【无懈可击】，
+    实体从手牌直接进入弃牌堆后通过正式摸牌接口摸 1 张。
+
+    本批只实现牌本体，不实现属性伤害传导：横置后的火／雷属性伤害传导
+    仍由伤害管线按后续批次处理，当前版本不会静默假装完成传导。
+    """
+
+    def __init__(
+        self, session: "ProductionBasicCardBatch | None" = None
+    ) -> None:
+        super().__init__(session)
+        self.card_key = "sgs_trick_tiesuolianhuan"
+        self.card_name = "铁索连环"
+
+    def rule_spec(self) -> dict[str, object]:
+        return {
+            "card_key": self.card_key,
+            "card_name": self.card_name,
+            "use_timing": "own_play_phase",
+            "use_limit": "unlimited_base;requires_entity_card_and_legal_targets",
+            "target_count": "one_or_two",
+            "target_filter": (
+                "one_or_two_distinct_alive_characters_including_self;"
+                "no_distance_requirement"
+            ),
+            "distance_rule": "not_applicable",
+            "response_requirements": [
+                {
+                    "response_card_key": "sgs_trick_wuxiekeji",
+                    "action": "use",
+                    "event_type": "card_used",
+                    "note": (
+                        "多目标逐名结算，一张无懈只取消对当前角色的效果"
+                    ),
+                }
+            ],
+            "nullification_eligible": True,
+            "movement_lifecycle": (
+                "trick:hand->processing->discard(after_all_targets);"
+                "recast:hand->discard(direct)+draw_1(tiesuo_recast)"
+            ),
+            "effect_resolution": (
+                "per_target_nullification_window;"
+                "per_target_chained_toggle(chained_state)"
+            ),
+            "damage_type": "不适用",
+            "completion_event": (
+                "card_used + per_target(chained_state + "
+                "group_target_resolved|cancelled) + "
+                "card_moved_to_discard_after_all_targets"
+            ),
+            "recast": {
+                "legal": True,
+                "event_type": "card_recast",
+                "targetless": True,
+                "no_wuxie_window": True,
+                "no_card_used_or_played": True,
+                "draw_after_recast": 1,
+            },
+            "chain_damage_implemented": False,
+            "full_semantics_complete": False,
+            "adapter_version": self.adapter_version,
+            "implemented": self.implemented,
+            "tested": self.tested,
+            "production_adapter": self.production_adapter,
+        }
+
+    def _target_combinations(
+        self, state: GameState, actor_id: str
+    ) -> tuple[tuple[str, ...], ...]:
+        alive_ids = tuple(
+            player.player_id for player in state.players if player.alive
+        )
+        combinations: list[tuple[str, ...]] = []
+        for size in (1, 2):
+            for combo in itertools.combinations(alive_ids, size):
+                combinations.append(
+                    normalize_target_order(state, actor_id, combo)
+                )
+        return tuple(combinations)
+
+    def enumerate_legal_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        session = self._require_session()
+        if session.phase.value != "play":
+            return ()
+        if context.actor_id != session.current_player_id:
+            return ()
+        actions: list[LegalAction] = []
+        for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
+            card = state.cards_by_id[instance_id]
+            if card.card_key != self.card_key:
+                continue
+            for targets in self._target_combinations(state, context.actor_id):
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.USE_CARD,
+                        actor_id=context.actor_id,
+                        card_instance_id=instance_id,
+                        target_ids=targets,
+                        payload={
+                            "operation": "use_tiesuo",
+                            "card_key": self.card_key,
+                            "card_name": self.card_name,
+                        },
+                    )
+                )
+            actions.append(
+                LegalAction(
+                    action_type=ActionType.MOVE_CARD,
+                    actor_id=context.actor_id,
+                    card_instance_id=instance_id,
+                    target_ids=(),
+                    payload={
+                        "operation": "recast_tiesuo",
+                        "card_key": self.card_key,
+                        "card_name": self.card_name,
+                    },
+                )
+            )
+        return tuple(actions)
+
+    def apply_action(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        session = self._require_session()
+        if session.phase.value != "play":
+            raise InvalidActionError(
+                "【铁索连环】生产适配器只能在出牌阶段处理动作"
+            )
+        operation = str(action.payload.get("operation", ""))
+        if operation == "use_tiesuo":
+            return session.apply_tiesuo_use(state, context, action, self)
+        if operation == "recast_tiesuo":
+            return session.apply_tiesuo_recast(state, context, action, self)
+        raise InvalidActionError("【铁索连环】出牌阶段动作负载无效")
+
+
+class WugufengdengAdapter(TrickCardAdapter):
+    """【五谷丰登】的生产适配器。
+
+    使用时只提交使用动作，不提交目标列表：引擎按当前存活且仍在游戏中的
+    角色数量快照目标序列，并一次性从牌堆展示等量实体牌到公共 REVEALED
+    区域；展示池全部公开。从使用者开始按行动顺序逐名结算，每名目标拥有
+    独立【无懈可击】窗口，被取消的目标不选牌；当前目标从公开展示池选择
+    一张并获得。全部目标结算完成后剩余展示牌统一进入弃牌堆，原锦囊此时
+    才从处理区进入弃牌堆；游戏提前结束也执行确定性清理。三人以上展示
+    数量与完整顺序仍未由正式生产入口证明。
+    """
+
+    includes_self = True
+    wounded_targets_only = False
+
+    def __init__(
+        self, session: "ProductionBasicCardBatch | None" = None
+    ) -> None:
+        super().__init__(session)
+        self.card_key = "sgs_trick_wugufengdeng"
+        self.card_name = "五谷丰登"
+
+    def rule_spec(self) -> dict[str, object]:
+        return {
+            "card_key": self.card_key,
+            "card_name": self.card_name,
+            "use_timing": "own_play_phase",
+            "use_limit": "unlimited_base;requires_entity_card_and_legal_targets",
+            "target_count": "all_alive_characters_server_generated",
+            "target_filter": (
+                "all_alive_characters_including_user;"
+                "snapshot_at_use_time"
+            ),
+            "distance_rule": "not_applicable",
+            "response_requirements": [
+                {
+                    "response_card_key": "sgs_trick_wuxiekeji",
+                    "action": "use",
+                    "event_type": "card_used",
+                    "note": (
+                        "每名目标独立无懈窗口；一张无懈只取消当前目标的"
+                        "选择，展示池保持并继续下一目标"
+                    ),
+                }
+            ],
+            "nullification_eligible": True,
+            "movement_lifecycle": (
+                "trick:hand->processing->discard(after_all_targets);"
+                "pool:draw_pile->revealed->hand(picked)|discard(remaining)"
+            ),
+            "effect_resolution": (
+                "reveal_public_pool;per_target_nullification_window;"
+                "per_target_public_pick;remaining_to_discard;"
+                "early_end_cleanup"
+            ),
+            "damage_type": "不适用",
+            "completion_event": (
+                "card_used + card_revealed(pool) + "
+                "per_target(group_target_resolved picked|cancelled) + "
+                "remaining_pool_card_moved + "
+                "card_moved_to_discard_after_all_targets"
+            ),
+            "adapter_version": self.adapter_version,
+            "implemented": self.implemented,
+            "tested": self.tested,
+            "production_adapter": self.production_adapter,
+        }
+
+    def enumerate_legal_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        session = self._require_session()
+        if session.phase.value == "play":
+            if context.actor_id != session.current_player_id:
+                return ()
+            actions: list[LegalAction] = []
+            for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
+                card = state.cards_by_id[instance_id]
+                if card.card_key != self.card_key:
+                    continue
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.USE_CARD,
+                        actor_id=context.actor_id,
+                        card_instance_id=instance_id,
+                        target_ids=(),
+                        payload={
+                            "operation": "use_wugu",
+                            "card_key": self.card_key,
+                            "card_name": self.card_name,
+                        },
+                    )
+                )
+            return tuple(actions)
+        if session.phase.value == "wugu_pick":
+            return session.enumerate_wugu_pick_actions(state, context)
+        return ()
+
+    def apply_action(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        session = self._require_session()
+        if session.phase.value == "play":
+            return session.apply_wugu_use(state, context, action, self)
+        if session.phase.value == "wugu_pick":
+            return session.apply_wugu_pick(state, context, action, self)
+        raise InvalidActionError(
+            "【五谷丰登】生产适配器不能处理当前阶段的动作"
+        )
+
+
 class GroupTargetTrickAdapter(TrickCardAdapter):
     """群体普通锦囊的公共适配器基类。
 
@@ -1430,6 +1718,8 @@ def _default_adapters() -> dict[str, RuleAdapter]:
         "sgs_trick_nanmanruqin": NanmanRuqinAdapter(),
         "sgs_trick_wanjianqifa": WanjianQifaAdapter(),
         "sgs_trick_taoyuanjieyi": TaoyuanJieyiAdapter(),
+        "sgs_trick_tiesuolianhuan": TiesuoLianhuanAdapter(),
+        "sgs_trick_wugufengdeng": WugufengdengAdapter(),
     }
 
 
@@ -1574,8 +1864,10 @@ __all__ = [
     "NanmanRuqinAdapter",
     "ShunshouQianyangAdapter",
     "TaoyuanJieyiAdapter",
+    "TiesuoLianhuanAdapter",
     "TrickCardAdapter",
     "WanjianQifaAdapter",
+    "WugufengdengAdapter",
     "WuxiekejiAdapter",
     "WuzhongshengyouAdapter",
     "BasicCardAdapter",
@@ -1589,5 +1881,6 @@ __all__ = [
     "has_target_zone_cards",
     "is_valid_shunshou_target",
     "is_valid_slash_target",
+    "normalize_target_order",
     "target_zone_refs",
 ]

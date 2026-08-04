@@ -210,17 +210,17 @@ def test_implemented_and_remaining_card_counts_updated() -> None:
     registry = game.formal_registry
     assert GUOHE in registry.implemented_card_keys
     assert SHUNSHOU in registry.implemented_card_keys
-    assert len(registry.unimplemented_card_keys) == 23
+    assert len(registry.unimplemented_card_keys) == 21
     assert GUOHE not in registry.unimplemented_card_keys
     assert SHUNSHOU not in registry.unimplemented_card_keys
-    assert sum(len(registry.instances_of(key)) for key in registry.implemented_card_keys) == 118
+    assert sum(len(registry.instances_of(key)) for key in registry.implemented_card_keys) == 126
     assert {GUOHE, SHUNSHOU} <= set(PRODUCTION_TRICK_KEYS)
 
 
 def test_other_unimplemented_tricks_stay_fail_closed() -> None:
     game = ProductionBasicCardBatch(seed=3)
     registry = game.formal_registry
-    for key in ("sgs_trick_jiedaosharen", "sgs_trick_wugufengdeng"):
+    for key in ("sgs_trick_jiedaosharen",):
         assert key in registry.unimplemented_card_keys
         with pytest.raises(UnsupportedRuleError):
             registry.adapter_for(key)
@@ -1218,4 +1218,3 @@ def test_all_paths_keep_conservation_and_hash_chain() -> None:
     )
     result = reexecute_production_replay(record)
     assert result.verified is True
-

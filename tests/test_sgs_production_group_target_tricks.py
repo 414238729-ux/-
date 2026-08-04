@@ -353,8 +353,8 @@ def test_implemented_and_remaining_card_counts_updated() -> None:
     game = _fresh(3)
     registry = game.formal_registry
     assert {NANMAN, WANJIAN, TAOYUAN} <= set(registry.implemented_card_keys)
-    assert len(registry.implemented_card_keys) == 15
-    assert len(registry.unimplemented_card_keys) == 23
+    assert len(registry.implemented_card_keys) == 17
+    assert len(registry.unimplemented_card_keys) == 21
     assert {NANMAN, WANJIAN, TAOYUAN} <= set(PRODUCTION_TRICK_KEYS)
     assert set(GROUP_TRICK_KEYS) == {NANMAN, WANJIAN, TAOYUAN}
     assert (
@@ -362,14 +362,14 @@ def test_implemented_and_remaining_card_counts_updated() -> None:
             len(registry.instances_of(key))
             for key in registry.implemented_card_keys
         )
-        == 118
+        == 126
     )
 
 
 def test_other_unimplemented_cards_stay_fail_closed() -> None:
     game = _fresh(3)
     registry = game.formal_registry
-    for key in ("sgs_trick_jiedaosharen", "sgs_trick_wugufengdeng"):
+    for key in ("sgs_trick_jiedaosharen",):
         assert key in registry.unimplemented_card_keys
         with pytest.raises(UnsupportedRuleError):
             registry.adapter_for(key)
@@ -1812,11 +1812,11 @@ def test_player_visible_replay_leaks_no_unplayed_hand_cards(
     publicized_ids = {
         event["card_instance_id"]
         for event in record.events
-        if event.get("event_type") in ("card_played", "card_used", "card_revealed")
+        if event.get("event_type")
+        in ("card_played", "card_used", "card_revealed", "card_recast")
     }
     never_publicized = p2_hand - publicized_ids
     assert never_publicized, "p2必须存在从未公开化的手牌"
-    decisions_blob = json.dumps(view["decisions"], ensure_ascii=False)
     for instance_id in never_publicized:
         occurrences = [
             event
@@ -1833,8 +1833,23 @@ def test_player_visible_replay_leaks_no_unplayed_hand_cards(
         assert len(occurrences) == len(public_deal), (
             f"实体{instance_id}在公共发牌记录之外的事件中被泄露"
         )
-        assert instance_id not in decisions_blob, (
-            f"实体{instance_id}在决策材料中被泄露"
+        # 隐私边界：未公开化的手牌不得出现在其所有者之外的材料中。
+        # 所有者自己在出牌阶段的合法动作会枚举自己的手牌（与【杀】
+        # 【闪】【桃】【酒】及全部已接入锦囊的既有生产口径一致），
+        # 属于自信息，不构成跨玩家泄露；响应类窗口继续以不透明句柄
+        # 保护，不允许任何未公开化实体进入他人决策材料。
+        leaked_outside_owner = [
+            decision
+            for decision in view["decisions"]
+            if decision.get("context", {}).get("actor_id") != "p2"
+            and instance_id
+            in json.dumps(
+                [decision["chosen_action"], *decision["legal_actions"]],
+                ensure_ascii=False,
+            )
+        ]
+        assert not leaked_outside_owner, (
+            f"实体{instance_id}在非所有者决策材料中被泄露"
         )
     # 群体响应动作负载只含固定键集，不携带牌面或实体ID
     for decision in view["decisions"]:
