@@ -43,9 +43,12 @@
     "chain_damage_infrastructure_audit_close_commit": "68e419b79e379184c1f1cc7ad650039771530f89",
     "chain_damage_infrastructure_audit_close_note": "CP-04J 最终独立复审结论 AUDIT_PASSED（2026-08-04）；初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES；审计残项 N1-N4 已由提交 68e419b79e379184c1f1cc7ad650039771530f89（fix: close chain damage audit gaps）正式关闭；里程碑标签 milestone-b2-chain-damage-infrastructure-audited 为本次最终文档提交后由用户立即建立的标签名称（本轮未执行 git tag、未验证标签已存在）",
     "cp04k_worktree_branch": "deepseek-borrowed-sword-weapon-system",
-    "cp04k_worktree_branch_note": "本批（【借刀杀人】＋11种武器牌本体，CP-04K）实现所在分支；该分支上的本批代码已由用户在外部PowerShell提交，最终实现提交 75c596b12f34a6222d972b2190148386bb670653（feat: implement borrowed sword and weapon card-body system，amend替代旧提交 7456377f5fdc94588f6e872be6505b4e0159c803），当前 HEAD 已为该实现提交",
+    "cp04k_worktree_branch_note": "本批（【借刀杀人】＋11种武器牌本体，CP-04K）实现所在分支；实现提交 75c596b12f34a6222d972b2190148386bb670653（feat: implement borrowed sword and weapon card-body system，amend替代旧提交 7456377f...）；检查点文档提交 f0008b571f502e0d6b7cc1800de9c2a8e39074e3；审计残项关闭提交 79acc6ff514af4900acfe87507374fc8d696ec97（fix: close borrowed sword weapon audit gaps）；最终独立复审结论 AUDIT_PASSED；里程碑标签 milestone-b2-borrowed-sword-weapon-system-audited 由用户在本次最终文档提交后立即建立（本轮未执行 git tag、未验证标签已存在）",
     "milestone_b2_borrowed_sword_weapon_system_commit": "75c596b12f34a6222d972b2190148386bb670653",
-    "milestone_b2_borrowed_sword_weapon_system_commit_note": "【借刀杀人】＋11种武器牌本体批次（CP-04K）已由用户在外部PowerShell提交，最终实现提交哈希 75c596b12f34a6222d972b2190148386bb670653（feat: implement borrowed sword and weapon card-body system）；旧提交 7456377f5fdc94588f6e872be6505b4e0159c803 已被amend替代"
+    "milestone_b2_borrowed_sword_weapon_system_commit_note": "【借刀杀人】＋11种武器牌本体批次（CP-04K）已由用户在外部PowerShell提交，实现提交哈希 75c596b12f34a6222d972b2190148386bb670653（feat: implement borrowed sword and weapon card-body system；amend 替代旧提交 7456377f5fdc94588f6e872be6505b4e0159c803）；检查点文档提交 f0008b571f502e0d6b7cc1800de9c2a8e39074e3；2026-08-05 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED；审计残项关闭提交 79acc6ff514af4900acfe87507374fc8d696ec97；里程碑标签 milestone-b2-borrowed-sword-weapon-system-audited 由用户在本次最终文档提交后立即建立（本轮未执行 git tag、未验证标签已存在）",
+    "borrowed_sword_weapon_system_checkpoint_commit": "f0008b571f502e0d6b7cc1800de9c2a8e39074e3",
+    "borrowed_sword_weapon_system_audit_close_commit": "79acc6ff514af4900acfe87507374fc8d696ec97",
+    "borrowed_sword_weapon_system_audit_close_note": "CP-04K 最终独立复审结论 AUDIT_PASSED（2026-08-05）；初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES；非阻塞问题 N1-N3 已由提交 79acc6ff514af4900acfe87507374fc8d696ec97（fix: close borrowed sword weapon audit gaps）正式关闭；里程碑标签 milestone-b2-borrowed-sword-weapon-system-audited 为本次最终文档提交后由用户立即建立的标签名称（本轮未执行 git tag、未验证标签已存在）"
   },
   "feature_status": {
     "authoritative_core_foundation": true,
@@ -231,17 +234,35 @@
     },
     {
       "id": "CP-04K-PRODUCTION-BORROWED-SWORD-WEAPON-SYSTEM",
-      "status": "committed_pending_audit",
+      "status": "audited",
       "commit": "75c596b12f34a6222d972b2190148386bb670653",
-      "commit_note": "本批（【借刀杀人】＋11种武器牌本体，CP-04K）已由用户在外部PowerShell创建真实实现提交；amend后的最终实现提交为 75c596b12f34a6222d972b2190148386bb670653（feat: implement borrowed sword and weapon card-body system），父提交为基线 3ea01f4e8603dd96698a2e5deee09c1e9b3fccef；旧提交 7456377f5fdc94588f6e872be6505b4e0159c803 已被amend替代，不再作为实现提交；测试文件末尾多余空行已在amend前修正；首次独立只读审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，非阻塞问题 N1（装备事件reason契约）、N2（12张武器实体逐张真实装备路径）、N3（拒绝计数不变、胜利清理严格回放、no_weapon_to_transfer单字段篡改、第二目标无独立无懈窗口）已在本工作树关闭（待用户提交），审计残项关闭后批次测试文件84项、事件契约测试85项、完整 pytest 1649 passed；当前尚未复审或标记 audited（independent_audit_done=false，audit_conclusion=NOT_AUDITED_YET），不得视为audited",
-      "independent_audit_done": false,
-      "audit_conclusion": "NOT_AUDITED_YET",
-      "milestone_tag": null,
+      "commit_note": "本批（【借刀杀人】＋11种武器牌本体，CP-04K）真实提交链：基线提交 3ea01f4e8603dd96698a2e5deee09c1e9b3fccef（milestone-b2-chain-damage-infrastructure-audited）；实现提交 75c596b12f34a6222d972b2190148386bb670653（feat: implement borrowed sword and weapon card-body system；amend 替代旧提交 7456377f5fdc94588f6e872be6505b4e0159c803，测试文件末尾多余空行已在 amend 前修正）；检查点文档提交 f0008b571f502e0d6b7cc1800de9c2a8e39074e3（docs: record borrowed sword and weapon system checkpoint）；审计残项关闭提交 79acc6ff514af4900acfe87507374fc8d696ec97（fix: close borrowed sword weapon audit gaps）。2026-08-05 完成独立审计：首次独立只读审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES（N1：装备事件reason封闭契约；N2：第二张诸葛连弩正式装备路径；N3：关键专项断言和严格回放），N1-N3 已由审计残项关闭提交正式关闭，最终独立复审结论 AUDIT_PASSED；审计残项关闭后批次测试文件84项、事件契约测试85项、完整 pytest 1649 passed（失败0、跳过0），最终独立复审有效完整重跑 1649 passed；compileall 通过，源码完整性审计 scanned_file_count=117、defect_count=0、audit_item_count=55；里程碑标签 milestone-b2-borrowed-sword-weapon-system-audited 由用户在本次最终文档提交后立即建立（本轮未执行 git tag）。",
+      "independent_audit_done": true,
+      "audit_conclusion": "AUDIT_PASSED",
+      "milestone_tag": "milestone-b2-borrowed-sword-weapon-system-audited",
       "evidence": "scripts/sgs_engine/production_cards.py、scripts/sgs_engine/production_batch.py、scripts/sgs_engine/events.py、scripts/sgs_engine/production_replay.py、tests/test_sgs_production_borrowed_sword_weapon_system.py、tests/test_sgs_engine_events.py；正式160张牌堆【借刀杀人】＋11种武器牌本体批次",
       "scope": "formal；【借刀杀人】2张完整双人生产语义与11种武器12张牌本体接入生产注册表与权威核心；两次目标检测、强制使用【杀】与按角色出杀计数、武器直接进入使用者手牌、装备三事件、挂起与终局清理、武器专属技能集中式失败关闭门禁；不构成武器技能完成、装备全部完成、多人借刀完成、正式单挑完成或里程碑B完成",
       "implementation_commit": "75c596b12f34a6222d972b2190148386bb670653",
       "implementation_commit_message": "feat: implement borrowed sword and weapon card-body system",
-      "implementation_parent": "3ea01f4e8603dd96698a2e5deee09c1e9b3fccef"
+      "implementation_parent": "3ea01f4e8603dd96698a2e5deee09c1e9b3fccef",
+      "audit": {
+        "independent_audit_done": true,
+        "audit_conclusion": "AUDIT_PASSED",
+        "conclusion": "AUDIT_PASSED",
+        "initial_conclusion": "AUDIT_PASSED_WITH_NONBLOCKING_ISSUES",
+        "final_reaudit_conclusion": "AUDIT_PASSED",
+        "audited_at": "2026-08-05",
+        "auditor_note": "最终独立复审；首次独立只读审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES；非阻塞问题 N1-N3 已由提交 79acc6ff514af4900acfe87507374fc8d696ec97（fix: close borrowed sword weapon audit gaps）正式关闭；N1：装备事件reason封闭契约（新增10项装备事件reason封闭枚举契约测试）；N2：第二张诸葛连弩正式装备路径（12张武器实体逐张真实装备路径）；N3：关键专项断言和严格回放（新增4项借刀武器专项：拒绝时计数不变、胜利清理严格回放、no_weapon_to_transfer单字段篡改失败关闭、第二目标无独立无懈窗口的回放与实况证明）；最终独立复审为只读审计，未修改文件或执行Git写操作；复审首次运行使用了不可写 --basetemp 导致48个 tmp_path setup 错误，该次运行因不可写临时目录无效、不计入验收统计；最终有效结果以按标准临时目录重跑的 1649 passed（失败0、跳过0）为准；无规则、契约、回放、隐藏信息或安全阻塞问题",
+        "audit_close_commit": "79acc6ff514af4900acfe87507374fc8d696ec97",
+        "audit_close_commit_message": "fix: close borrowed sword weapon audit gaps",
+        "implementation_commit": "75c596b12f34a6222d972b2190148386bb670653",
+        "checkpoint_commit": "f0008b571f502e0d6b7cc1800de9c2a8e39074e3",
+        "audit_gap_fix_commit": "79acc6ff514af4900acfe87507374fc8d696ec97",
+        "final_audit_conclusion": "AUDIT_PASSED",
+        "milestone_tag": "milestone-b2-borrowed-sword-weapon-system-audited",
+        "milestone_tag_note": "本次最终文档提交后由用户立即在外部PowerShell建立的标签名称；本轮未执行 git tag，未验证标签已存在；用户建立标签后该字段即与 Git 状态完全一致",
+        "final_status": "audited"
+      }
     }
   ],
   "final_verification": {
@@ -250,7 +271,7 @@
       "passed": 1649,
       "failed": 0,
       "skipped": 0,
-      "note": "1649=1635+14：CP-04K 首次独立审计非阻塞问题 N1-N3 关闭新增14项（4项借刀武器专项：胜利清理严格回放、no_weapon_to_transfer单字段篡改、第二目标无独立无懈窗口回放与实况证明、拒绝计数不变；10项装备事件reason封闭枚举契约）；1635=1543+92 为 CP-04K 实现提交时验收（80项借刀＋武器专项＋12项装备事件契约测试）"
+      "note": "1649=1635+14：CP-04K 首次独立审计非阻塞问题 N1-N3 关闭新增14项（4项借刀武器专项：胜利清理严格回放、no_weapon_to_transfer单字段篡改、第二目标无独立无懈窗口回放与实况证明、拒绝计数不变；10项装备事件reason封闭枚举契约）；1635=1543+92 为 CP-04K 实现提交时验收（80项借刀＋武器专项＋12项装备事件契约测试）；最终独立复审有效完整重跑 1649 passed（失败0、跳过0）；复审首次运行因不可写 --basetemp 导致的48个 tmp_path setup 错误不计入验收"
     },
     "compileall": {
       "command": ".\\\\.venv\\\\Scripts\\\\python.exe -m compileall -q scripts tests",
@@ -339,7 +360,7 @@
       "fallback_for_unimplemented": false,
       "unsupported_rules": 1,
       "approximation_count": 0,
-      "audit_residual_note": "首次独立只读审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES；N1（装备事件reason封闭枚举：equip／replaced）、N2（12张武器实体逐张真实装备路径）、N3（拒绝计数不变、胜利清理严格回放、no_weapon_to_transfer单字段篡改、第二目标无独立无懈窗口）已在本工作树关闭（待用户提交）；SHA-256 清单为33个文件条目＋1个hash_note元数据项",
+      "audit_residual_note": "首次独立只读审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES；N1（装备事件reason封闭枚举：equip／replaced）、N2（12张武器实体逐张真实装备路径）、N3（拒绝计数不变、胜利清理严格回放、no_weapon_to_transfer单字段篡改、第二目标无独立无懈窗口）已由审计残项关闭提交 79acc6ff514af4900acfe87507374fc8d696ec97 正式关闭，最终独立复审结论 AUDIT_PASSED；SHA-256 清单为33个文件条目＋1个hash_note元数据项",
       "reexecution_replay_supported": true,
       "reference_path_seed": 5,
       "formal_result": false,
@@ -577,19 +598,25 @@
       "formal_duel_no_skill_ready": false,
       "multi_player_production_proven": false,
       "worktree_commit_pending": false,
-      "independent_audit_done": false,
-      "audit_conclusion": "NOT_AUDITED_YET",
-      "milestone_tag": null,
+      "independent_audit_done": true,
+      "audit_conclusion": "AUDIT_PASSED",
+      "milestone_tag": "milestone-b2-borrowed-sword-weapon-system-audited",
       "implementation_commit": "75c596b12f34a6222d972b2190148386bb670653",
       "implementation_commit_message": "feat: implement borrowed sword and weapon card-body system",
-      "implementation_parent": "3ea01f4e8603dd96698a2e5deee09c1e9b3fccef"
+      "implementation_parent": "3ea01f4e8603dd96698a2e5deee09c1e9b3fccef",
+      "audit_close_commit": "79acc6ff514af4900acfe87507374fc8d696ec97",
+      "audit_close_commit_message": "fix: close borrowed sword weapon audit gaps",
+      "checkpoint_commit": "f0008b571f502e0d6b7cc1800de9c2a8e39074e3",
+      "final_audit_conclusion": "AUDIT_PASSED",
+      "initial_audit_conclusion": "AUDIT_PASSED_WITH_NONBLOCKING_ISSUES",
+      "final_pytest": 1649
     }
   },
   "sha256": {
-    "docs/ENGINE_STATUS.md": "e470cf2f6fab6fc1bef6a9f3b3eb7296470cf73ffb460c56f5d0d43c69f90aff",
-    "docs/IMPLEMENTATION_MATRIX.md": "a4f2b464275ad6c0c96508111df628c5d8d5a5911ba543d7624dbf531be26f4f",
+    "docs/ENGINE_STATUS.md": "32bfdc49812208ede7581a0392b07faa234f25ffeaaa9bf561476c3f7f90352b",
+    "docs/IMPLEMENTATION_MATRIX.md": "81dc51049bf401be88ccf23cbea02ff3bdff8acbde8e73c08054c78f906b8ec9",
     "docs/LEGACY_RESULTS_INVALID.md": "267d51329b65b4435ed770b9fe90a0d53148d17cc9b0dae3e6d3406b06c0c0cc",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "c6a5a1deded6ab79e2ef9f9c6f451a0c37cff94c85e748a9e5d85ed6edbfb3ab",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "953a8826620ebf90ca7fccf7c66ec9a45b2380fd8136a94706ce4bc5bc48cb66",
     "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "23b56a0edf0c85657b332100538013de16be4d71ea6a8214ac862a6708105af6",
     "knowledge/三国杀牌堆数据.csv": "8cb8da4177f11962776ae0f7e0154ed4ce56e293e96ac457874d48650517de18",
     "scripts/sgs_dev_runner.py": "6f88baa78fc9c22106188defda7190cd2a4412325db46f3964d217fd0e61c755",
