@@ -41,6 +41,10 @@ class EventType(str, Enum):
     CHAIN_DAMAGE_STARTED = "chain_damage_started"
     CHAIN_TARGET_RESOLVED = "chain_target_resolved"
     CHAIN_DAMAGE_FINISHED = "chain_damage_finished"
+    JUDGMENT_STARTED = "judgment_started"
+    JUDGMENT_RESULT = "judgment_result"
+    PHASE_SKIPPED = "phase_skipped"
+    DELAYED_TRICK_TRANSFERRED = "delayed_trick_transferred"
     EQUIPMENT_EQUIPPED = "equipment_equipped"
     EQUIPMENT_REMOVED = "equipment_removed"
     EQUIPMENT_REPLACED = "equipment_replaced"
@@ -382,6 +386,123 @@ def validate_event_contract(event: GameEvent) -> GameEvent:
                 "old_instance_id与new_instance_id"
             )
         # 生产实现中 equipment_replaced 没有 reason 字段，不为统一形式凭空增加。
+    if event.event_type is EventType.JUDGMENT_STARTED:
+        if event.card_instance_id is None or event.card_key is None:
+            raise ValueError("判定开始事件必须提供延时锦囊实体牌ID与card_key")
+        if len(event.target_ids) != 1:
+            raise ValueError("判定开始事件必须且只能指定一名判定角色")
+        payload = event.payload
+        if set(payload) != {
+            "delayed_trick_instance_id",
+            "target_id",
+            "judgment_zone_entry_index",
+        }:
+            raise ValueError(
+                "判定开始事件payload字段必须恰好为delayed_trick_instance_id、"
+                "target_id与judgment_zone_entry_index"
+            )
+        if payload["delayed_trick_instance_id"] != event.card_instance_id:
+            raise ValueError("判定开始事件delayed_trick_instance_id必须等于实体牌ID")
+        if payload["target_id"] != event.target_ids[0]:
+            raise ValueError("判定开始事件target_id必须等于target_ids唯一角色")
+        index = payload["judgment_zone_entry_index"]
+        if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+            raise ValueError("判定开始事件judgment_zone_entry_index必须是非负整数")
+    if event.event_type is EventType.JUDGMENT_RESULT:
+        if event.card_instance_id is None or event.card_key is None:
+            raise ValueError("判定结果事件必须提供判定牌实体牌ID与card_key")
+        if len(event.target_ids) != 1:
+            raise ValueError("判定结果事件必须且只能指定一名判定角色")
+        payload = event.payload
+        if set(payload) != {
+            "delayed_trick_instance_id",
+            "judgment_card_instance_id",
+            "target_id",
+            "suit",
+            "rank",
+            "hit",
+            "skipped_phase",
+            "damage_amount",
+            "damage_type",
+            "effect_applied",
+        }:
+            raise ValueError("判定结果事件payload字段集与正式契约不一致")
+        if payload["judgment_card_instance_id"] != event.card_instance_id:
+            raise ValueError("判定结果事件judgment_card_instance_id必须等于判定牌实体ID")
+        if payload["target_id"] != event.target_ids[0]:
+            raise ValueError("判定结果事件target_id必须等于target_ids唯一角色")
+        if not isinstance(payload["suit"], str) or not payload["suit"]:
+            raise ValueError("判定结果事件suit必须是非空字符串")
+        if not isinstance(payload["rank"], str) or not payload["rank"]:
+            raise ValueError("判定结果事件rank必须是非空字符串")
+        if not isinstance(payload["hit"], bool):
+            raise ValueError("判定结果事件hit必须是布尔值")
+        skipped = payload["skipped_phase"]
+        if skipped is not None and (
+            not isinstance(skipped, str)
+            or skipped not in ("draw", "play")
+        ):
+            raise ValueError("判定结果事件skipped_phase必须是draw、play或空")
+        amount = payload["damage_amount"]
+        if amount is not None and (
+            isinstance(amount, bool)
+            or not isinstance(amount, int)
+            or amount < 0
+        ):
+            raise ValueError("判定结果事件damage_amount必须是非负整数或空")
+        dmg_type = payload["damage_type"]
+        if dmg_type is not None and (
+            not isinstance(dmg_type, str)
+            or not dmg_type.strip()
+        ):
+            raise ValueError("判定结果事件damage_type必须是非空字符串或空")
+        if not isinstance(payload["effect_applied"], bool):
+            raise ValueError("判定结果事件effect_applied必须是布尔值")
+    if event.event_type is EventType.PHASE_SKIPPED:
+        if event.card_instance_id is None:
+            raise ValueError("阶段跳过事件必须提供延时锦囊实体牌ID")
+        if len(event.target_ids) != 1:
+            raise ValueError("阶段跳过事件必须且只能指定一名角色")
+        payload = event.payload
+        if set(payload) != {
+            "player_id",
+            "turn_number",
+            "skipped_phase",
+            "reason",
+            "delayed_trick_instance_id",
+        }:
+            raise ValueError("阶段跳过事件payload字段集与正式契约不一致")
+        if payload["player_id"] != event.target_ids[0]:
+            raise ValueError("阶段跳过事件player_id必须等于target_ids唯一角色")
+        if payload["delayed_trick_instance_id"] != event.card_instance_id:
+            raise ValueError("阶段跳过事件delayed_trick_instance_id必须等于实体牌ID")
+        turn = payload["turn_number"]
+        if isinstance(turn, bool) or not isinstance(turn, int) or turn < 1:
+            raise ValueError("阶段跳过事件turn_number必须是正整数")
+        if payload["skipped_phase"] not in ("draw", "play"):
+            raise ValueError("阶段跳过事件skipped_phase必须是draw或play")
+        if not isinstance(payload["reason"], str) or not payload["reason"]:
+            raise ValueError("阶段跳过事件reason必须是非空字符串")
+    if event.event_type is EventType.DELAYED_TRICK_TRANSFERRED:
+        if event.card_instance_id is None or event.card_key is None:
+            raise ValueError("延时锦囊转移事件必须提供实体牌ID与card_key")
+        if len(event.target_ids) != 1:
+            raise ValueError("延时锦囊转移事件必须且只能指定一名接收角色")
+        payload = event.payload
+        if set(payload) != {
+            "from_player_id",
+            "to_player_id",
+            "judgment_zone_entry_index",
+            "reason",
+        }:
+            raise ValueError("延时锦囊转移事件payload字段集与正式契约不一致")
+        if payload["to_player_id"] != event.target_ids[0]:
+            raise ValueError("延时锦囊转移事件to_player_id必须等于target_ids唯一角色")
+        index = payload["judgment_zone_entry_index"]
+        if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+            raise ValueError("延时锦囊转移事件judgment_zone_entry_index必须是非负整数")
+        if not isinstance(payload["reason"], str) or not payload["reason"]:
+            raise ValueError("延时锦囊转移事件reason必须是非空字符串")
     if event.event_type is EventType.LOSE_HP:
         if len(event.target_ids) != 1:
             raise ValueError("失去体力事件必须且只能指定一名目标角色")

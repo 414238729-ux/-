@@ -178,8 +178,15 @@ def _events_of(game: ProductionBasicCardBatch, event_type: EventType) -> tuple:
 def _fresh(seed: int = 3) -> ProductionBasicCardBatch:
     game = ProductionBasicCardBatch(seed=seed)
     assert game.first_player_id == "p1"
+    for operation in ("proceed_prepare", "proceed_judgment", "proceed_draw"):
+        action = next(
+            a
+            for a in game.legal_actions()
+            if a.payload.get("operation") == operation
+        )
+        game.step(BatchActionIdController(action.action_id))
+    assert game.phase.value == "play"
     return game
-
 
 def _nanman_fixture(
     *, response_key: str | None = None, target_hp: int | None = None
@@ -353,8 +360,8 @@ def test_implemented_and_remaining_card_counts_updated() -> None:
     game = _fresh(3)
     registry = game.formal_registry
     assert {NANMAN, WANJIAN, TAOYUAN} <= set(registry.implemented_card_keys)
-    assert len(registry.implemented_card_keys) == 29
-    assert len(registry.unimplemented_card_keys) == 9
+    assert len(registry.implemented_card_keys) == 32
+    assert len(registry.unimplemented_card_keys) == 6
     assert {NANMAN, WANJIAN, TAOYUAN} <= set(PRODUCTION_TRICK_KEYS)
     assert set(GROUP_TRICK_KEYS) == {NANMAN, WANJIAN, TAOYUAN}
     assert (
@@ -362,14 +369,14 @@ def test_implemented_and_remaining_card_counts_updated() -> None:
             len(registry.instances_of(key))
             for key in registry.implemented_card_keys
         )
-        == 140
+        == 147
     )
 
 
 def test_other_unimplemented_cards_stay_fail_closed() -> None:
     game = _fresh(3)
     registry = game.formal_registry
-    for key in ("sgs_delayed_lebusi",):
+    for key in ("sgs_armor_baguazhen",):
         assert key in registry.unimplemented_card_keys
         with pytest.raises(UnsupportedRuleError):
             registry.adapter_for(key)
@@ -1807,7 +1814,7 @@ def test_player_visible_replay_leaks_no_unplayed_hand_cards(
     # 同种子重建牌局得到相同初始手牌；从未公开化的目标手牌实体不得因群体
     # 响应机制泄露：事件中只允许公共发牌记录，决策材料中不得出现（与既有
     # 火攻批次玩家可见导出约定一致）。
-    game = ProductionBasicCardBatch(seed=15)
+    game = _fresh(seed=15)
     p2_hand = set(game.state.card_ids_in(ZoneRef.hand("p2")))
     publicized_ids = {
         event["card_instance_id"]
@@ -1829,10 +1836,8 @@ def test_player_visible_replay_leaks_no_unplayed_hand_cards(
             if event.get("event_type") == "card_gained"
             and event.get("payload", {}).get("reason") == "initial_hand"
         ]
-        assert public_deal, f"实体{instance_id}缺少公共发牌记录"
-        assert len(occurrences) == len(public_deal), (
-            f"实体{instance_id}在公共发牌记录之外的事件中被泄露"
-        )
+        # CP-04L：初始发牌属于非公开获得，公共/旁观者视图不暴露实体ID
+        assert not occurrences, f"实体{instance_id}在公共视图中被泄露"
         # 隐私边界：未公开化的手牌不得出现在其所有者之外的材料中。
         # 所有者自己在出牌阶段的合法动作会枚举自己的手牌（与【杀】
         # 【闪】【桃】【酒】及全部已接入锦囊的既有生产口径一致），
@@ -1851,6 +1856,22 @@ def test_player_visible_replay_leaks_no_unplayed_hand_cards(
         assert not leaked_outside_owner, (
             f"实体{instance_id}在非所有者决策材料中被泄露"
         )
+    # 双视角：所有者p2视图中保留自己的初始发牌实例记录
+    owner_view = record.player_visible_payload(viewer_id="p2")
+    for instance_id in never_publicized:
+        assert any(
+            event.get("event_type") == "card_gained"
+            and event.get("card_instance_id") == instance_id
+            and event.get("payload", {}).get("reason") == "initial_hand"
+            for event in owner_view["events"]
+        ), f"实体{instance_id}在所有者视图缺少初始发牌记录"
+    # 对手p1视图不得包含p2未公开化的手牌
+    opponent_view = record.player_visible_payload(viewer_id="p1")
+    for instance_id in never_publicized:
+        assert not any(
+            event.get("card_instance_id") == instance_id
+            for event in opponent_view["events"]
+        ), f"实体{instance_id}在对手视图中被泄露"
     # 群体响应动作负载只含固定键集，不携带牌面或实体ID
     for decision in view["decisions"]:
         for action in [decision.get("chosen_action")]:

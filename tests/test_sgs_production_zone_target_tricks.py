@@ -92,6 +92,19 @@ def _step(game: ProductionBasicCardBatch, action: object) -> None:
     game.step(BatchActionIdController(action.action_id))
 
 
+def _fresh(*args: object, **kwargs: object) -> ProductionBasicCardBatch:
+    """创建生产批处理会话并推进到出牌阶段（CP-04L 正式阶段流）。"""
+    game = ProductionBasicCardBatch(*args, **kwargs)  # type: ignore[arg-type]
+    for operation in ("proceed_prepare", "proceed_judgment", "proceed_draw"):
+        action = next(
+            a
+            for a in game.legal_actions()
+            if a.payload.get("operation") == operation
+        )
+        game.step(BatchActionIdController(action.action_id))
+    assert game.phase.value == "play"
+    return game
+
 def _pass(game: ProductionBasicCardBatch) -> None:
     _step(game, _action(game, "pass_trick_response"))
 
@@ -155,7 +168,7 @@ def _any_instance_of(game: ProductionBasicCardBatch, card_key: str) -> str:
 
 
 def test_guohe_entities_bind_to_production_adapter() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
     assert GUOHE in PRODUCTION_TRICK_KEYS
     assert GUOHE in registry.implemented_card_keys
@@ -177,7 +190,7 @@ def test_guohe_entities_bind_to_production_adapter() -> None:
 
 
 def test_shunshou_entities_bind_to_production_adapter() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
     assert SHUNSHOU in PRODUCTION_TRICK_KEYS
     assert SHUNSHOU in registry.implemented_card_keys
@@ -197,7 +210,7 @@ def test_shunshou_entities_bind_to_production_adapter() -> None:
 
 
 def test_formal_deck_remains_160_with_unique_ids() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     zone_total = sum(
         len(game.state.card_ids_in(zone)) for zone in game.state.zone_order
     )
@@ -206,21 +219,21 @@ def test_formal_deck_remains_160_with_unique_ids() -> None:
 
 
 def test_implemented_and_remaining_card_counts_updated() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
     assert GUOHE in registry.implemented_card_keys
     assert SHUNSHOU in registry.implemented_card_keys
-    assert len(registry.unimplemented_card_keys) == 9
+    assert len(registry.unimplemented_card_keys) == 6
     assert GUOHE not in registry.unimplemented_card_keys
     assert SHUNSHOU not in registry.unimplemented_card_keys
-    assert sum(len(registry.instances_of(key)) for key in registry.implemented_card_keys) == 140
+    assert sum(len(registry.instances_of(key)) for key in registry.implemented_card_keys) == 147
     assert {GUOHE, SHUNSHOU} <= set(PRODUCTION_TRICK_KEYS)
 
 
 def test_other_unimplemented_tricks_stay_fail_closed() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
-    for key in ("sgs_delayed_lebusi",):
+    for key in ("sgs_armor_baguazhen",):
         assert key in registry.unimplemented_card_keys
         with pytest.raises(UnsupportedRuleError):
             registry.adapter_for(key)
@@ -236,7 +249,7 @@ def test_other_unimplemented_tricks_stay_fail_closed() -> None:
 
 
 def test_tricks_usable_only_in_own_play_phase() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     assert _action(game, "use_guohe", card_key=GUOHE) is not None
     _use_trick(game, "use_guohe", GUOHE)
     assert game.phase is ProductionPhase.TRICK_RESPONSE
@@ -262,13 +275,13 @@ def test_tricks_usable_only_in_own_play_phase() -> None:
 
 
 def test_cannot_target_self() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     action = _action(game, "use_guohe", card_key=GUOHE)
     assert action is not None and action.target_ids == ("p2",)
     forged = replace(action, target_ids=("p1",))
     with pytest.raises(InvalidActionError):
         validate_action(game.state, game._context(), forged, game.registry)
-    shunshou_game = ProductionBasicCardBatch(seed=2)
+    shunshou_game = _fresh(seed=2)
     shun_action = _action(shunshou_game, "use_shunshou", card_key=SHUNSHOU)
     assert shun_action is not None and shun_action.target_ids == ("p2",)
     forged = replace(shun_action, target_ids=("p1",))
@@ -276,14 +289,14 @@ def test_cannot_target_self() -> None:
         validate_action(shunshou_game.state, shunshou_game._context(), forged, shunshou_game.registry)
 
 def test_all_zones_empty_target_not_legal() -> None:
-    game = ProductionBasicCardBatch(seed=66)
+    game = _fresh(seed=66)
     _empty_p2_zones(game)
     assert _action(game, "use_guohe", card_key=GUOHE) is None
     assert _action(game, "use_shunshou", card_key=SHUNSHOU) is None
 
 
 def test_hand_only_target_legal() -> None:
-    game = ProductionBasicCardBatch(seed=66)
+    game = _fresh(seed=66)
     assert game.state.card_ids_in(ZoneRef.hand("p2"))
     assert not game.state.card_ids_in(ZoneRef.judgment("p2"))
     assert _action(game, "use_guohe", card_key=GUOHE) is not None
@@ -291,7 +304,7 @@ def test_hand_only_target_legal() -> None:
 
 
 def test_equipment_only_target_legal() -> None:
-    game = ProductionBasicCardBatch(seed=66)
+    game = _fresh(seed=66)
     _empty_p2_zones(game)
     equipment_id = _any_equipment_instance(game)
     slot = game.state.cards_by_id[equipment_id].equipment_slot
@@ -304,7 +317,7 @@ def test_equipment_only_target_legal() -> None:
 
 
 def test_judgment_only_target_legal() -> None:
-    game = ProductionBasicCardBatch(seed=66)
+    game = _fresh(seed=66)
     _empty_p2_zones(game)
     judgment_id = _any_instance_of(game, "sgs_delayed_shandian")
     _fixture_set_state(game, {judgment_id: ZoneRef.judgment("p2")})
@@ -315,7 +328,7 @@ def test_judgment_only_target_legal() -> None:
 
 
 def test_shunshou_distance_fail_closed_with_mount() -> None:
-    game = ProductionBasicCardBatch(seed=66)
+    game = _fresh(seed=66)
     assert is_valid_shunshou_target(game.state, "p1", "p1") is False
     _empty_p2_zones(game)
     mount_id = _any_instance_of(game, "sgs_mount_defensive")
@@ -329,7 +342,7 @@ def test_shunshou_distance_fail_closed_with_mount() -> None:
 
 
 def test_guohe_does_not_inherit_shunshou_distance_rule() -> None:
-    game = ProductionBasicCardBatch(seed=66)
+    game = _fresh(seed=66)
     _empty_p2_zones(game)
     mount_id = _any_instance_of(game, "sgs_mount_defensive")
     _fixture_set_state(
@@ -346,7 +359,7 @@ def test_guohe_does_not_inherit_shunshou_distance_rule() -> None:
 
 
 def test_stale_and_forged_use_actions_fail_closed() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     action = _action(game, "use_guohe", card_key=GUOHE)
     assert action is not None
     _step(game, action)
@@ -377,7 +390,7 @@ def _wuxie_chain(game: ProductionBasicCardBatch, wuxie_count: int) -> None:
 
 
 def test_wuxie_nullifies_guohe_no_target_card_moved() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     assert "sgs_trick_wuxiekeji" in _hand_keys(game, "p2")
     trick_id = _use_trick(game, "use_guohe", GUOHE)
     _wuxie_chain(game, 1)
@@ -401,7 +414,7 @@ def test_wuxie_nullifies_guohe_no_target_card_moved() -> None:
 
 
 def test_two_wuxie_restore_guohe_effect() -> None:
-    game = ProductionBasicCardBatch(seed=21)
+    game = _fresh(seed=21)
     assert _hand_keys(game, "p2").count("sgs_trick_wuxiekeji") >= 2
     trick_id = _use_trick(game, "use_guohe", GUOHE)
     _wuxie_chain(game, 2)
@@ -414,7 +427,7 @@ def test_two_wuxie_restore_guohe_effect() -> None:
 
 
 def test_wuxie_nullifies_shunshou_no_target_card_moved() -> None:
-    game = ProductionBasicCardBatch(seed=14)
+    game = _fresh(seed=14)
     assert "sgs_trick_wuxiekeji" in _hand_keys(game, "p2")
     trick_id = _use_trick(game, "use_shunshou", SHUNSHOU)
     _wuxie_chain(game, 1)
@@ -437,7 +450,7 @@ def test_wuxie_nullifies_shunshou_no_target_card_moved() -> None:
 
 
 def test_two_wuxie_restore_shunshou_effect() -> None:
-    game = ProductionBasicCardBatch(seed=51)
+    game = _fresh(seed=51)
     assert _hand_keys(game, "p2").count("sgs_trick_wuxiekeji") >= 2
     trick_id = _use_trick(game, "use_shunshou", SHUNSHOU)
     _wuxie_chain(game, 2)
@@ -453,7 +466,7 @@ def test_both_reuse_audited_response_to_chain() -> None:
         (3, "use_guohe", GUOHE),
         (2, "use_shunshou", SHUNSHOU),
     ):
-        game = ProductionBasicCardBatch(seed=seed)
+        game = _fresh(seed=seed)
         trick_id = _use_trick(game, operation, key)
         runtime = game.runtime
         assert runtime.pending_trick is not None
@@ -467,7 +480,7 @@ def test_both_reuse_audited_response_to_chain() -> None:
 
 
 def test_nullified_trick_opens_no_zone_choice_window() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _use_trick(game, "use_guohe", GUOHE)
     _wuxie_chain(game, 1)
     assert game.phase is ProductionPhase.PLAY
@@ -480,7 +493,7 @@ def test_nullified_trick_opens_no_zone_choice_window() -> None:
 
 
 def test_nullified_trick_still_records_used_and_in_discard() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     trick_id = _use_trick(game, "use_guohe", GUOHE)
     _wuxie_chain(game, 1)
     used = [
@@ -500,7 +513,7 @@ def test_nullified_trick_still_records_used_and_in_discard() -> None:
 
 
 def _guohe_effect_game(**fixture: object) -> ProductionBasicCardBatch:
-    game = ProductionBasicCardBatch(seed=66)
+    game = _fresh(seed=66)
     _use_trick(game, "use_guohe", GUOHE)
     _pass(game)
     _pass(game)
@@ -538,7 +551,7 @@ def test_guohe_discards_target_hand_card() -> None:
 
 
 def test_guohe_discards_target_equipment_card() -> None:
-    game = ProductionBasicCardBatch(seed=66)
+    game = _fresh(seed=66)
     _use_trick(game, "use_guohe", GUOHE)
     _pass(game)
     _pass(game)
@@ -564,7 +577,7 @@ def test_guohe_discards_target_equipment_card() -> None:
 
 
 def test_guohe_discards_target_judgment_card() -> None:
-    game = ProductionBasicCardBatch(seed=66)
+    game = _fresh(seed=66)
     _use_trick(game, "use_guohe", GUOHE)
     _pass(game)
     _pass(game)
@@ -643,7 +656,7 @@ def test_guohe_move_event_source_zone_reason_correct() -> None:
 
 
 def test_guohe_no_legal_zone_card_at_resolution() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     trick_id = _use_trick(game, "use_guohe", GUOHE)
     _pass(game)
     _empty_p2_zones(game)
@@ -671,7 +684,7 @@ def test_guohe_no_legal_zone_card_at_resolution() -> None:
 
 
 def _shunshou_effect_game(**fixture: object) -> ProductionBasicCardBatch:
-    game = ProductionBasicCardBatch(seed=2)
+    game = _fresh(seed=2)
     _use_trick(game, "use_shunshou", SHUNSHOU)
     _pass(game)
     _pass(game)
@@ -790,7 +803,7 @@ def test_shunshou_card_conservation_160() -> None:
 
 
 def test_shunshou_no_legal_zone_card_at_resolution() -> None:
-    game = ProductionBasicCardBatch(seed=2)
+    game = _fresh(seed=2)
     trick_id = _use_trick(game, "use_shunshou", SHUNSHOU)
     _pass(game)
     _empty_p2_zones(game)
@@ -839,7 +852,7 @@ def test_different_hidden_hands_produce_same_decision_structure() -> None:
     stable_fields: set[tuple[tuple[str, object], ...]] = set()
     handles: set[str] = set()
     for seed in (66, 3):
-        game = ProductionBasicCardBatch(seed=seed)
+        game = _fresh(seed=seed)
         if _action(game, "use_guohe", card_key=GUOHE) is None:
             continue
         _use_trick(game, "use_guohe", GUOHE)
@@ -1060,7 +1073,7 @@ def test_public_zone_path_strictly_reproducible() -> None:
     必须产生完全相同的事件流与最终状态（严格重执行语义的事件哈希一致）。"""
     runs: list[list[dict]] = []
     for _ in range(2):
-        game = ProductionBasicCardBatch(seed=66)
+        game = _fresh(seed=66)
         _use_trick(game, "use_guohe", GUOHE)
         _pass(game)
         _pass(game)
@@ -1165,7 +1178,7 @@ def test_tampered_zone_choice_replay_fails_closed() -> None:
 
 
 def test_finished_game_opens_no_zone_window() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     game.run()
     assert game.is_finished
     event_count = len(game.events)
@@ -1177,7 +1190,7 @@ def test_finished_game_opens_no_zone_window() -> None:
 
 
 def test_safety_limit_still_fails_closed() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     with pytest.raises(ProductionBatchSafetyLimitError):
         game.run(max_steps=1)
     assert not game.is_finished
@@ -1191,7 +1204,7 @@ def test_all_paths_keep_conservation_and_hash_chain() -> None:
         (21, "use_guohe", GUOHE),
         (51, "use_shunshou", SHUNSHOU),
     ):
-        game = ProductionBasicCardBatch(seed=seed)
+        game = _fresh(seed=seed)
         _use_trick(game, operation, key)
         _wuxie_chain(game, 2 if seed in (21, 51) else 0)
         if game.phase is ProductionPhase.ZONE_CHOICE:

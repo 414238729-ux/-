@@ -264,6 +264,68 @@ _PRIVATE_FIELDS = {
 
 AUTHORITATIVE_PRIVATE_SCHEMA = "sgs-authoritative-private-v1"
 
+# 初始发牌、摸牌阶段与普通摸牌的非公开获得reason；对手/旁观者视图必须脱敏
+_PRIVATE_GAIN_REASONS: frozenset[str] = frozenset(
+    {"initial_hand", "draw_phase"}
+)
+
+
+def _redact_private_hand_event(
+    event: Mapping[str, object], viewer_id: str | None
+) -> dict[str, object]:
+    """按观察者身份脱敏事件中的隐藏手牌实体信息（CP-04L）。
+
+    公开获得路径（五谷公开选择、顺手牵羊公开获得、借刀交武器等）保持公开；
+    仅对初始发牌、摸牌等非公开获得按“接收者本人可见、其他人只见数量与
+    reason”规则处理。"""
+
+    event_type = event.get("event_type")
+    if event_type == "card_gained":
+        payload = event.get("payload", {})
+        reason = str(payload.get("reason", "")) if isinstance(payload, Mapping) else ""
+        target_ids = event.get("target_ids")
+        recipient = None
+        if isinstance(target_ids, (list, tuple)) and target_ids:
+            recipient = target_ids[0]
+        if reason in _PRIVATE_GAIN_REASONS and recipient != viewer_id:
+            redacted: dict[str, object] = dict(event)
+            redacted["card_instance_id"] = None
+            redacted["card_key"] = None
+            redacted["payload"] = {
+                "reason": reason,
+                "redacted": True,
+                "redacted_by_viewer": viewer_id,
+            }
+            return redacted
+        return dict(event)
+    if event_type == "card_moved":
+        payload = event.get("payload", {})
+        if not isinstance(payload, Mapping):
+            return dict(event)
+        source = payload.get("source")
+        destination = payload.get("destination")
+        if (
+            isinstance(source, Mapping)
+            and isinstance(destination, Mapping)
+            and source.get("kind") == "draw_pile"
+            and destination.get("kind") == "hand"
+        ):
+            owner = destination.get("owner_id")
+            if owner != viewer_id:
+                redacted = dict(event)
+                redacted["card_instance_id"] = None
+                redacted["card_key"] = None
+                redacted["payload"] = {
+                    "source": dict(source),
+                    "destination": dict(destination),
+                    "reason": str(payload.get("reason", "")),
+                    "redacted": True,
+                    "redacted_by_viewer": viewer_id,
+                }
+                return redacted
+        return dict(event)
+    return dict(event)
+
 
 @dataclass(frozen=True, slots=True)
 class ProductionReexecutionReplay:
@@ -448,17 +510,35 @@ class ProductionReexecutionReplay:
         value["record_sha256"] = self.record_sha256
         return value
 
-    def player_visible_payload(self) -> dict[str, object]:
-        """返回不包含权威私有材料的玩家可见回放导出。
+    def player_visible_payload(
+        self, viewer_id: str | None = None
+    ) -> dict[str, object]:
+        """返回不包含权威私有材料的玩家可见回放导出（CP-04L 双视角脱敏）。
 
-        导出移除 ``authoritative_private``（会话秘密与句柄映射材料），标记
-        ``player_visible=true``，并附 ``player_visible_sha256`` 覆盖全部公开
-        材料；权威重执行拒绝此类导出（缺少私有材料直接失败关闭）。
+        默认 ``viewer_id=None`` 表示公共/旁观者视图；传入角色ID时该角色可以
+        看到自己获得到手牌区的实例与牌面，对手视图中初始发牌、摸牌与非公开
+        获得的 CARD_GAINED/card_moved 不暴露实例ID、card_key、牌名、花色或
+        点数，只保留公开可知的数量变化与reason。导出同时移除 seed、
+        initial_rng_state、随机消费记录等可反推牌堆顺序或下一张顶牌的材料，
+        以及 ``authoritative_private``（会话秘密与句柄映射）；权威重执行
+        拒绝此类导出（缺少私有材料直接失败关闭）。
         """
 
         value = self._material_dict()
         del value["authoritative_private"]
+        header = dict(_plain(value["header"]))
+        for key in ("seed", "initial_rng_state", "initial_rng_state_sha256"):
+            header.pop(key, None)
+        header["rng_material_redacted"] = True
+        value["header"] = header
+        value["random_consumptions"] = []
+        value["random_consumption_count"] = len(self.random_consumptions)
+        value["events"] = [
+            _redact_private_hand_event(event, viewer_id)
+            for event in value["events"]
+        ]
         value["player_visible"] = True
+        value["viewer_id"] = viewer_id
         value["player_visible_sha256"] = sha256_value(value)
         return value
 

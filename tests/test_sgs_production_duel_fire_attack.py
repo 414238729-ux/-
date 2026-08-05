@@ -106,6 +106,19 @@ def _step(game: ProductionBasicCardBatch, action: object) -> None:
     game.step(BatchActionIdController(action.action_id))
 
 
+def _fresh(*args: object, **kwargs: object) -> ProductionBasicCardBatch:
+    """创建生产批处理会话并推进到出牌阶段（CP-04L 正式阶段流）。"""
+    game = ProductionBasicCardBatch(*args, **kwargs)  # type: ignore[arg-type]
+    for operation in ("proceed_prepare", "proceed_judgment", "proceed_draw"):
+        action = next(
+            a
+            for a in game.legal_actions()
+            if a.payload.get("operation") == operation
+        )
+        game.step(BatchActionIdController(action.action_id))
+    assert game.phase.value == "play"
+    return game
+
 def _pass_trick(game: ProductionBasicCardBatch) -> None:
     _step(game, _action(game, "pass_trick_response"))
 
@@ -171,7 +184,7 @@ def _fire_reveal_open(
 
 
 def test_duel_entities_bind_to_production_adapter() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
     assert DUEL in PRODUCTION_TRICK_KEYS
     assert DUEL in registry.implemented_card_keys
@@ -198,7 +211,7 @@ def test_duel_entities_bind_to_production_adapter() -> None:
 
 
 def test_huogong_entities_bind_to_production_adapter() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
     assert HUO in PRODUCTION_TRICK_KEYS
     assert HUO in registry.implemented_card_keys
@@ -225,7 +238,7 @@ def test_huogong_entities_bind_to_production_adapter() -> None:
 
 
 def test_formal_deck_remains_160_with_unique_ids_and_single_zone() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     zone_total = sum(
         len(game.state.card_ids_in(zone)) for zone in game.state.zone_order
     )
@@ -241,25 +254,25 @@ def test_formal_deck_remains_160_with_unique_ids_and_single_zone() -> None:
 
 
 def test_implemented_and_remaining_card_counts_updated() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
     assert DUEL in registry.implemented_card_keys
     assert HUO in registry.implemented_card_keys
-    assert len(registry.implemented_card_keys) == 29
-    assert len(registry.unimplemented_card_keys) == 9
+    assert len(registry.implemented_card_keys) == 32
+    assert len(registry.unimplemented_card_keys) == 6
     assert DUEL not in registry.unimplemented_card_keys
     assert HUO not in registry.unimplemented_card_keys
     assert (
         sum(len(registry.instances_of(key)) for key in registry.implemented_card_keys)
-        == 140
+        == 147
     )
     assert {DUEL, HUO} <= set(PRODUCTION_TRICK_KEYS)
 
 
 def test_other_unimplemented_cards_stay_fail_closed() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
-    for key in ("sgs_delayed_lebusi",):
+    for key in ("sgs_armor_baguazhen",):
         assert key in registry.unimplemented_card_keys
         with pytest.raises(UnsupportedRuleError):
             registry.adapter_for(key)
@@ -275,7 +288,7 @@ def test_other_unimplemented_cards_stay_fail_closed() -> None:
 
 
 def test_duel_usable_only_in_own_play_phase() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     assert _action(game, "use_duel", card_key=DUEL) is not None
     _use_trick(game, "use_duel", DUEL, "p2")
     assert game.phase is ProductionPhase.TRICK_RESPONSE
@@ -300,7 +313,7 @@ def test_duel_usable_only_in_own_play_phase() -> None:
 
 
 def test_huogong_usable_only_in_own_play_phase() -> None:
-    game = ProductionBasicCardBatch(seed=14)
+    game = _fresh(seed=14)
     assert _action(game, "use_fire_attack", card_key=HUO, target="p2") is not None
     _use_trick(game, "use_fire_attack", HUO, "p2")
     assert game.phase is ProductionPhase.TRICK_RESPONSE
@@ -324,7 +337,7 @@ def test_huogong_usable_only_in_own_play_phase() -> None:
 
 
 def test_duel_cannot_target_self() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     action = _action(game, "use_duel", card_key=DUEL)
     assert action is not None and action.target_ids == ("p2",)
     forged = replace(action, target_ids=("p1",))
@@ -333,7 +346,7 @@ def test_duel_cannot_target_self() -> None:
 
 
 def test_duel_has_no_zone_or_distance_target_restriction() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     hand_ids = tuple(game.state.card_ids_in(ZoneRef.hand("p2")))
     _fixture_set_state(game, {instance_id: DISCARD_PILE for instance_id in hand_ids})
     mount_id = _any_instance_of(game, "sgs_mount_defensive")
@@ -347,7 +360,7 @@ def test_duel_has_no_zone_or_distance_target_restriction() -> None:
 
 
 def test_huogong_target_must_have_hand_and_may_be_self() -> None:
-    game = ProductionBasicCardBatch(seed=14)
+    game = _fresh(seed=14)
     assert _action(game, "use_fire_attack", card_key=HUO, target="p1") is not None
     assert _action(game, "use_fire_attack", card_key=HUO, target="p2") is not None
     hand_ids = tuple(game.state.card_ids_in(ZoneRef.hand("p2")))
@@ -361,7 +374,7 @@ def test_huogong_target_must_have_hand_and_may_be_self() -> None:
 
 
 def test_duel_use_establishes_nullification_window_and_card_used() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     trick_id = _use_trick(game, "use_duel", DUEL, "p2")
     runtime = game.runtime
     assert runtime.pending_trick is not None
@@ -386,7 +399,7 @@ def test_duel_use_establishes_nullification_window_and_card_used() -> None:
 
 
 def test_one_wuxie_cancels_duel_no_slash_chain() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     assert WUXIE in _hand_keys(game, "p2")
     trick_id = _use_trick(game, "use_duel", DUEL, "p2")
     _pass_trick(game)
@@ -408,7 +421,7 @@ def test_one_wuxie_cancels_duel_no_slash_chain() -> None:
 
 
 def test_two_wuxie_restore_duel_opens_slash_chain() -> None:
-    game = ProductionBasicCardBatch(seed=6)
+    game = _fresh(seed=6)
     assert WUXIE in _hand_keys(game, "p1")
     assert WUXIE in _hand_keys(game, "p2")
     trick_id = _use_trick(game, "use_duel", DUEL, "p2")
@@ -436,7 +449,7 @@ def test_two_wuxie_restore_duel_opens_slash_chain() -> None:
 
 
 def test_duel_target_is_first_responder() -> None:
-    game = ProductionBasicCardBatch(seed=137)
+    game = _fresh(seed=137)
     trick_id = _use_trick(game, "use_duel", DUEL, "p2")
     _close_trick_window(game)
     duel = game.runtime.pending_duel
@@ -452,7 +465,7 @@ def test_duel_target_is_first_responder() -> None:
 
 
 def test_duel_slash_recorded_as_played_not_used() -> None:
-    game = ProductionBasicCardBatch(seed=10)
+    game = _fresh(seed=10)
     trick_id = _use_trick(game, "use_duel", DUEL, "p2")
     _close_trick_window(game)
     slash = _action(game, "play_slash_for_duel", card_key="sgs_basic_sha")
@@ -493,7 +506,7 @@ def test_huosha_and_leisha_respond_by_current_card_name() -> None:
         (10, "sgs_basic_sha", "sgs_basic_huosha"),
         (377, "sgs_basic_leisha", "sgs_basic_sha"),
     ):
-        game = ProductionBasicCardBatch(seed=seed)
+        game = _fresh(seed=seed)
         _use_trick(game, "use_duel", DUEL, "p2")
         _close_trick_window(game)
         first = _action(game, "play_slash_for_duel", card_key=first_slash)
@@ -513,7 +526,7 @@ def test_huosha_and_leisha_respond_by_current_card_name() -> None:
 
 
 def test_non_slash_card_not_enumerated_for_duel_response() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _use_trick(game, "use_duel", DUEL, "p2")
     _close_trick_window(game)
     assert WUXIE in _hand_keys(game, "p2")
@@ -532,7 +545,7 @@ def test_non_slash_card_not_enumerated_for_duel_response() -> None:
 
 
 def test_duel_slash_completes_hand_processing_discard_lifecycle() -> None:
-    game = ProductionBasicCardBatch(seed=10)
+    game = _fresh(seed=10)
     _use_trick(game, "use_duel", DUEL, "p2")
     _close_trick_window(game)
     slash = _action(game, "play_slash_for_duel", card_key="sgs_basic_sha")
@@ -566,7 +579,7 @@ def test_duel_slash_completes_hand_processing_discard_lifecycle() -> None:
 
 
 def test_duel_responder_with_slash_may_pass() -> None:
-    game = ProductionBasicCardBatch(seed=10)
+    game = _fresh(seed=10)
     _use_trick(game, "use_duel", DUEL, "p2")
     _close_trick_window(game)
     assert _action(game, "play_slash_for_duel", card_key="sgs_basic_sha") is not None
@@ -630,7 +643,7 @@ def _consume_duel(
 
 
 def test_duel_slash_physical_lifecycle_hand_processing_discard() -> None:
-    game = ProductionBasicCardBatch(seed=10)
+    game = _fresh(seed=10)
     _use_trick(game, "use_duel", DUEL, "p2")
     _close_trick_window(game)
     slash = _action(game, "play_slash_for_duel", card_key="sgs_basic_sha")
@@ -654,7 +667,7 @@ def test_duel_slash_physical_lifecycle_hand_processing_discard() -> None:
 
 
 def test_duel_pass_allowed_even_with_slash_in_hand() -> None:
-    game = ProductionBasicCardBatch(seed=10)
+    game = _fresh(seed=10)
     _use_trick(game, "use_duel", DUEL, "p2")
     _close_trick_window(game)
     assert _action(game, "play_slash_for_duel", card_key="sgs_basic_sha") is not None
@@ -668,7 +681,7 @@ def test_duel_pass_allowed_even_with_slash_in_hand() -> None:
 
 
 def test_duel_target_passes_damage_source_is_user() -> None:
-    game = ProductionBasicCardBatch(seed=137)
+    game = _fresh(seed=137)
     trick_id = _use_trick(game, "use_duel", DUEL, "p2")
     _close_trick_window(game)
     _step(game, _action(game, "pass_duel_slash"))
@@ -685,7 +698,7 @@ def test_duel_target_passes_damage_source_is_user() -> None:
 
 
 def test_duel_user_passes_second_round_damage_source_is_target() -> None:
-    game = ProductionBasicCardBatch(seed=107)
+    game = _fresh(seed=107)
     trick_id = _use_trick(game, "use_duel", DUEL, "p2")
     _close_trick_window(game)
     _step(game, _action(game, "play_slash_for_duel"))
@@ -701,7 +714,7 @@ def test_duel_user_passes_second_round_damage_source_is_target() -> None:
 
 
 def test_duel_three_slash_alternation_exact_order() -> None:
-    game = ProductionBasicCardBatch(seed=399)
+    game = _fresh(seed=399)
     _use_trick(game, "use_duel", DUEL, "p2")
     _close_trick_window(game)
     responders: list[str] = []
@@ -732,7 +745,7 @@ def test_duel_three_slash_alternation_exact_order() -> None:
 
 
 def test_duel_dead_responder_ends_immediately_without_damage() -> None:
-    game = ProductionBasicCardBatch(seed=323)
+    game = _fresh(seed=323)
     _use_trick(game, "use_duel", DUEL, "p2")
     _close_trick_window(game)
     assert game.runtime.pending_duel.responder_id == "p2"
@@ -764,7 +777,7 @@ def test_duel_continues_after_source_death() -> None:
     """
 
     # 子场景1：目标放弃响应，伤害正常结算
-    game = ProductionBasicCardBatch(seed=10)
+    game = _fresh(seed=10)
     trick_id = _use_trick(game, "use_duel", DUEL, "p2")
     _close_trick_window(game)
     assert game.phase is ProductionPhase.DUEL_RESPONSE
@@ -788,7 +801,7 @@ def test_duel_continues_after_source_death() -> None:
     assert game.phase is ProductionPhase.PLAY
 
     # 子场景2：目标出【杀】后轮到已死亡来源，立即结束且不补伤害
-    game = ProductionBasicCardBatch(seed=10)
+    game = _fresh(seed=10)
     _use_trick(game, "use_duel", DUEL, "p2")
     _close_trick_window(game)
     _kill_player(game, "p1")
@@ -812,7 +825,7 @@ def test_duel_continues_after_source_death() -> None:
 
 
 def test_duel_damage_enters_peach_rescue() -> None:
-    game = ProductionBasicCardBatch(seed=137)
+    game = _fresh(seed=137)
     _set_player_stats(game, "p2", hp=1, max_hp=1)
     trick_id = _use_trick(game, "use_duel", DUEL, "p2")
     _close_trick_window(game)
@@ -830,7 +843,7 @@ def test_duel_damage_enters_peach_rescue() -> None:
 
 
 def test_duel_damage_enters_wine_self_rescue() -> None:
-    game = ProductionBasicCardBatch(seed=377)
+    game = _fresh(seed=377)
     _set_player_stats(game, "p2", hp=1, max_hp=1)
     _use_trick(game, "use_duel", DUEL, "p2")
     _close_trick_window(game)
@@ -845,7 +858,7 @@ def test_duel_damage_enters_wine_self_rescue() -> None:
 
 
 def test_duel_rescue_failure_confirms_death_and_victory() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _set_player_stats(game, "p2", hp=1, max_hp=1)
     trick_id = _use_trick(game, "use_duel", DUEL, "p2")
     _pass_trick(game)
@@ -872,7 +885,7 @@ def test_duel_rescue_failure_confirms_death_and_victory() -> None:
 
 
 def test_fire_attack_one_wuxie_cancels_no_reveal_window() -> None:
-    game = ProductionBasicCardBatch(seed=14)
+    game = _fresh(seed=14)
     assert WUXIE in _hand_keys(game, "p2")
     trick_id = _use_trick(game, "use_fire_attack", HUO, "p2")
     _pass_trick(game)
@@ -894,7 +907,7 @@ def test_fire_attack_one_wuxie_cancels_no_reveal_window() -> None:
 
 
 def test_fire_attack_two_wuxie_restore_enters_reveal() -> None:
-    game = ProductionBasicCardBatch(seed=968)
+    game = _fresh(seed=968)
     assert _hand_keys(game, "p2").count(WUXIE) == 2
     trick_id = _use_trick(game, "use_fire_attack", HUO, "p2")
     _pass_trick(game)
@@ -922,7 +935,7 @@ def test_fire_attack_two_wuxie_restore_enters_reveal() -> None:
 
 
 def test_fire_attack_target_not_user_chooses_reveal() -> None:
-    game = ProductionBasicCardBatch(seed=283)
+    game = _fresh(seed=283)
     trick_id = _use_trick(game, "use_fire_attack", HUO, "p2")
     _close_trick_window(game)
     assert game.phase is ProductionPhase.FIRE_ATTACK_REVEAL
@@ -943,7 +956,7 @@ def test_fire_attack_target_not_user_chooses_reveal() -> None:
 
 
 def test_fire_attack_revealed_card_stays_in_target_hand() -> None:
-    game = ProductionBasicCardBatch(seed=283)
+    game = _fresh(seed=283)
     _use_trick(game, "use_fire_attack", HUO, "p2")
     _close_trick_window(game)
     reveal = _action(game, "reveal_card_for_fire_attack")
@@ -957,7 +970,7 @@ def test_fire_attack_revealed_card_stays_in_target_hand() -> None:
 
 
 def test_fire_attack_reveal_event_publicizes_card() -> None:
-    game = ProductionBasicCardBatch(seed=283)
+    game = _fresh(seed=283)
     trick_id = _use_trick(game, "use_fire_attack", HUO, "p2")
     _close_trick_window(game)
     reveal = _action(game, "reveal_card_for_fire_attack")
@@ -984,7 +997,7 @@ def test_fire_attack_reveal_event_publicizes_card() -> None:
 
 
 def test_fire_attack_unrevealed_hand_never_leaks_to_decision_input() -> None:
-    game = ProductionBasicCardBatch(seed=283)
+    game = _fresh(seed=283)
     _use_trick(game, "use_fire_attack", HUO, "p2")
     _close_trick_window(game)
     target_hand_ids = set(game.state.card_ids_in(ZoneRef.hand("p2")))
@@ -1016,7 +1029,7 @@ def test_fire_attack_unrevealed_hand_never_leaks_to_decision_input() -> None:
 def test_fire_attack_single_hand_target_legal_reveal() -> None:
     """【火攻】目标只有一张手牌时仍走合法动作与展示事件（审计补测）。"""
 
-    game = ProductionBasicCardBatch(seed=283)
+    game = _fresh(seed=283)
     target_hand = game.state.card_ids_in(ZoneRef.hand("p2"))
     assert len(target_hand) >= 2
     # 用权威 move_cards 接口把目标手牌收缩到恰好一张
@@ -1066,7 +1079,7 @@ def test_fire_attack_single_hand_target_legal_reveal() -> None:
 
 
 def test_fire_attack_user_only_discards_same_suit_real_hand_cards() -> None:
-    game = ProductionBasicCardBatch(seed=283)
+    game = _fresh(seed=283)
     _use_trick(game, "use_fire_attack", HUO, "p2")
     _close_trick_window(game)
     reveal = _action(game, "reveal_card_for_fire_attack")
@@ -1089,7 +1102,7 @@ def test_fire_attack_user_only_discards_same_suit_real_hand_cards() -> None:
 
 
 def test_fire_attack_pass_discard_allowed_even_with_same_suit() -> None:
-    game = ProductionBasicCardBatch(seed=283)
+    game = _fresh(seed=283)
     trick_id = _use_trick(game, "use_fire_attack", HUO, "p2")
     _close_trick_window(game)
     _step(game, _action(game, "reveal_card_for_fire_attack"))
@@ -1111,7 +1124,7 @@ def test_fire_attack_pass_discard_allowed_even_with_same_suit() -> None:
 
 
 def test_fire_attack_no_same_suit_cannot_forge_discard() -> None:
-    game = ProductionBasicCardBatch(seed=283)
+    game = _fresh(seed=283)
     _use_trick(game, "use_fire_attack", HUO, "p2")
     _close_trick_window(game)
     reveal = _action(game, "reveal_card_for_fire_attack")
@@ -1201,7 +1214,7 @@ def _reveal_action_for_suit(
 
 
 def test_fire_attack_discard_emits_moved_lost_discarded() -> None:
-    game = ProductionBasicCardBatch(seed=283)
+    game = _fresh(seed=283)
     trick_id = _use_trick(game, "use_fire_attack", HUO, "p2")
     _close_trick_window(game)
     reveal = _action(game, "reveal_card_for_fire_attack")
@@ -1246,7 +1259,7 @@ def test_fire_attack_discard_emits_moved_lost_discarded() -> None:
 
 
 def test_fire_attack_discard_not_used_or_played() -> None:
-    game = ProductionBasicCardBatch(seed=283)
+    game = _fresh(seed=283)
     _use_trick(game, "use_fire_attack", HUO, "p2")
     _close_trick_window(game)
     _step(game, _action(game, "reveal_card_for_fire_attack"))
@@ -1269,7 +1282,7 @@ def test_fire_attack_discard_not_used_or_played() -> None:
 
 
 def test_fire_attack_successful_discard_deals_one_fire_damage() -> None:
-    game = ProductionBasicCardBatch(seed=283)
+    game = _fresh(seed=283)
     trick_id = _use_trick(game, "use_fire_attack", HUO, "p2")
     _close_trick_window(game)
     _step(game, _action(game, "reveal_card_for_fire_attack"))
@@ -1289,7 +1302,7 @@ def test_fire_attack_successful_discard_deals_one_fire_damage() -> None:
 
 
 def test_fire_attack_target_hand_emptied_resolution_no_effect() -> None:
-    game = ProductionBasicCardBatch(seed=14)
+    game = _fresh(seed=14)
     trick_id = _use_trick(game, "use_fire_attack", HUO, "p2")
     _pass_trick(game)
     hand_ids = tuple(game.state.card_ids_in(ZoneRef.hand("p2")))
@@ -1310,7 +1323,7 @@ def test_fire_attack_target_hand_emptied_resolution_no_effect() -> None:
 
 
 def test_fire_attack_self_target_reveal_and_discard() -> None:
-    game = ProductionBasicCardBatch(seed=14)
+    game = _fresh(seed=14)
     trick_id = _use_trick(game, "use_fire_attack", HUO, "p1")
     _close_trick_window(game)
     assert game.phase is ProductionPhase.FIRE_ATTACK_REVEAL
@@ -1345,7 +1358,7 @@ def test_fire_attack_self_target_reveal_and_discard() -> None:
 
 
 def test_fire_attack_damage_enters_dying_peach_rescue() -> None:
-    game = ProductionBasicCardBatch(seed=382)
+    game = _fresh(seed=382)
     _set_player_stats(game, "p2", hp=1, max_hp=1)
     _use_trick(game, "use_fire_attack", HUO, "p2")
     _close_trick_window(game)
@@ -1367,7 +1380,7 @@ def test_fire_attack_damage_enters_dying_peach_rescue() -> None:
 
 
 def test_fire_attack_reveal_handle_forged_or_stale_fails_closed() -> None:
-    game = ProductionBasicCardBatch(seed=283)
+    game = _fresh(seed=283)
     _use_trick(game, "use_fire_attack", HUO, "p2")
     _close_trick_window(game)
     reveal = _action(game, "reveal_card_for_fire_attack")
@@ -1669,7 +1682,7 @@ def test_fire_attack_player_visible_replay_only_publicizes_revealed() -> None:
     assert len(reveal_events) == 1
     revealed_id = reveal_events[0]["card_instance_id"]
     assert reveal_events[0]["payload"]["suit"] in ("♣", "♦")
-    game = ProductionBasicCardBatch(seed=283)
+    game = _fresh(seed=283)
     target_hand_ids = set(game.state.card_ids_in(ZoneRef.hand("p2")))
     assert revealed_id in target_hand_ids
     reveal_event_index = events.index(reveal_events[0])
@@ -1723,7 +1736,7 @@ def test_duel_and_fire_actions_pass_enumerate_validate_apply() -> None:
         (10, "use_duel", DUEL, "p2"),
         (283, "use_fire_attack", HUO, "p2"),
     ):
-        game = ProductionBasicCardBatch(seed=seed)
+        game = _fresh(seed=seed)
         action = _action(game, operation, card_key=card_key, target=target)
         assert action is not None
         context = game._context()
@@ -1751,14 +1764,14 @@ def test_conservation_and_single_zone_after_each_new_branch() -> None:
             ]
             assert len(locations) == 1
 
-    game = ProductionBasicCardBatch(seed=10)
+    game = _fresh(seed=10)
     _use_trick(game, "use_duel", DUEL, "p2")
     _close_trick_window(game)
     _step(game, _action(game, "play_slash_for_duel"))
     _step(game, _action(game, "pass_duel_slash"))
     check(game)
 
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _use_trick(game, "use_duel", DUEL, "p2")
     _pass_trick(game)
     _step(game, _action(game, "use_wuxie"))
@@ -1766,14 +1779,14 @@ def test_conservation_and_single_zone_after_each_new_branch() -> None:
     _pass_trick(game)
     check(game)
 
-    game = ProductionBasicCardBatch(seed=283)
+    game = _fresh(seed=283)
     _use_trick(game, "use_fire_attack", HUO, "p2")
     _close_trick_window(game)
     _step(game, _action(game, "reveal_card_for_fire_attack"))
     _step(game, _action(game, "discard_same_suit_for_fire_attack"))
     check(game)
 
-    game = ProductionBasicCardBatch(seed=14)
+    game = _fresh(seed=14)
     _use_trick(game, "use_fire_attack", HUO, "p2")
     _pass_trick(game)
     _step(game, _action(game, "use_wuxie"))
@@ -1783,7 +1796,7 @@ def test_conservation_and_single_zone_after_each_new_branch() -> None:
 
 
 def test_finished_game_blocks_further_duel_and_fire_actions() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _set_player_stats(game, "p2", hp=1, max_hp=1)
     _use_trick(game, "use_duel", DUEL, "p2")
     _pass_trick(game)

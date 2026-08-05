@@ -66,12 +66,20 @@ def _fresh(
     player_hp: tuple[int, int] = (4, 4),
     initial_hand_count: int = 4,
 ) -> ProductionBasicCardBatch:
-    return ProductionBasicCardBatch(
+    game = ProductionBasicCardBatch(
         seed=seed,
         player_hp=player_hp,
         initial_hand_count=initial_hand_count,
     )
-
+    for operation in ("proceed_prepare", "proceed_judgment", "proceed_draw"):
+        action = next(
+            a
+            for a in game.legal_actions()
+            if a.payload.get("operation") == operation
+        )
+        game.step(BatchActionIdController(action.action_id))
+    assert game.phase.value == "play"
+    return game
 
 def _me(game: ProductionBasicCardBatch) -> str:
     return game._first_player_id
@@ -1879,7 +1887,7 @@ def test_player_visible_replay_shows_pool_but_no_private_material(
     # 跨玩家隐私边界：另一名玩家从未公开化的初始手牌不得出现在
     # 其所有者之外的决策材料中（所有者自己出牌阶段的合法动作枚举
     # 自己的手牌是既有生产口径，属于自信息）。
-    game = ProductionBasicCardBatch(seed=9, initial_hand_count=6)
+    game = _fresh(seed=9, initial_hand_count=6)
     other_player = "p1" if game._first_player_id == "p2" else "p2"
     other_hand = set(game.state.card_ids_in(ZoneRef.hand(other_player)))
     publicized_ids = {

@@ -75,6 +75,9 @@ CARD_NAMES_BY_KEY: Mapping[str, str] = {
     "sgs_weapon_fangtianhuaji": "方天画戟",
     "sgs_weapon_zhuqueyushan": "朱雀羽扇",
     "sgs_weapon_qilingong": "麒麟弓",
+    "sgs_delayed_lebusi": "乐不思蜀",
+    "sgs_delayed_bingliang": "兵粮寸断",
+    "sgs_delayed_shandian": "闪电",
 }
 
 SLASH_CARD_KEYS: tuple[str, ...] = (
@@ -118,6 +121,12 @@ PRODUCTION_WEAPON_KEYS: tuple[str, ...] = (
     "sgs_weapon_fangtianhuaji",
     "sgs_weapon_zhuqueyushan",
     "sgs_weapon_qilingong",
+)
+
+PRODUCTION_DELAYED_TRICK_KEYS: tuple[str, ...] = (
+    "sgs_delayed_lebusi",
+    "sgs_delayed_bingliang",
+    "sgs_delayed_shandian",
 )
 
 DEFAULT_STRUCTURED_CARD_CSV_PATH = Path("knowledge") / "三国杀卡牌结构化数据.csv"
@@ -1051,7 +1060,10 @@ class WuxiekejiAdapter(TrickCardAdapter):
         self, state: GameState, context: ActionContext
     ) -> tuple[LegalAction, ...]:
         session = self._require_session()
-        if session.phase.value != "trick_response":
+        if session.phase.value not in (
+            "trick_response",
+            "judgment_wuxie",
+        ):
             return ()
         trick = session.runtime.pending_trick
         if trick is None:
@@ -1085,9 +1097,11 @@ class WuxiekejiAdapter(TrickCardAdapter):
         self, state: GameState, context: ActionContext, action: LegalAction
     ) -> GameState:
         session = self._require_session()
-        if session.phase.value == "trick_response":
+        if session.phase.value in ("trick_response", "judgment_wuxie"):
             return session.apply_wuxie(state, context, action, self)
-        raise InvalidActionError("【无懈可击】只能在合法锦囊响应窗口使用")
+        raise InvalidActionError(
+            "【无懈可击】只能在合法锦囊或判定前无懈响应窗口使用"
+        )
 
 
 class GuoheChaiqiaoAdapter(TrickCardAdapter):
@@ -1990,6 +2004,215 @@ class TaoyuanJieyiAdapter(GroupTargetTrickAdapter):
         super().__init__(session)
 
 
+class DelayedTrickAdapter(TrickCardAdapter):
+    """延时锦囊生产适配器的公共基类（CP-04L）。
+
+    延时锦囊在出牌阶段使用后直接进入目标判定区（不经处理区、不开普通
+    锦囊TRICK_RESPONSE窗口）；判定区公开；进入判定区时分配单调递增的
+    判定区进入序号；同名延时锦囊不得在同一角色判定区共存。判定区内的
+    结算在目标角色判定阶段进行，判定前先开【无懈可击】窗口。
+    """
+
+    def _enumerate_use(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        session = self._require_session()
+        if context.actor_id != session.runtime.current_player_id:
+            return ()
+        actions: list[LegalAction] = []
+        for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
+            card = state.cards_by_id[instance_id]
+            if card.card_key != self.card_key:
+                continue
+            for target_id in self._legal_targets(state, context.actor_id):
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.USE_CARD,
+                        actor_id=context.actor_id,
+                        card_instance_id=instance_id,
+                        target_ids=(target_id,),
+                        payload={
+                            "operation": self.use_operation,
+                            "card_key": self.card_key,
+                            "card_name": self.card_name,
+                        },
+                    )
+                )
+        return tuple(actions)
+
+    def _legal_targets(
+        self, state: GameState, user_id: str
+    ) -> tuple[str, ...]:
+        raise NotImplementedError
+
+    def enumerate_legal_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        session = self._require_session()
+        if session.phase.value == "play":
+            return self._enumerate_use(state, context)
+        return ()
+
+    def apply_action(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        session = self._require_session()
+        if session.phase.value == "play":
+            return session.apply_delayed_trick_use(state, context, action, self)
+        raise InvalidActionError(
+            f"{self.card_name}生产适配器不能处理当前阶段的动作"
+        )
+
+
+class LebusiAdapter(DelayedTrickAdapter):
+    """【乐不思蜀】的生产适配器（CP-04L）。"""
+
+    def __init__(self, session: "ProductionBasicCardBatch | None" = None) -> None:
+        super().__init__(session)
+        self.card_key = "sgs_delayed_lebusi"
+        self.card_name = "乐不思蜀"
+        self.use_operation = "use_lebusi"
+
+    def rule_spec(self) -> dict[str, object]:
+        return {
+            "card_key": self.card_key,
+            "card_name": self.card_name,
+            "use_timing": "own_play_phase",
+            "use_limit": "unlimited_base;requires_entity_card",
+            "target_count": 1,
+            "target_filter": (
+                "one_other_character_without_lebusi_in_judgment_zone;no_distance"
+            ),
+            "placement": "hand->judgment_zone_direct",
+            "judgment": "heart_does_not_skip_play;non_heart_skips_play",
+            "nullification_timing": "judgment_phase_before_judging",
+            "movement_lifecycle": (
+                "judgment_zone->processing->discard_after_resolution;"
+                "nullified:judgment_zone->processing->discard"
+            ),
+            "adapter_version": self.adapter_version,
+            "implemented": self.implemented,
+            "tested": self.tested,
+            "production_adapter": self.production_adapter,
+        }
+
+    def _legal_targets(self, state: GameState, user_id: str) -> tuple[str, ...]:
+        targets: list[str] = []
+        for player_id in state.players_by_id:
+            if player_id == user_id:
+                continue
+            if not state.players_by_id[player_id].alive:
+                continue
+            # 同名限制：目标判定区不得已有【乐不思蜀】；不同名延时锦囊可共存
+            if any(
+                state.cards_by_id[instance_id].card_key == self.card_key
+                for instance_id in state.card_ids_in(ZoneRef.judgment(player_id))
+            ):
+                continue
+            targets.append(player_id)
+        return tuple(targets)
+
+
+class BingliangAdapter(DelayedTrickAdapter):
+    """【兵粮寸断】的生产适配器（CP-04L）。"""
+
+    def __init__(self, session: "ProductionBasicCardBatch | None" = None) -> None:
+        super().__init__(session)
+        self.card_key = "sgs_delayed_bingliang"
+        self.card_name = "兵粮寸断"
+        self.use_operation = "use_bingliang"
+
+    def rule_spec(self) -> dict[str, object]:
+        return {
+            "card_key": self.card_key,
+            "card_name": self.card_name,
+            "use_timing": "own_play_phase",
+            "use_limit": "unlimited_base;requires_entity_card",
+            "target_count": 1,
+            "target_filter": (
+                "one_other_character_at_actual_distance_1_without_bingliang"
+            ),
+            "distance_rule": "actual_distance(user,target)==1;weapon_range_irrelevant",
+            "placement": "hand->judgment_zone_direct",
+            "judgment": "club_does_not_skip_draw;non_club_skips_draw",
+            "nullification_timing": "judgment_phase_before_judging",
+            "movement_lifecycle": (
+                "judgment_zone->processing->discard_after_resolution;"
+                "nullified:judgment_zone->processing->discard"
+            ),
+            "adapter_version": self.adapter_version,
+            "implemented": self.implemented,
+            "tested": self.tested,
+            "production_adapter": self.production_adapter,
+        }
+
+    def _legal_targets(self, state: GameState, user_id: str) -> tuple[str, ...]:
+        targets: list[str] = []
+        for player_id in state.players_by_id:
+            if player_id == user_id:
+                continue
+            if not state.players_by_id[player_id].alive:
+                continue
+            # 同名限制：目标判定区不得已有【兵粮寸断】；不同名延时锦囊可共存
+            if any(
+                state.cards_by_id[instance_id].card_key == self.card_key
+                for instance_id in state.card_ids_in(ZoneRef.judgment(player_id))
+            ):
+                continue
+            # 坐骑修正未实现：坐骑栏被夹具占用时失败关闭（apply 层再验证）
+            mounts = state.card_ids_in(
+                ZoneRef.equipment(player_id, "attack_horse")
+            ) + state.card_ids_in(ZoneRef.equipment(player_id, "defense_horse"))
+            if mounts:
+                raise UnsupportedRuleError(
+                    "兵粮寸断的实际距离=1依赖坐骑修正；坐骑语义未实现，坐骑栏被占用时失败关闭"
+                )
+            if actual_distance(state, user_id, player_id) != 1:
+                continue
+            targets.append(player_id)
+        return tuple(targets)
+
+
+class ShandianAdapter(DelayedTrickAdapter):
+    """【闪电】的生产适配器（CP-04L）。"""
+
+    def __init__(self, session: "ProductionBasicCardBatch | None" = None) -> None:
+        super().__init__(session)
+        self.card_key = "sgs_delayed_shandian"
+        self.card_name = "闪电"
+        self.use_operation = "use_shandian"
+
+    def rule_spec(self) -> dict[str, object]:
+        return {
+            "card_key": self.card_key,
+            "card_name": self.card_name,
+            "use_timing": "own_play_phase",
+            "use_limit": "unlimited_base;requires_entity_card",
+            "target_count": 1,
+            "target_filter": "self_without_shandian_in_judgment_zone",
+            "placement": "hand->own_judgment_zone_direct",
+            "judgment": "spade_2_to_9_hits_3_thunder_no_source;otherwise_transfer_next",
+            "nullification_timing": "judgment_phase_before_judging",
+            "movement_lifecycle": (
+                "hit:judgment_zone->processing->discard_after_damage;"
+                "miss_or_nullified:judgment_zone->transfer_next_player_judgment_zone"
+            ),
+            "adapter_version": self.adapter_version,
+            "implemented": self.implemented,
+            "tested": self.tested,
+            "production_adapter": self.production_adapter,
+        }
+
+    def _legal_targets(self, state: GameState, user_id: str) -> tuple[str, ...]:
+        # 同名限制：自己判定区不得已有【闪电】；不同名延时锦囊可共存
+        if any(
+            state.cards_by_id[instance_id].card_key == self.card_key
+            for instance_id in state.card_ids_in(ZoneRef.judgment(user_id))
+        ):
+            return ()
+        return (user_id,)
+
+
 class WeaponCardAdapter(BasicCardAdapter):
     """11种武器牌本体的通用生产适配器（CP-04K）。
 
@@ -2220,6 +2443,9 @@ def _default_adapters() -> dict[str, RuleAdapter]:
             "sgs_weapon_zhuqueyushan"
         ),
         "sgs_weapon_qilingong": WeaponCardAdapter("sgs_weapon_qilingong"),
+        "sgs_delayed_lebusi": LebusiAdapter(),
+        "sgs_delayed_bingliang": BingliangAdapter(),
+        "sgs_delayed_shandian": ShandianAdapter(),
     }
 
 
@@ -2359,11 +2585,16 @@ __all__ = [
     "SLASH_CARD_KEYS",
     "GuoheChaiqiaoAdapter",
     "GroupTargetTrickAdapter",
+    "BingliangAdapter",
+    "DelayedTrickAdapter",
     "HuogongAdapter",
     "JiedaoSharenAdapter",
+    "LebusiAdapter",
     "JuedouAdapter",
     "NanmanRuqinAdapter",
+    "PRODUCTION_DELAYED_TRICK_KEYS",
     "PRODUCTION_WEAPON_KEYS",
+    "ShandianAdapter",
     "ShunshouQianyangAdapter",
     "TaoyuanJieyiAdapter",
     "TiesuoLianhuanAdapter",

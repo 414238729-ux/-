@@ -85,6 +85,19 @@ def _step(game: ProductionBasicCardBatch, action: object) -> object:
     return game.step(BatchActionIdController(action.action_id))
 
 
+def _fresh(*args: object, **kwargs: object) -> ProductionBasicCardBatch:
+    """创建生产批处理会话并推进到出牌阶段（CP-04L 正式阶段流）。"""
+    game = ProductionBasicCardBatch(*args, **kwargs)  # type: ignore[arg-type]
+    for operation in ("proceed_prepare", "proceed_judgment", "proceed_draw"):
+        action = next(
+            a
+            for a in game.legal_actions()
+            if a.payload.get("operation") == operation
+        )
+        game.step(BatchActionIdController(action.action_id))
+    assert game.phase.value == "play"
+    return game
+
 def _use_wuzhong(game: ProductionBasicCardBatch) -> str:
     action = _action(game, "use_wuzhong", card_key=WUZHONG)
     assert action is not None, "出牌阶段必须能枚举【无中生有】动作"
@@ -105,7 +118,7 @@ def _close_window_with_passes(game: ProductionBasicCardBatch) -> None:
 
 
 def test_wuzhong_entities_bind_to_production_adapter() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
     assert isinstance(registry, FormalCardRegistry)
     assert WUZHONG in PRODUCTION_TRICK_KEYS
@@ -135,7 +148,7 @@ def test_wuzhong_entities_bind_to_production_adapter() -> None:
 
 
 def test_wuxie_entities_bind_to_production_adapter() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
     assert WUXIE in PRODUCTION_TRICK_KEYS
     assert WUXIE in registry.implemented_card_keys
@@ -168,7 +181,7 @@ def test_wuxie_entities_bind_to_production_adapter() -> None:
 
 
 def test_wuzhong_use_establishes_nullification_window() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     assert game.current_player_id == "p1"
     action = _action(game, "use_wuzhong", card_key=WUZHONG)
     assert action is not None
@@ -201,7 +214,7 @@ def test_wuzhong_use_establishes_nullification_window() -> None:
 
 
 def test_all_passes_close_window_and_wuzhong_draws_two() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     trick_id = _use_wuzhong(game)
     hand_after_use = len(game.state.card_ids_in(ZoneRef.hand("p1")))
     _close_window_with_passes(game)
@@ -246,7 +259,7 @@ def test_all_passes_close_window_and_wuzhong_draws_two() -> None:
 
 
 def test_wuxie_nullifies_wuzhong_and_blocks_draw() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     trick_id = _use_wuzhong(game)
     hand_after_use = len(game.state.card_ids_in(ZoneRef.hand("p1")))
     _step(game, _action(game, "pass_trick_response"))
@@ -271,7 +284,7 @@ def test_wuxie_nullifies_wuzhong_and_blocks_draw() -> None:
 
 
 def test_nullified_wuzhong_still_records_card_used() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     trick_id = _use_wuzhong(game)
     _step(game, _action(game, "pass_trick_response"))
     _step(game, _action(game, "use_wuxie"))
@@ -290,7 +303,7 @@ def test_nullified_wuzhong_still_records_card_used() -> None:
 
 
 def test_wuxie_card_completes_zone_lifecycle() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _use_wuzhong(game)
     _step(game, _action(game, "pass_trick_response"))
     wuxie = _action(game, "use_wuxie")
@@ -322,13 +335,16 @@ def test_wuxie_card_completes_zone_lifecycle() -> None:
 
 
 def test_three_consecutive_wuxie_chain_targets_and_nullification() -> None:
-    game = ProductionBasicCardBatch(seed=292)
+    game = _fresh(seed=292)
     controller = ScriptedBatchController(
         [
             {"operation": "use_slash"},
             {"operation": "pass_slash_response"},
             {"operation": "end_play_phase"},
             {"operation": "end_turn"},
+            {"operation": "proceed_prepare"},
+            {"operation": "proceed_judgment"},
+            {"operation": "proceed_draw"},
             {"operation": "use_wuzhong"},
             {"operation": "pass_trick_response"},
             {"operation": "use_wuxie"},
@@ -338,7 +354,7 @@ def test_three_consecutive_wuxie_chain_targets_and_nullification() -> None:
             {"operation": "use_wuxie"},
         ]
     )
-    for _ in range(11):
+    for _ in range(14):
         game.step(controller)
     trick_id = next(
         event.card_instance_id
@@ -374,7 +390,7 @@ def test_three_consecutive_wuxie_chain_targets_and_nullification() -> None:
 
 
 def test_two_consecutive_wuxie_keep_effect_with_correct_chain() -> None:
-    game = ProductionBasicCardBatch(seed=396)
+    game = _fresh(seed=396)
     trick_id = _use_wuzhong(game)
     _step(game, _action(game, "pass_trick_response"))
     first = _action(game, "use_wuxie")
@@ -416,7 +432,7 @@ def test_two_consecutive_wuxie_keep_effect_with_correct_chain() -> None:
 
 
 def test_wuxie_can_respond_to_wuxie_chain() -> None:
-    game = ProductionBasicCardBatch(seed=396)
+    game = _fresh(seed=396)
     assert WUXIE in _hand_keys(game, "p1")
     assert WUXIE in _hand_keys(game, "p2")
     trick_id = _use_wuzhong(game)
@@ -453,7 +469,7 @@ def test_wuxie_can_respond_to_wuxie_chain() -> None:
 
 def test_consecutive_response_final_effect_state_correct() -> None:
     # 奇数次【无懈可击】：最终不生效，不摸牌
-    odd = ProductionBasicCardBatch(seed=3)
+    odd = _fresh(seed=3)
     trick_id = _use_wuzhong(odd)
     _step(odd, _action(odd, "pass_trick_response"))
     _step(odd, _action(odd, "use_wuxie"))
@@ -470,7 +486,7 @@ def test_consecutive_response_final_effect_state_correct() -> None:
     ]
 
     # 偶数次【无懈可击】：最终生效并摸2张
-    even = ProductionBasicCardBatch(seed=396)
+    even = _fresh(seed=396)
     trick_id = _use_wuzhong(even)
     _step(even, _action(even, "pass_trick_response"))
     _step(even, _action(even, "use_wuxie"))
@@ -506,7 +522,7 @@ def test_consecutive_response_final_effect_state_correct() -> None:
 
 
 def test_illegal_responder_card_and_stale_actions_rejected() -> None:
-    game = ProductionBasicCardBatch(seed=396)
+    game = _fresh(seed=396)
     use = _action(game, "use_wuzhong", card_key=WUZHONG)
     assert use is not None
     _step(game, use)
@@ -566,7 +582,7 @@ def test_illegal_responder_card_and_stale_actions_rejected() -> None:
 
 
 def test_forged_wuxie_response_targets_fail_closed() -> None:
-    game = ProductionBasicCardBatch(seed=396)
+    game = _fresh(seed=396)
     trick_id = _use_wuzhong(game)
     _step(game, _action(game, "pass_trick_response"))
     assert game.current_actor_id == "p2"
@@ -616,7 +632,7 @@ def test_forged_wuxie_response_targets_fail_closed() -> None:
 
 
 def test_responder_without_wuxie_has_no_wuxie_action() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     assert WUXIE not in _hand_keys(game, "p1")
     _use_wuzhong(game)
     actions = game.legal_actions()
@@ -630,7 +646,7 @@ def test_responder_without_wuxie_has_no_wuxie_action() -> None:
 
 
 def test_both_players_without_wuxie_only_pass_in_trick_window() -> None:
-    game = ProductionBasicCardBatch(seed=18)
+    game = _fresh(seed=18)
     assert WUXIE not in _hand_keys(game, "p1")
     assert WUXIE not in _hand_keys(game, "p2")
     _use_wuzhong(game)
@@ -670,7 +686,7 @@ def trick_sequence(game: ProductionBasicCardBatch) -> int:
 
 
 def test_pass_is_real_legal_action_in_trick_window() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _use_wuzhong(game)
     passes = [
         action
@@ -688,7 +704,7 @@ def test_pass_is_real_legal_action_in_trick_window() -> None:
 
 
 def test_response_order_starts_from_current_turn_player() -> None:
-    game = ProductionBasicCardBatch(seed=11)
+    game = _fresh(seed=11)
     assert game.first_player_id == "p2"
     assert game.current_player_id == "p2"
     action = _action(game, "use_wuzhong", card_key=WUZHONG)
@@ -703,7 +719,7 @@ def test_response_order_starts_from_current_turn_player() -> None:
 
 
 def test_hidden_hands_not_exposed_to_unauthorized_decision_input() -> None:
-    game = ProductionBasicCardBatch(seed=396)
+    game = _fresh(seed=396)
     _use_wuzhong(game)
     _step(game, _action(game, "pass_trick_response"))
     assert game.current_actor_id == "p2"
@@ -734,7 +750,7 @@ def test_hidden_hands_not_exposed_to_unauthorized_decision_input() -> None:
 
 
 def test_card_conservation_holds_through_trick_paths() -> None:
-    game = ProductionBasicCardBatch(seed=396)
+    game = _fresh(seed=396)
     trick_id = _use_wuzhong(game)
     _step(game, _action(game, "pass_trick_response"))
     wuxie = _action(game, "use_wuxie")
@@ -760,9 +776,9 @@ def test_card_conservation_holds_through_trick_paths() -> None:
 
 
 def test_wuzhong_draw_reshuffles_when_draw_pile_exhausted() -> None:
-    game = ProductionBasicCardBatch(seed=102)
+    game = _fresh(seed=102)
     reached = False
-    while not game.is_finished and game.step_count < 400:
+    while not game.is_finished and game.step_count < 1200:
         context = game._context()
         legal = game.legal_actions()
         if context.phase == ProductionPhase.PLAY.value:
@@ -832,9 +848,9 @@ def test_wuzhong_draw_reshuffles_when_draw_pile_exhausted() -> None:
 
 
 def test_other_normal_tricks_stay_fail_closed() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
-    for key in ("sgs_delayed_lebusi",):
+    for key in ("sgs_armor_baguazhen",):
         assert key in registry.unimplemented_card_keys
         with pytest.raises(UnsupportedRuleError):
             registry.adapter_for(key)
@@ -844,7 +860,7 @@ def test_other_normal_tricks_stay_fail_closed() -> None:
     assert "sgs_trick_shunshouqianyang" not in registry.unimplemented_card_keys
     assert "sgs_trick_nanmanruqin" not in registry.unimplemented_card_keys
     with pytest.raises(UnsupportedRuleError):
-        registry.rule_spec_for("sgs_delayed_lebusi")
+        registry.rule_spec_for("sgs_armor_baguazhen")
     with pytest.raises(UnsupportedRuleError):
         registry.assert_no_unimplemented_fallback()
     implemented = set(PRODUCTION_BASIC_CARD_KEYS) | set(PRODUCTION_TRICK_KEYS)
@@ -1006,7 +1022,7 @@ def test_tampered_trick_replay_fails_closed() -> None:
 
 
 def test_finished_game_stops_trick_response_and_draw() -> None:
-    game = ProductionBasicCardBatch(seed=5)
+    game = _fresh(seed=5)
     result = game.run()
     assert game.is_finished
     assert game.winner_id == result.winner_id

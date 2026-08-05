@@ -90,6 +90,19 @@ def _step(game: ProductionBasicCardBatch, action: object) -> None:
     game.step(BatchActionIdController(action.action_id))
 
 
+def _fresh(*args: object, **kwargs: object) -> ProductionBasicCardBatch:
+    """创建生产批处理会话并推进到出牌阶段（CP-04L 正式阶段流）。"""
+    game = ProductionBasicCardBatch(*args, **kwargs)  # type: ignore[arg-type]
+    for operation in ("proceed_prepare", "proceed_judgment", "proceed_draw"):
+        action = next(
+            a
+            for a in game.legal_actions()
+            if a.payload.get("operation") == operation
+        )
+        game.step(BatchActionIdController(action.action_id))
+    assert game.phase.value == "play"
+    return game
+
 def _pass_response(game: ProductionBasicCardBatch) -> None:
     _step(game, _action(game, "pass_trick_response"))
 
@@ -115,7 +128,7 @@ def _zone_choice_game(
     session_id: str | None = None,
     session_secret: bytes | None = None,
 ) -> ProductionBasicCardBatch:
-    game = ProductionBasicCardBatch(
+    game = _fresh(
         seed=seed, session_id=session_id, session_secret=session_secret
     )
     _use_trick(game, operation, card_key)
@@ -643,21 +656,21 @@ def test_wrong_key_handle_does_not_resolve() -> None:
 
 
 def test_session_secret_is_random_256_bit_and_validated() -> None:
-    game_a = ProductionBasicCardBatch(seed=3)
-    game_b = ProductionBasicCardBatch(seed=3)
+    game_a = _fresh(seed=3)
+    game_b = _fresh(seed=3)
     assert len(game_a._session_secret) == 32
     assert len(game_b._session_secret) == 32
     assert game_a._session_secret != game_b._session_secret
     assert len(game_a.session_secret_hex) == 64
     with pytest.raises(ValueError):
-        ProductionBasicCardBatch(seed=3, session_secret=b"short-key")
+        _fresh(seed=3, session_secret=b"short-key")
     with pytest.raises(TypeError):
-        ProductionBasicCardBatch(seed=3, session_secret="not-bytes")  # type: ignore[arg-type]
+        _fresh(seed=3, session_secret="not-bytes")  # type: ignore[arg-type]
 
 
 def test_session_id_is_random_and_bound() -> None:
-    game_a = ProductionBasicCardBatch(seed=3)
-    game_b = ProductionBasicCardBatch(seed=3)
+    game_a = _fresh(seed=3)
+    game_b = _fresh(seed=3)
     assert game_a.session_id != game_b.session_id
     secret = game_a._session_secret
     handle_a = _hand_choice_handle(
@@ -668,7 +681,7 @@ def test_session_id_is_random_and_bound() -> None:
     )
     assert handle_a != handle_b
     with pytest.raises(ValueError):
-        ProductionBasicCardBatch(seed=3, session_id="")
+        _fresh(seed=3, session_id="")
 
 
 def test_same_session_material_reproduces_same_handles() -> None:

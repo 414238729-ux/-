@@ -42,6 +42,7 @@ from scripts.sgs_engine.production_batch import (
 )
 from scripts.sgs_engine.production_cards import (
     PRODUCTION_BASIC_CARD_KEYS,
+    PRODUCTION_DELAYED_TRICK_KEYS,
     PRODUCTION_TRICK_KEYS,
     PRODUCTION_WEAPON_KEYS,
     SLASH_CARD_KEYS,
@@ -129,6 +130,19 @@ def _step(game: ProductionBasicCardBatch, action: object) -> None:
     assert action is not None and getattr(action, "action_id", None), action
     game.step(BatchActionIdController(action.action_id))  # type: ignore[attr-defined]
 
+
+def _fresh(*args: object, **kwargs: object) -> ProductionBasicCardBatch:
+    """创建生产批处理会话并推进到出牌阶段（CP-04L 正式阶段流）。"""
+    game = ProductionBasicCardBatch(*args, **kwargs)  # type: ignore[arg-type]
+    for operation in ("proceed_prepare", "proceed_judgment", "proceed_draw"):
+        action = next(
+            a
+            for a in game.legal_actions()
+            if a.payload.get("operation") == operation
+        )
+        game.step(BatchActionIdController(action.action_id))
+    assert game.phase.value == "play"
+    return game
 
 def _events_of(game: ProductionBasicCardBatch, event_type: EventType) -> list:
     return [event for event in game.events if event.event_type is event_type]
@@ -226,7 +240,7 @@ def _hand_keys(game: ProductionBasicCardBatch, player_id: str) -> tuple[str, ...
 
 
 def test_weapon_entities_all_registered_and_attack_ranges_from_csv() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
     assert len(PRODUCTION_WEAPON_KEYS) == 11
     records = [
@@ -260,33 +274,35 @@ def test_weapon_entities_all_registered_and_attack_ranges_from_csv() -> None:
 
 
 def test_implemented_and_remaining_card_counts_updated() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
     assert JIEDAO in registry.implemented_card_keys
-    assert len(registry.implemented_card_keys) == 29
-    assert len(registry.unimplemented_card_keys) == 9
+    assert len(registry.implemented_card_keys) == 32
+    assert len(registry.unimplemented_card_keys) == 6
     # 完整实现口径：18种／128张（武器实体不计入完整实现）
-    complete_keys = set(PRODUCTION_BASIC_CARD_KEYS) | set(PRODUCTION_TRICK_KEYS)
-    assert len(complete_keys) == 18
-    assert sum(len(registry.instances_of(key)) for key in complete_keys) == 128
+    complete_keys = (
+        set(PRODUCTION_BASIC_CARD_KEYS)
+        | set(PRODUCTION_TRICK_KEYS)
+        | set(PRODUCTION_DELAYED_TRICK_KEYS)
+    )
+    assert len(complete_keys) == 21
+    assert sum(len(registry.instances_of(key)) for key in complete_keys) == 135
     # 注册表口径：29种适配器／140张实体
-    assert sum(len(registry.instances_of(key)) for key in registry.implemented_card_keys) == 140
+    assert sum(len(registry.instances_of(key)) for key in registry.implemented_card_keys) == 147
     assert set(registry.unimplemented_card_keys) == {
         "sgs_armor_baguazhen",
         "sgs_armor_baiyinshizi",
         "sgs_armor_renwangdun",
         "sgs_armor_tengjia",
-        "sgs_delayed_bingliang",
-        "sgs_delayed_lebusi",
-        "sgs_delayed_shandian",
         "sgs_mount_defensive",
         "sgs_mount_offensive",
     }
     assert not any(key.startswith("sgs_trick_") for key in registry.unimplemented_card_keys)
+    assert not any(key.startswith("sgs_delayed_") for key in registry.unimplemented_card_keys)
 
 
 def test_formal_deck_remains_160_with_unique_ids() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     zone_total = sum(
         len(game.state.card_ids_in(zone)) for zone in game.state.zone_order
     )
@@ -302,9 +318,9 @@ def test_formal_deck_remains_160_with_unique_ids() -> None:
 
 
 def test_other_unimplemented_cards_stay_fail_closed() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
-    for key in ("sgs_delayed_lebusi", "sgs_armor_tengjia", "sgs_mount_defensive"):
+    for key in ("sgs_armor_baguazhen", "sgs_armor_tengjia", "sgs_mount_defensive"):
         assert key in registry.unimplemented_card_keys
         with pytest.raises(UnsupportedRuleError):
             registry.adapter_for(key)
@@ -323,7 +339,7 @@ def test_other_unimplemented_cards_stay_fail_closed() -> None:
 def test_all_12_weapon_entities_equipped_from_hand_via_formal_path() -> None:
     # N2：不按11个card_key各取第一张，而是从正式注册表枚举全部12张武器实体，
     # 每张实体分别走 enumerate -> validate -> apply 真实装备路径。
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
     weapon_records = [
         record
@@ -339,7 +355,7 @@ def test_all_12_weapon_entities_equipped_from_hand_via_formal_path() -> None:
     ]
     assert len(zhuge_records) == 2  # 两张诸葛连弩必须分别实际装备
     for record in weapon_records:
-        equipped_game = ProductionBasicCardBatch(seed=3)
+        equipped_game = _fresh(seed=3)
         _swap(equipped_game, record.instance_id, ZoneRef.hand("p1"))
         action = _action(
             equipped_game, "use_weapon", card_key=record.card_key
@@ -370,7 +386,7 @@ def test_all_12_weapon_entities_equipped_from_hand_via_formal_path() -> None:
 
 
 def test_weapon_equip_uses_card_used_and_public_events() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
     record = next(r for r in registry.records if r.card_key == WEAPON_QINGGANG)
     _swap(game, record.instance_id, ZoneRef.hand("p1"))
@@ -397,7 +413,7 @@ def test_weapon_equip_uses_card_used_and_public_events() -> None:
 
 
 def test_no_weapon_default_attack_range_is_one() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     assert attack_range_of(game.state, "p1") == 1
     assert attack_range_of(game.state, "p2") == 1
 
@@ -405,7 +421,7 @@ def test_no_weapon_default_attack_range_is_one() -> None:
 def test_each_weapon_uses_formal_csv_attack_range() -> None:
     ranges = dict(weapon_attack_ranges())
     for weapon_key, expected in ranges.items():
-        game = ProductionBasicCardBatch(seed=3)
+        game = _fresh(seed=3)
         record = next(
             r for r in game.formal_registry.records if r.card_key == weapon_key
         )
@@ -418,7 +434,7 @@ def test_each_weapon_uses_formal_csv_attack_range() -> None:
 
 def test_weapon_dynamically_changes_slash_distance() -> None:
     # 双人环实际距离恒为1；武器改变攻击范围进而改变杀目标合法性判定入口。
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
     record = next(r for r in registry.records if r.card_key == WEAPON_QINGGANG)
     _swap(game, record.instance_id, ZoneRef.hand("p1"))
@@ -432,7 +448,7 @@ def test_weapon_dynamically_changes_slash_distance() -> None:
 
 
 def test_same_slot_replacement_moves_old_weapon_to_discard() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
     old = next(r for r in registry.records if r.card_key == WEAPON_QINGGANG)
     new = next(r for r in registry.records if r.card_key == "sgs_weapon_zhugeliannu")
@@ -464,7 +480,7 @@ def test_same_slot_replacement_moves_old_weapon_to_discard() -> None:
 def test_same_slot_replacement_is_atomic() -> None:
     # 替换后武器槽恰好一张新武器、旧武器在弃牌堆、全牌守恒；中间不存在
     # 同槽两张武器的非法GameState。
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
     old = next(r for r in registry.records if r.card_key == WEAPON_QINGGANG)
     new = next(r for r in registry.records if r.card_key == "sgs_weapon_zhugeliannu")
@@ -477,7 +493,7 @@ def test_same_slot_replacement_is_atomic() -> None:
 
 
 def test_equipment_zone_is_public_and_entity_identity_preserved() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
     record = next(r for r in registry.records if r.card_key == WEAPON_QINGGANG)
     _swap(game, record.instance_id, ZoneRef.hand("p1"))
@@ -491,7 +507,7 @@ def test_equipment_zone_is_public_and_entity_identity_preserved() -> None:
 def test_weapon_equip_strictly_reproducible() -> None:
     runs: list[list[dict]] = []
     for _ in range(2):
-        game = ProductionBasicCardBatch(seed=3)
+        game = _fresh(seed=3)
         registry = game.formal_registry
         record = next(r for r in registry.records if r.card_key == WEAPON_QINGGANG)
         _swap(game, record.instance_id, ZoneRef.hand("p1"))
@@ -503,7 +519,7 @@ def test_weapon_equip_strictly_reproducible() -> None:
 def test_tampered_weapon_entity_fails_closed() -> None:
     from scripts.sgs_engine.actions import validate_action
 
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
     record = next(r for r in registry.records if r.card_key == WEAPON_QINGGANG)
     _swap(game, record.instance_id, ZoneRef.hand("p1"))
@@ -532,7 +548,7 @@ def test_tampered_attack_range_fails_closed() -> None:
     # 状态层本身必须失败关闭，不允许出现被范围计算消费的非法状态。
     from scripts.sgs_engine.model import ModelValidationError
 
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
     w1 = next(r for r in registry.records if r.card_key == WEAPON_QINGGANG)
     w2 = next(r for r in registry.records if r.card_key == "sgs_weapon_zhugeliannu")
@@ -548,7 +564,7 @@ def test_tampered_attack_range_fails_closed() -> None:
 def test_tampered_replacement_order_fails_closed() -> None:
     # 装备事件顺序（removed->replaced->equipped）进入事件哈希链；改变顺序
     # 会导致严格重执行或事件流校验失败关闭。
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
     old = next(r for r in registry.records if r.card_key == WEAPON_QINGGANG)
     new = next(r for r in registry.records if r.card_key == "sgs_weapon_zhugeliannu")
@@ -625,7 +641,7 @@ def test_equipment_three_event_contract_legal_and_illegal() -> None:
 
 
 def test_first_target_must_have_weapon() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
     jiedao = next(r for r in registry.records if r.card_key == JIEDAO)
     _swap(game, jiedao.instance_id, ZoneRef.hand("p1"))
@@ -634,7 +650,7 @@ def test_first_target_must_have_weapon() -> None:
 
 
 def test_first_target_cannot_be_user() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     registry = game.formal_registry
     jiedao = next(r for r in registry.records if r.card_key == JIEDAO)
     weapon = next(r for r in registry.records if r.card_key == WEAPON_QINGGANG)
@@ -662,7 +678,7 @@ def test_first_target_cannot_be_user() -> None:
 
 
 def test_second_target_must_differ_from_first() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     jiedao_id, _, _ = _jiedao_fixture(game)
     forged = LegalAction(
         action_type=ActionType.USE_CARD,
@@ -684,7 +700,7 @@ def test_second_target_must_differ_from_first() -> None:
 
 def test_second_target_can_be_user_and_first_check_requires_range() -> None:
     # 双人切片：第二目标只能是使用者p1；枚举即证明“第二目标可以是使用者”。
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _jiedao_fixture(game)
     action = _action(game, "use_jiedao", card_key=JIEDAO)
     assert action is not None
@@ -695,7 +711,7 @@ def test_second_target_can_be_user_and_first_check_requires_range() -> None:
 
 
 def test_second_target_is_not_trick_target() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     jiedao_id, _, _ = _jiedao_fixture(game)
     action = _action(game, "use_jiedao", card_key=JIEDAO)
     assert action is not None
@@ -709,7 +725,7 @@ def test_second_target_is_not_trick_target() -> None:
 
 
 def test_second_target_has_no_independent_wuxie_window() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _jiedao_fixture(game)
     _step(game, _action(game, "use_jiedao", card_key=JIEDAO))
     assert game.phase is ProductionPhase.TRICK_RESPONSE
@@ -739,7 +755,7 @@ def test_second_target_has_no_independent_wuxie_window() -> None:
 
 def test_second_target_can_still_wuxie_first_target_effect() -> None:
     # 第二目标本人（p1）仍可对作用于第一目标p2的借刀效果使用无懈。
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _jiedao_fixture(game, give_p1_wuxie=True)
     _step(game, _action(game, "use_jiedao", card_key=JIEDAO))
     wuxie_action = _action(game, "use_wuxie")
@@ -754,7 +770,7 @@ def test_second_target_can_still_wuxie_first_target_effect() -> None:
 
 
 def test_nullified_jiedao_opens_no_slash_window_and_moves_no_weapon() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     jiedao_id, weapon_id, _ = _jiedao_fixture(game, give_p2_wuxie=True)
     _step(game, _action(game, "use_jiedao", card_key=JIEDAO))
     _step(game, _action(game, "pass_trick_response"))  # p1 pass
@@ -773,7 +789,7 @@ def test_nullified_jiedao_opens_no_slash_window_and_moves_no_weapon() -> None:
 
 
 def test_nullified_jiedao_root_discarded_once() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     jiedao_id, _, _ = _jiedao_fixture(game, give_p2_wuxie=True)
     _step(game, _action(game, "use_jiedao", card_key=JIEDAO))
     _step(game, _action(game, "pass_trick_response"))
@@ -795,7 +811,7 @@ def test_nullified_jiedao_root_discarded_once() -> None:
 
 
 def test_borrowed_slash_entity_plain_sha() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     jiedao_id, _, slash_ids = _jiedao_fixture(game, slash_keys=(SHA,))
     _use_jiedao(game)
     assert game.phase is ProductionPhase.BORROWED_SWORD_CHOICE
@@ -812,7 +828,7 @@ def test_borrowed_slash_entity_plain_sha() -> None:
 
 
 def test_borrowed_slash_entity_huosha() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _, _, slash_ids = _jiedao_fixture(game, slash_keys=(HUOSHA,))
     _use_jiedao(game)
     _choose_borrowed_slash(game, slash_ids[0])
@@ -823,7 +839,7 @@ def test_borrowed_slash_entity_huosha() -> None:
 
 
 def test_borrowed_slash_entity_leisha() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _, _, slash_ids = _jiedao_fixture(game, slash_keys=(LEISHA,))
     _use_jiedao(game)
     _choose_borrowed_slash(game, slash_ids[0])
@@ -834,7 +850,7 @@ def test_borrowed_slash_entity_leisha() -> None:
 
 
 def test_borrowed_slash_allowed_even_at_normal_use_limit() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _, _, slash_ids = _jiedao_fixture(game, slash_keys=(SHA,))
     # 构造“第一目标本出牌阶段已经使用过杀”的状态：计数按角色保存，不临时清零。
     game._runtime = replace(
@@ -849,7 +865,7 @@ def test_borrowed_slash_allowed_even_at_normal_use_limit() -> None:
 
 
 def test_borrowed_slash_increments_first_target_count_only() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _, _, slash_ids = _jiedao_fixture(game, slash_keys=(SHA,))
     assert game.runtime.slash_used_counts.get("p2", 0) == 0
     assert game.runtime.slash_used_counts.get("p1", 0) == 0
@@ -860,7 +876,7 @@ def test_borrowed_slash_increments_first_target_count_only() -> None:
 
 
 def test_borrowed_slash_does_not_ignore_attack_range() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _jiedao_fixture(game)
     _use_jiedao(game)
     assert game.phase is ProductionPhase.BORROWED_SWORD_CHOICE
@@ -880,7 +896,7 @@ def test_borrowed_slash_does_not_ignore_attack_range() -> None:
 def test_second_dynamic_recheck_rereads_current_weapon() -> None:
     # 无懈链期间第一目标武器消失：杀请求仍可进行（武器不是杀合法性的前提），
     # 且不使用使用借刀时保存的旧武器快照。
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     jiedao_id, weapon_id, slash_ids = _jiedao_fixture(game, slash_keys=(SHA,))
     _step(game, _action(game, "use_jiedao", card_key=JIEDAO))
     # 无懈链期间移除第一目标武器（夹具）
@@ -902,7 +918,7 @@ def test_second_dynamic_recheck_target_invalid_skips_window() -> None:
     # 结构级边界：双人正式入口下“无懈链期间第二目标死亡但游戏未结束”
     # 不可达（死亡角色无法继续参与弃权响应）。直接调用内部状态机验证
     # 第二次检测的目标失效分支，不宣称双人端到端PROVEN。
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     jiedao_id, weapon_id, _ = _jiedao_fixture(game, slash_keys=(SHA,))
     _step(game, _action(game, "use_jiedao", card_key=JIEDAO))
     assert game.phase is ProductionPhase.TRICK_RESPONSE
@@ -918,7 +934,7 @@ def test_second_dynamic_recheck_target_invalid_skips_window() -> None:
 
 
 def test_borrowed_slash_choice_uses_opaque_handle_only() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _, _, slash_ids = _jiedao_fixture(game, slash_keys=(SHA,))
     _use_jiedao(game)
     assert game.phase is ProductionPhase.BORROWED_SWORD_CHOICE
@@ -941,7 +957,7 @@ def test_borrowed_slash_choice_uses_opaque_handle_only() -> None:
 
 
 def test_bare_entity_id_submission_rejected() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _, _, slash_ids = _jiedao_fixture(game, slash_keys=(SHA,))
     _use_jiedao(game)
     choice = next(
@@ -957,7 +973,7 @@ def test_bare_entity_id_submission_rejected() -> None:
 
 
 def test_borrowed_slash_produces_normal_card_used_and_dodge_response() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     jiedao_id, weapon_id, slash_ids = _jiedao_fixture(game, slash_keys=(SHA,))
     _use_jiedao(game)
     _choose_borrowed_slash(game, slash_ids[0])
@@ -977,7 +993,7 @@ def test_borrowed_slash_produces_normal_card_used_and_dodge_response() -> None:
 
 
 def test_borrowed_slash_dodged_still_fulfilled_no_weapon() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     jiedao_id, weapon_id, slash_ids = _jiedao_fixture(game, slash_keys=(SHA,))
     _use_jiedao(game)
     _choose_borrowed_slash(game, slash_ids[0])
@@ -992,7 +1008,7 @@ def test_borrowed_slash_dodged_still_fulfilled_no_weapon() -> None:
 
 
 def test_borrowed_fire_slash_enters_chain_damage() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     jiedao_id, weapon_id, slash_ids = _jiedao_fixture(game, slash_keys=(HUOSHA,))
     # p1横置（属性传导目标）与p2横置（原受伤者）——双人环传导候选
     _set_chained(game, "p1", True)
@@ -1011,7 +1027,7 @@ def test_borrowed_fire_slash_enters_chain_damage() -> None:
 
 
 def test_borrowed_slash_dying_rescue_recovers_and_fulfills() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     jiedao_id, weapon_id, slash_ids = _jiedao_fixture(game, slash_keys=(SHA,))
     _set_hp(game, "p1", 1)
     _use_jiedao(game)
@@ -1031,7 +1047,7 @@ def test_borrowed_slash_dying_rescue_recovers_and_fulfills() -> None:
 
 
 def test_borrowed_slash_keeps_first_target_weapon_and_no_repeat() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     jiedao_id, weapon_id, slash_ids = _jiedao_fixture(game, slash_keys=(SHA,))
     _use_jiedao(game)
     _choose_borrowed_slash(game, slash_ids[0])
@@ -1052,7 +1068,7 @@ def test_borrowed_slash_keeps_first_target_weapon_and_no_repeat() -> None:
 
 
 def test_has_legal_slash_but_voluntarily_refuses() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     jiedao_id, weapon_id, slash_ids = _jiedao_fixture(game, slash_keys=(SHA,))
     _use_jiedao(game)
     assert game.phase is ProductionPhase.BORROWED_SWORD_CHOICE
@@ -1079,7 +1095,7 @@ def test_has_legal_slash_but_voluntarily_refuses() -> None:
 
 
 def test_no_entity_slash_skips_window_and_delivers_weapon() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     jiedao_id, weapon_id, _ = _jiedao_fixture(game, slash_keys=())
     _use_jiedao(game)
     # 无实体杀：不打开选择窗口，直接交付武器
@@ -1092,7 +1108,7 @@ def test_no_entity_slash_skips_window_and_delivers_weapon() -> None:
 def test_second_check_target_invalid_delivers_no_weapon_when_user_dead() -> None:
     # 结构级边界：双人正式入口下“使用者死亡但游戏未结束”不可达；此处用
     # 权威状态转换助手构造内部状态机边界，不宣称双人端到端PROVEN。
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     jiedao_id, weapon_id, _ = _jiedao_fixture(game, slash_keys=(SHA,))
     _step(game, _action(game, "use_jiedao", card_key=JIEDAO))
     dead_state = _replace_player(game.state, "p1", hp=0, alive=False)
@@ -1111,7 +1127,7 @@ def test_out_of_range_second_check_is_structural_unreachable() -> None:
     # 结构级说明：双人环无坐骑时实际距离恒为1，任何武器攻击范围>=1，
     # 因此“第二次检测超出攻击范围”在双人生产切片不可达；该分支由
     # is_valid_slash_target 动态重检守护，不得宣称双人端到端PROVEN。
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _jiedao_fixture(game)
     from scripts.sgs_engine.production_cards import actual_distance
 
@@ -1120,7 +1136,7 @@ def test_out_of_range_second_check_is_structural_unreachable() -> None:
 
 
 def test_refusal_delivers_weapon_to_user_hand_not_equipment() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     jiedao_id, weapon_id, _ = _jiedao_fixture(game, slash_keys=())
     # 使用者自己已装备另一把武器：交付不得进入装备区、不得触发替换
     own = next(
@@ -1144,7 +1160,7 @@ def test_refusal_delivers_weapon_to_user_hand_not_equipment() -> None:
 
 
 def test_weapon_delivery_events_order_and_fields() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     jiedao_id, weapon_id, _ = _jiedao_fixture(game, slash_keys=())
     _use_jiedao(game)
     moved = [
@@ -1177,7 +1193,7 @@ def test_weapon_delivery_events_order_and_fields() -> None:
 
 def test_weapon_disappeared_during_resolution_delivers_nothing() -> None:
     # 第一目标武器在无懈链期间消失：拒绝时无牌可交，不抛异常、不虚构武器。
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     jiedao_id, weapon_id, slash_ids = _jiedao_fixture(game, slash_keys=(SHA,))
     _step(game, _action(game, "use_jiedao", card_key=JIEDAO))
     game._state = game.state.move_card(weapon_id, ZoneRef.hand("p1"))
@@ -1197,14 +1213,14 @@ def test_weapon_disappeared_during_resolution_delivers_nothing() -> None:
 
 
 def test_no_weapon_no_exception_and_finish_once() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     jiedao_id, weapon_id, _ = _jiedao_fixture(game, slash_keys=())
     # 第一目标武器在结算开始前消失：使用借刀时第一次检测就不会通过；
     # 因此在无懈链后武器消失的路径中，交付必须无异常且只结束一次。
     game._state = game.state.move_card(weapon_id, ZoneRef.hand("p1"))
     assert _action(game, "use_jiedao", card_key=JIEDAO) is None
     # 武器消失后无牌可交路径：直接验证no_weapon_to_transfer只结束一次
-    game2 = ProductionBasicCardBatch(seed=3)
+    game2 = _fresh(seed=3)
     jiedao2, weapon2, _ = _jiedao_fixture(game2, slash_keys=())
     _use_jiedao(game2)
     finish_events = [
@@ -1220,7 +1236,7 @@ def test_no_weapon_no_exception_and_finish_once() -> None:
 
 
 def test_no_weapon_to_transfer_flag_when_nothing_to_deliver() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     jiedao_id, weapon_id, _ = _jiedao_fixture(game, slash_keys=(SHA,))
     _step(game, _action(game, "use_jiedao", card_key=JIEDAO))
     # 无懈链期间武器消失：仍重新检查实体杀并打开选择窗口
@@ -1245,7 +1261,7 @@ def test_no_weapon_to_transfer_flag_when_nothing_to_deliver() -> None:
 
 
 def test_pending_kept_while_slash_awaits_dodge() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _, _, slash_ids = _jiedao_fixture(game, slash_keys=(SHA,))
     _use_jiedao(game)
     _choose_borrowed_slash(game, slash_ids[0])
@@ -1259,7 +1275,7 @@ def test_pending_kept_while_slash_awaits_dodge() -> None:
 
 
 def test_pending_kept_during_dying_rescue() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _, _, slash_ids = _jiedao_fixture(game, slash_keys=(SHA,))
     _set_hp(game, "p1", 1)
     _use_jiedao(game)
@@ -1277,7 +1293,7 @@ def test_pending_kept_during_dying_rescue() -> None:
 
 
 def test_pending_kept_during_chain_damage() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     jiedao_id, weapon_id, slash_ids = _jiedao_fixture(game, slash_keys=(HUOSHA,))
     _set_chained(game, "p1", True)
     _set_chained(game, "p2", True)
@@ -1303,7 +1319,7 @@ def test_pending_kept_during_chain_damage() -> None:
 
 def test_game_over_cleans_pending_and_discards_root() -> None:
     # 借刀杀杀死使用者：胜利成立后挂起清理、根借刀进弃牌堆、处理区无遗留。
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     jiedao_id, weapon_id, slash_ids = _jiedao_fixture(game, slash_keys=(SHA,))
     _set_hp(game, "p1", 1)
     _use_jiedao(game)
@@ -1338,7 +1354,7 @@ def test_game_over_cleans_pending_and_discards_root() -> None:
 
 
 def test_victory_death_cleanup_event_order_deterministic() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     jiedao_id, _, slash_ids = _jiedao_fixture(game, slash_keys=(SHA,))
     _set_hp(game, "p1", 1)
     _use_jiedao(game)
@@ -1368,7 +1384,7 @@ def test_victory_death_cleanup_event_order_deterministic() -> None:
 def test_borrowed_sword_pending_never_replaced_by_other_pending() -> None:
     # 借刀使用杀后：pending_slash 是子结算，pending_borrowed_sword 是外层根，
     # 两者并存，不互相覆盖。
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _, _, slash_ids = _jiedao_fixture(game, slash_keys=(SHA,))
     _use_jiedao(game)
     _choose_borrowed_slash(game, slash_ids[0])
@@ -1395,14 +1411,14 @@ def _equip_weapon(
 
 
 def test_cixiong_holder_slash_fails_closed() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _equip_weapon(game, "sgs_weapon_cixiongshuanggujian")
     sha = next(r for r in game.formal_registry.records if r.card_key == SHA)
     _swap(game, sha.instance_id, ZoneRef.hand("p1"))
     with pytest.raises(UnsupportedRuleError):
         game.legal_actions()
     # 借刀强制杀同样失败关闭（第一目标持雌雄双股剑时无法证明目标非异性）
-    game2 = ProductionBasicCardBatch(seed=3)
+    game2 = _fresh(seed=3)
     _equip_weapon(game2, "sgs_weapon_cixiongshuanggujian", "p2")
     with pytest.raises(UnsupportedRuleError):
         check_weapon_skill_gate(
@@ -1415,13 +1431,13 @@ def test_cixiong_holder_slash_fails_closed() -> None:
 
 
 def test_zhangba_possible_expansion_fails_closed() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _equip_weapon(game, "sgs_weapon_zhangbashemao")
     # 手牌>=2张：合法杀集合可能因转化扩大，失败关闭
     with pytest.raises(UnsupportedRuleError):
         game.legal_actions()
     # 手牌<2张时可证明无转化材料：按实体杀流程继续
-    game2 = ProductionBasicCardBatch(seed=3)
+    game2 = _fresh(seed=3)
     _equip_weapon(game2, "sgs_weapon_zhangbashemao")
     hand = list(game2.state.card_ids_in(ZoneRef.hand("p1")))
     # 把p1手牌清到1张（移到牌堆）
@@ -1434,14 +1450,14 @@ def test_zhangba_possible_expansion_fails_closed() -> None:
 
 
 def test_zhuque_entity_plain_slash_fails_closed() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _equip_weapon(game, "sgs_weapon_zhuqueyushan")
     sha = next(r for r in game.formal_registry.records if r.card_key == SHA)
     _swap(game, sha.instance_id, ZoneRef.hand("p1"))
     with pytest.raises(UnsupportedRuleError):
         game.legal_actions()
     # 实体火杀不受朱雀羽扇影响：可继续
-    game2 = ProductionBasicCardBatch(seed=3)
+    game2 = _fresh(seed=3)
     _equip_weapon(game2, "sgs_weapon_zhuqueyushan")
     huosha = next(r for r in game2.formal_registry.records if r.card_key == HUOSHA)
     _swap(game2, huosha.instance_id, ZoneRef.hand("p1"))
@@ -1450,7 +1466,7 @@ def test_zhuque_entity_plain_slash_fails_closed() -> None:
 
 
 def test_zhuge_active_extra_slash_dependency_fails_closed() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _equip_weapon(game, "sgs_weapon_zhugeliannu")
     game._runtime = replace(
         game._runtime,
@@ -1461,7 +1477,7 @@ def test_zhuge_active_extra_slash_dependency_fails_closed() -> None:
 
 
 def test_zhuge_borrowed_forced_slash_not_dependent_on_skill() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _equip_weapon(game, "sgs_weapon_zhugeliannu")
     # 借刀强制杀绕过次数限制来自借刀规则本身，不依赖连弩无限杀技能
     check_weapon_skill_gate(
@@ -1475,20 +1491,20 @@ def test_zhuge_borrowed_forced_slash_not_dependent_on_skill() -> None:
 
 def test_other_weapons_impact_matrix_provable_no_impact_and_fail_states() -> None:
     # 方天画戟：双人环额外目标不存在，可证明目标集合不变 -> 无影响
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _equip_weapon(game, "sgs_weapon_fangtianhuaji")
     sha = next(r for r in game.formal_registry.records if r.card_key == SHA)
     _swap(game, sha.instance_id, ZoneRef.hand("p1"))
     ops = [a.payload.get("operation") for a in game.legal_actions()]
     assert "use_slash" in ops
     # 青釭剑：目标无防具 -> 无影响；目标装备防具 -> 失败关闭
-    game2 = ProductionBasicCardBatch(seed=3)
+    game2 = _fresh(seed=3)
     _equip_weapon(game2, "sgs_weapon_qinggangjian")
     sha2 = next(r for r in game2.formal_registry.records if r.card_key == SHA)
     _swap(game2, sha2.instance_id, ZoneRef.hand("p1"))
     ops2 = [a.payload.get("operation") for a in game2.legal_actions()]
     assert "use_slash" in ops2
-    game3 = ProductionBasicCardBatch(seed=3)
+    game3 = _fresh(seed=3)
     _equip_weapon(game3, "sgs_weapon_qinggangjian")
     armor = next(
         r for r in game3.formal_registry.records if r.card_key == "sgs_armor_baguazhen"
@@ -1499,7 +1515,7 @@ def test_other_weapons_impact_matrix_provable_no_impact_and_fail_states() -> Non
     with pytest.raises(UnsupportedRuleError):
         game3.legal_actions()
     # 古锭刀：目标无手牌 -> 失败关闭；目标有手牌 -> 无影响
-    game4 = ProductionBasicCardBatch(seed=3)
+    game4 = _fresh(seed=3)
     _equip_weapon(game4, "sgs_weapon_gudingdao")
     sha4 = next(r for r in game4.formal_registry.records if r.card_key == SHA)
     _swap(game4, sha4.instance_id, ZoneRef.hand("p1"))
@@ -1508,12 +1524,12 @@ def test_other_weapons_impact_matrix_provable_no_impact_and_fail_states() -> Non
     with pytest.raises(UnsupportedRuleError):
         game4.legal_actions()
     # 麒麟弓：目标无坐骑 -> 伤害结算可继续；目标有坐骑 -> 失败关闭
-    game5 = ProductionBasicCardBatch(seed=3)
+    game5 = _fresh(seed=3)
     _equip_weapon(game5, "sgs_weapon_qilingong", "p1")
     check_weapon_skill_gate(
         game5.state, actor_id="p1", decision="slash_damage", target_id="p2"
     )
-    game6 = ProductionBasicCardBatch(seed=3)
+    game6 = _fresh(seed=3)
     _equip_weapon(game6, "sgs_weapon_qilingong", "p1")
     mount = next(
         r for r in game6.formal_registry.records if r.card_key == "sgs_mount_offensive"
@@ -1529,7 +1545,7 @@ def test_other_weapons_impact_matrix_provable_no_impact_and_fail_states() -> Non
 
 def test_dodge_time_weapon_gates_qinglong_and_guanshifu() -> None:
     # 青龙偃月刀：被闪后手中有杀 -> 失败关闭；无杀 -> 可证明无影响
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _equip_weapon(game, "sgs_weapon_qinglongyanyuedao")
     sha = next(r for r in game.formal_registry.records if r.card_key == SHA)
     _swap(game, sha.instance_id, ZoneRef.hand("p1"))
@@ -1537,7 +1553,7 @@ def test_dodge_time_weapon_gates_qinglong_and_guanshifu() -> None:
         check_weapon_skill_gate(
             game.state, actor_id="p1", decision="slash_dodged", target_id="p2"
         )
-    game2 = ProductionBasicCardBatch(seed=3)
+    game2 = _fresh(seed=3)
     _equip_weapon(game2, "sgs_weapon_qinglongyanyuedao")
     for instance_id in list(game2.state.card_ids_in(ZoneRef.hand("p1"))):
         if game2.state.cards_by_id[instance_id].card_key in SLASH_CARD_KEYS:
@@ -1546,13 +1562,13 @@ def test_dodge_time_weapon_gates_qinglong_and_guanshifu() -> None:
         game2.state, actor_id="p1", decision="slash_dodged", target_id="p2"
     )
     # 贯石斧：手牌+装备>=2张 -> 失败关闭；<2张 -> 无影响
-    game3 = ProductionBasicCardBatch(seed=3)
+    game3 = _fresh(seed=3)
     _equip_weapon(game3, "sgs_weapon_guanshifu")
     with pytest.raises(UnsupportedRuleError):
         check_weapon_skill_gate(
             game3.state, actor_id="p1", decision="slash_dodged", target_id="p2"
         )
-    game4 = ProductionBasicCardBatch(seed=3)
+    game4 = _fresh(seed=3)
     _equip_weapon(game4, "sgs_weapon_guanshifu")
     for instance_id in list(game4.state.card_ids_in(ZoneRef.hand("p1"))):
         game4._state = game4.state.move_card(instance_id, DISCARD_PILE)
@@ -1562,7 +1578,7 @@ def test_dodge_time_weapon_gates_qinglong_and_guanshifu() -> None:
 
 
 def test_hanbingjian_damage_gate_fails_closed() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _equip_weapon(game, "sgs_weapon_hanbingjian")
     with pytest.raises(UnsupportedRuleError):
         check_weapon_skill_gate(
@@ -1575,7 +1591,7 @@ def test_hanbingjian_damage_gate_fails_closed() -> None:
 
 
 def test_gate_failure_leaves_state_events_rng_pending_hash_unchanged() -> None:
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _equip_weapon(game, "sgs_weapon_cixiongshuanggujian")
     sha = next(r for r in game.formal_registry.records if r.card_key == SHA)
     _swap(game, sha.instance_id, ZoneRef.hand("p1"))
@@ -1596,7 +1612,7 @@ def test_gate_failure_leaves_state_events_rng_pending_hash_unchanged() -> None:
 def test_weapon_gates_never_approximate_unknown_weapons() -> None:
     # 未知武器键（理论上不可能出现在正式牌堆，但防御性断言）必须失败关闭，
     # 不得静默当作白板；approximation_count 始终为0（由源码审计与门禁覆盖）。
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     from scripts.sgs_engine.production_cards import weapon_attack_ranges as _r
 
     assert set(_r()) == set(PRODUCTION_WEAPON_KEYS)
@@ -1772,7 +1788,7 @@ def test_jiedao_victory_cleanup_strictly_reexecutes() -> None:
         for event in record.events
     )
     # 终局挂起与牌区状态：真实运行同一控制器路径验证
-    live = ProductionBasicCardBatch(seed=3)
+    live = _fresh(seed=3)
     _jiedao_victory_fixture(live)
     live.run(
         ScriptedBatchController(
@@ -1873,7 +1889,7 @@ def test_second_target_never_gets_independent_wuxie_window_in_replay() -> None:
 def test_second_target_only_participates_in_first_target_wuxie_chain() -> None:
     # N3-D 实况路径：无懈链期间每次响应前 pending_trick 都只指向第一目标，
     # 第二目标以同一响应链参与者身份出现，不产生第二套窗口。
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _jiedao_fixture(game)
     _step(game, _action(game, "use_jiedao", card_key=JIEDAO))
     assert game.phase is ProductionPhase.TRICK_RESPONSE
@@ -2157,7 +2173,7 @@ def test_player_visible_replay_leaks_no_other_hands_or_handle_maps() -> None:
     assert "session_secret_hex" not in str(visible)
     assert "borrowed_sword_slash_handles" not in str(visible)
     # 未选择杀实体ID不得出现在事件或决策负载中（公共initial_hand事件除外）
-    game = ProductionBasicCardBatch(seed=3)
+    game = _fresh(seed=3)
     _jiedao_replay_fixture(game)
     hand_ids = set(game.state.card_ids_in(ZoneRef.hand("p2")))
     exposed_ids: set[str] = set()

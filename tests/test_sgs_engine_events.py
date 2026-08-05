@@ -884,3 +884,267 @@ def test_equipment_events_reject_invalid_construction(
 ) -> None:
     with pytest.raises(ValueError, match=match):
         _equipment_event(event_type, **override)  # type: ignore[arg-type]
+
+
+# ----------------------------------------------------------------------
+# 判定事件契约（CP-04L）
+# ----------------------------------------------------------------------
+
+
+def _judgment_started_event(
+    *,
+    trick_id: str = "sgs-mobile-20260725-098",
+    target_id: str = "p2",
+    entry_index: int = 1,
+    payload: dict[str, object] | None = None,
+    target_ids: tuple[str, ...] | None = None,
+) -> GameEvent:
+    return GameEvent(
+        event_type=EventType.JUDGMENT_STARTED,
+        card_instance_id=trick_id,
+        card_key="sgs_delayed_lebusi",
+        target_ids=target_ids or (target_id,),
+        payload=(
+            payload
+            if payload is not None
+            else {
+                "delayed_trick_instance_id": trick_id,
+                "target_id": target_id,
+                "judgment_zone_entry_index": entry_index,
+            }
+        ),
+    )
+
+
+def _judgment_result_event(
+    *,
+    trick_id: str = "sgs-mobile-20260725-098",
+    judgment_card_id: str = "sgs-mobile-20260725-023",
+    target_id: str = "p2",
+    payload: dict[str, object] | None = None,
+    target_ids: tuple[str, ...] | None = None,
+) -> GameEvent:
+    return GameEvent(
+        event_type=EventType.JUDGMENT_RESULT,
+        card_instance_id=judgment_card_id,
+        card_key="sgs_basic_shan",
+        target_ids=target_ids or (target_id,),
+        payload=(
+            payload
+            if payload is not None
+            else {
+                "delayed_trick_instance_id": trick_id,
+                "judgment_card_instance_id": judgment_card_id,
+                "target_id": target_id,
+                "suit": "♦",
+                "rank": "8",
+                "hit": False,
+                "skipped_phase": None,
+                "damage_amount": None,
+                "damage_type": None,
+                "effect_applied": False,
+            }
+        ),
+    )
+
+
+def _phase_skipped_event(
+    *,
+    trick_id: str = "sgs-mobile-20260725-098",
+    player_id: str = "p2",
+    skipped_phase: str = "play",
+    payload: dict[str, object] | None = None,
+    target_ids: tuple[str, ...] | None = None,
+) -> GameEvent:
+    return GameEvent(
+        event_type=EventType.PHASE_SKIPPED,
+        card_instance_id=trick_id,
+        card_key="sgs_delayed_lebusi",
+        target_ids=target_ids or (player_id,),
+        payload=(
+            payload
+            if payload is not None
+            else {
+                "player_id": player_id,
+                "turn_number": 2,
+                "skipped_phase": skipped_phase,
+                "reason": "lebusi_judgment_hit",
+                "delayed_trick_instance_id": trick_id,
+            }
+        ),
+    )
+
+
+def _delayed_transferred_event(
+    *,
+    trick_id: str = "sgs-mobile-20260725-117",
+    from_player_id: str = "p1",
+    to_player_id: str = "p2",
+    payload: dict[str, object] | None = None,
+    target_ids: tuple[str, ...] | None = None,
+) -> GameEvent:
+    return GameEvent(
+        event_type=EventType.DELAYED_TRICK_TRANSFERRED,
+        card_instance_id=trick_id,
+        card_key="sgs_delayed_shandian",
+        target_ids=target_ids or (to_player_id,),
+        payload=(
+            payload
+            if payload is not None
+            else {
+                "from_player_id": from_player_id,
+                "to_player_id": to_player_id,
+                "judgment_zone_entry_index": 2,
+                "reason": "shandian_transfer",
+            }
+        ),
+    )
+
+
+def test_judgment_started_valid_contract() -> None:
+    event = _judgment_started_event()
+    assert event.event_type is EventType.JUDGMENT_STARTED
+    assert event.target_ids == ("p2",)
+    assert event.payload["judgment_zone_entry_index"] == 1
+
+
+def test_judgment_result_valid_contract() -> None:
+    event = _judgment_result_event()
+    assert event.event_type is EventType.JUDGMENT_RESULT
+    assert event.payload["judgment_card_instance_id"] == event.card_instance_id
+    assert event.payload["hit"] is False
+    assert event.payload["skipped_phase"] is None
+    assert event.payload["damage_amount"] is None
+
+
+def test_phase_skipped_valid_contract() -> None:
+    event = _phase_skipped_event()
+    assert event.event_type is EventType.PHASE_SKIPPED
+    assert event.payload["player_id"] == event.target_ids[0]
+    assert event.payload["skipped_phase"] == "play"
+    draw = _phase_skipped_event(skipped_phase="draw")
+    assert draw.payload["skipped_phase"] == "draw"
+
+
+def test_delayed_trick_transferred_valid_contract() -> None:
+    event = _delayed_transferred_event()
+    assert event.event_type is EventType.DELAYED_TRICK_TRANSFERRED
+    assert event.payload["to_player_id"] == event.target_ids[0]
+    assert event.payload["reason"] == "shandian_transfer"
+    restored = _delayed_transferred_event(
+        to_player_id="p1", from_player_id="p1"
+    )
+    assert restored.payload["reason"] == "shandian_transfer"
+
+
+@pytest.mark.parametrize(
+    ("event_type", "override", "match"),
+    [
+        (
+            EventType.JUDGMENT_STARTED,
+            {"payload": {"target_id": "p2", "judgment_zone_entry_index": 1}},
+            "字段必须恰好",
+        ),
+        (
+            EventType.JUDGMENT_STARTED,
+            {"payload": {"delayed_trick_instance_id": "other", "target_id": "p2", "judgment_zone_entry_index": 1}},
+            "必须等于实体牌ID",
+        ),
+        (
+            EventType.JUDGMENT_STARTED,
+            {"payload": {"delayed_trick_instance_id": "sgs-mobile-20260725-098", "target_id": "p2", "judgment_zone_entry_index": True}},
+            "必须是非负整数",
+        ),
+        (
+            EventType.JUDGMENT_STARTED,
+            {"target_ids": ("p2", "p1")},
+            "必须且只能指定一名判定角色",
+        ),
+        (
+            EventType.JUDGMENT_STARTED,
+            {"payload": {"delayed_trick_instance_id": "sgs-mobile-20260725-098", "target_id": "p1", "judgment_zone_entry_index": 1}},
+            "target_id必须等于target_ids",
+        ),
+        (
+            EventType.JUDGMENT_RESULT,
+            {"payload": {"delayed_trick_instance_id": "sgs-mobile-20260725-098", "target_id": "p2", "suit": "♦", "rank": "8", "hit": True, "skipped_phase": None, "damage_amount": None, "damage_type": None, "effect_applied": False}},
+            "字段集与正式契约不一致",
+        ),
+        (
+            EventType.JUDGMENT_RESULT,
+            {"payload": {"delayed_trick_instance_id": "sgs-mobile-20260725-098", "judgment_card_instance_id": "other", "target_id": "p2", "suit": "♦", "rank": "8", "hit": False, "skipped_phase": None, "damage_amount": None, "damage_type": None, "effect_applied": False}},
+            "必须等于判定牌实体ID",
+        ),
+        (
+            EventType.JUDGMENT_RESULT,
+            {"payload": {"delayed_trick_instance_id": "sgs-mobile-20260725-098", "judgment_card_instance_id": "sgs-mobile-20260725-023", "target_id": "p2", "suit": "♦", "rank": "8", "hit": 1, "skipped_phase": None, "damage_amount": None, "damage_type": None, "effect_applied": False}},
+            "hit必须是布尔值",
+        ),
+        (
+            EventType.JUDGMENT_RESULT,
+            {"payload": {"delayed_trick_instance_id": "sgs-mobile-20260725-098", "judgment_card_instance_id": "sgs-mobile-20260725-023", "target_id": "p2", "suit": "♦", "rank": "8", "hit": False, "skipped_phase": "end", "damage_amount": None, "damage_type": None, "effect_applied": False}},
+            "必须是draw、play或空",
+        ),
+        (
+            EventType.JUDGMENT_RESULT,
+            {"payload": {"delayed_trick_instance_id": "sgs-mobile-20260725-098", "judgment_card_instance_id": "sgs-mobile-20260725-023", "target_id": "p2", "suit": "♦", "rank": "8", "hit": False, "skipped_phase": None, "damage_amount": True, "damage_type": None, "effect_applied": False}},
+            "必须是非负整数或空",
+        ),
+        (
+            EventType.PHASE_SKIPPED,
+            {"payload": {"player_id": "p2", "turn_number": 2, "skipped_phase": "play", "reason": "lebusi_judgment_hit"}},
+            "字段集与正式契约不一致",
+        ),
+        (
+            EventType.PHASE_SKIPPED,
+            {"payload": {"player_id": "p1", "turn_number": 2, "skipped_phase": "play", "reason": "lebusi_judgment_hit", "delayed_trick_instance_id": "sgs-mobile-20260725-098"}},
+            "必须等于target_ids",
+        ),
+        (
+            EventType.PHASE_SKIPPED,
+            {"payload": {"player_id": "p2", "turn_number": 0, "skipped_phase": "play", "reason": "lebusi_judgment_hit", "delayed_trick_instance_id": "sgs-mobile-20260725-098"}},
+            "必须是正整数",
+        ),
+        (
+            EventType.PHASE_SKIPPED,
+            {"payload": {"player_id": "p2", "turn_number": 2, "skipped_phase": "draw_phase", "reason": "lebusi_judgment_hit", "delayed_trick_instance_id": "sgs-mobile-20260725-098"}},
+            "必须是draw或play",
+        ),
+        (
+            EventType.PHASE_SKIPPED,
+            {"payload": {"player_id": "p2", "turn_number": 2, "skipped_phase": "play", "reason": "", "delayed_trick_instance_id": "sgs-mobile-20260725-098"}},
+            "必须是非空字符串",
+        ),
+        (
+            EventType.DELAYED_TRICK_TRANSFERRED,
+            {"payload": {"to_player_id": "p2", "judgment_zone_entry_index": 2, "reason": "shandian_transfer"}},
+            "字段集与正式契约不一致",
+        ),
+        (
+            EventType.DELAYED_TRICK_TRANSFERRED,
+            {"payload": {"from_player_id": "p1", "to_player_id": "p1", "judgment_zone_entry_index": 2, "reason": "shandian_transfer"}},
+            "必须等于target_ids",
+        ),
+        (
+            EventType.DELAYED_TRICK_TRANSFERRED,
+            {"payload": {"from_player_id": "p1", "to_player_id": "p2", "judgment_zone_entry_index": -1, "reason": "shandian_transfer"}},
+            "必须是非负整数",
+        ),
+        (
+            EventType.DELAYED_TRICK_TRANSFERRED,
+            {"payload": {"from_player_id": "p1", "to_player_id": "p2", "judgment_zone_entry_index": 2, "reason": ""}},
+            "必须是非空字符串",
+        ),
+    ],
+)
+def test_judgment_events_reject_invalid_construction(
+    event_type: EventType, override: dict[str, object], match: str
+) -> None:
+    factories = {
+        EventType.JUDGMENT_STARTED: _judgment_started_event,
+        EventType.JUDGMENT_RESULT: _judgment_result_event,
+        EventType.PHASE_SKIPPED: _phase_skipped_event,
+        EventType.DELAYED_TRICK_TRANSFERRED: _delayed_transferred_event,
+    }
+    with pytest.raises(ValueError, match=match):
+        factories[event_type](**override)  # type: ignore[arg-type]

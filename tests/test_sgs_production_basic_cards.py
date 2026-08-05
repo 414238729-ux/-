@@ -37,6 +37,7 @@ from scripts.sgs_engine.production_batch import (
 from scripts.sgs_engine.production_cards import (
     PRODUCTION_BASIC_CARD_KEYS,
     PRODUCTION_TRICK_KEYS,
+    PRODUCTION_DELAYED_TRICK_KEYS,
     PRODUCTION_WEAPON_KEYS,
     BasicCardAdapter,
     FormalCardRegistry,
@@ -82,9 +83,22 @@ def _step(game: ProductionBasicCardBatch, action: object) -> object:
     return game.step(BatchActionIdController(action.action_id))
 
 
+def _fresh(*args: object, **kwargs: object) -> ProductionBasicCardBatch:
+    """创建生产批处理会话并推进到出牌阶段（CP-04L 正式阶段流）。"""
+    game = ProductionBasicCardBatch(*args, **kwargs)  # type: ignore[arg-type]
+    for operation in ("proceed_prepare", "proceed_judgment", "proceed_draw"):
+        action = next(
+            a
+            for a in game.legal_actions()
+            if a.payload.get("operation") == operation
+        )
+        game.step(BatchActionIdController(action.action_id))
+    assert game.phase.value == "play"
+    return game
+
 def _find_seed(predicate, max_seed: int = 150) -> int:
     for seed in range(1, max_seed + 1):
-        game = ProductionBasicCardBatch(seed=seed)
+        game = _fresh(seed=seed)
         if predicate(game):
             return seed
     raise AssertionError("未在种子范围内找到满足条件的初始手牌")
@@ -95,12 +109,12 @@ def _find_seed(predicate, max_seed: int = 150) -> int:
 # ---------------------------------------------------------------------
 
 def test_formal_160_deck_production_card_keys_map_to_production_adapters() -> None:
-    game = ProductionBasicCardBatch(seed=1)
+    game = _fresh(seed=1)
     registry = game.formal_registry
 
     assert registry.card_count == 160
     assert len(registry.instance_ids) == len(set(registry.instance_ids)) == 160
-    assert set(registry.implemented_card_keys) == set(PRODUCTION_BASIC_CARD_KEYS) | set(PRODUCTION_TRICK_KEYS) | set(PRODUCTION_WEAPON_KEYS)
+    assert set(registry.implemented_card_keys) == set(PRODUCTION_BASIC_CARD_KEYS) | set(PRODUCTION_TRICK_KEYS) | set(PRODUCTION_WEAPON_KEYS) | set(PRODUCTION_DELAYED_TRICK_KEYS)
     for key in PRODUCTION_BASIC_CARD_KEYS:
         adapter = registry.adapter_for(key)
         assert isinstance(adapter, BasicCardAdapter)
@@ -128,7 +142,7 @@ def test_formal_160_deck_production_card_keys_map_to_production_adapters() -> No
 
 
 def test_production_adapters_read_real_instance_suit_and_rank() -> None:
-    game = ProductionBasicCardBatch(seed=1)
+    game = _fresh(seed=1)
     registry = game.formal_registry
 
     for key in PRODUCTION_BASIC_CARD_KEYS:
@@ -157,7 +171,7 @@ def _use_slash_and_pass(game: ProductionBasicCardBatch, slash_key: str) -> None:
 
 
 def test_plain_slash_generates_no_attribute_damage() -> None:
-    game = ProductionBasicCardBatch(seed=1)
+    game = _fresh(seed=1)
     assert game.first_player_id == "p1"
     _use_slash_and_pass(game, "sgs_basic_sha")
 
@@ -173,7 +187,7 @@ def test_plain_slash_generates_no_attribute_damage() -> None:
 
 
 def test_fire_slash_generates_fire_damage() -> None:
-    game = ProductionBasicCardBatch(seed=1)
+    game = _fresh(seed=1)
     _use_slash_and_pass(game, "sgs_basic_huosha")
 
     damages = [e for e in game.events if isinstance(e, DamageEvent)]
@@ -184,7 +198,7 @@ def test_fire_slash_generates_fire_damage() -> None:
 
 
 def test_thunder_slash_generates_thunder_damage() -> None:
-    game = ProductionBasicCardBatch(seed=28)
+    game = _fresh(seed=28)
     assert game.first_player_id == "p1"
     _use_slash_and_pass(game, "sgs_basic_leisha")
 
@@ -204,7 +218,7 @@ def test_thunder_slash_generates_thunder_damage() -> None:
     ],
 )
 def test_each_slash_establishes_real_response_window(slash_key: str, seed: int) -> None:
-    game = ProductionBasicCardBatch(seed=seed)
+    game = _fresh(seed=seed)
     action = _action(game, "use_slash", card_key=slash_key)
     _step(game, action)
 
@@ -227,7 +241,7 @@ def test_each_slash_establishes_real_response_window(slash_key: str, seed: int) 
 # ---------------------------------------------------------------------
 
 def test_dodge_response_generates_card_used() -> None:
-    game = ProductionBasicCardBatch(seed=1)
+    game = _fresh(seed=1)
     _step(game, _action(game, "use_slash", card_key="sgs_basic_sha"))
     dodge = _action(game, "play_dodge")
     assert dodge is not None
@@ -247,7 +261,7 @@ def test_dodge_response_generates_card_used() -> None:
 
 
 def test_dodge_response_does_not_generate_card_played() -> None:
-    game = ProductionBasicCardBatch(seed=1)
+    game = _fresh(seed=1)
     _step(game, _action(game, "use_slash", card_key="sgs_basic_sha"))
     _step(game, _action(game, "play_dodge"))
 
@@ -257,7 +271,7 @@ def test_dodge_response_does_not_generate_card_played() -> None:
 
 
 def test_slash_without_dodge_deals_real_damage() -> None:
-    game = ProductionBasicCardBatch(seed=1)
+    game = _fresh(seed=1)
     _use_slash_and_pass(game, "sgs_basic_sha")
 
     assert any(isinstance(e, DamageEvent) for e in game.events)
@@ -268,7 +282,7 @@ def test_slash_without_dodge_deals_real_damage() -> None:
 
 
 def test_slash_cancelled_by_dodge_deals_no_damage() -> None:
-    game = ProductionBasicCardBatch(seed=1)
+    game = _fresh(seed=1)
     _step(game, _action(game, "use_slash", card_key="sgs_basic_sha"))
     slash_id = game.runtime.pending_slash.slash_instance_id
     _step(game, _action(game, "play_dodge"))
@@ -290,7 +304,7 @@ def test_slash_cancelled_by_dodge_deals_no_damage() -> None:
 # ---------------------------------------------------------------------
 
 def test_plain_slash_respects_one_per_play_phase() -> None:
-    game = ProductionBasicCardBatch(seed=28)
+    game = _fresh(seed=28)
     assert game.first_player_id == "p1"
     slash_keys = {
         game.state.cards_by_id[a.card_instance_id].card_key
@@ -322,7 +336,7 @@ def test_all_three_slashes_enforce_target_and_distance_checks() -> None:
         ("sgs_basic_huosha", 1),
         ("sgs_basic_leisha", 28),
     ):
-        game = ProductionBasicCardBatch(seed=seed)
+        game = _fresh(seed=seed)
         for action in game.legal_actions():
             if (
                 action.payload.get("operation") != "use_slash"
@@ -351,7 +365,7 @@ def test_all_three_slashes_enforce_target_and_distance_checks() -> None:
 # ---------------------------------------------------------------------
 
 def test_peach_self_heal_in_own_play_phase_when_wounded() -> None:
-    game = ProductionBasicCardBatch(seed=18, player_hp=(3, 4))
+    game = _fresh(seed=18, player_hp=(3, 4))
     assert game.first_player_id == "p1"
     assert "sgs_basic_tao" in _hand_keys(game, "p1")
 
@@ -376,7 +390,7 @@ def test_peach_self_heal_in_own_play_phase_when_wounded() -> None:
 
 
 def test_peach_self_heal_unavailable_at_full_hp() -> None:
-    game = ProductionBasicCardBatch(seed=18)
+    game = _fresh(seed=18)
     assert game.first_player_id == "p1"
     assert "sgs_basic_tao" in _hand_keys(game, "p1")
     assert game.state.players_by_id["p1"].hp == game.state.players_by_id["p1"].max_hp
@@ -389,7 +403,7 @@ def test_peach_self_heal_unavailable_at_full_hp() -> None:
 
 
 def test_peach_enters_real_dying_rescue_flow() -> None:
-    game = ProductionBasicCardBatch(seed=49, player_hp=(1, 1))
+    game = _fresh(seed=49, player_hp=(1, 1))
     assert game.first_player_id == "p1"
     _step(game, _action(game, "use_slash"))
     _step(game, _action(game, "pass_slash_response"))
@@ -416,7 +430,7 @@ def test_peach_enters_real_dying_rescue_flow() -> None:
 
 
 def test_rescue_success_stops_unnecessary_rescue_and_returns_to_play() -> None:
-    game = ProductionBasicCardBatch(seed=49, player_hp=(1, 1))
+    game = _fresh(seed=49, player_hp=(1, 1))
     _step(game, _action(game, "use_slash"))
     _step(game, _action(game, "pass_slash_response"))
     _step(game, _action(game, "pass_rescue"))
@@ -439,7 +453,7 @@ def test_rescue_success_stops_unnecessary_rescue_and_returns_to_play() -> None:
 
 
 def test_rescue_failure_confirms_death_and_victory() -> None:
-    game = ProductionBasicCardBatch(
+    game = _fresh(
         seed=2, player_hp=(1, 1), player_max_hp=(1, 1)
     )
     game.run(
@@ -477,7 +491,7 @@ def _wine_buff_then_slash(game: ProductionBasicCardBatch) -> object:
 
 
 def test_wine_buff_boosts_next_slash_damage() -> None:
-    game = ProductionBasicCardBatch(seed=49)
+    game = _fresh(seed=49)
     assert game.first_player_id == "p1"
     assert "sgs_basic_jiu" in _hand_keys(game, "p1")
 
@@ -520,7 +534,7 @@ def test_wine_buff_boosts_next_slash_damage() -> None:
 
 
 def test_wine_buff_respects_once_per_play_phase() -> None:
-    game = ProductionBasicCardBatch(seed=49)
+    game = _fresh(seed=49)
     wine = _action(game, "use_wine_buff")
     _step(game, wine)
 
@@ -537,7 +551,7 @@ def test_wine_buff_respects_once_per_play_phase() -> None:
 
 
 def test_wine_dying_self_rescue_recovers_one_hp() -> None:
-    game = ProductionBasicCardBatch(seed=49, player_hp=(1, 1))
+    game = _fresh(seed=49, player_hp=(1, 1))
     assert game.first_player_id == "p1"
     _step(game, _action(game, "use_slash"))
     _step(game, _action(game, "pass_slash_response"))
@@ -570,7 +584,7 @@ def test_wine_dying_self_rescue_recovers_one_hp() -> None:
 
 
 def test_wine_play_phase_and_dying_rescue_purposes_are_not_merged() -> None:
-    game = ProductionBasicCardBatch(seed=49, player_hp=(1, 1))
+    game = _fresh(seed=49, player_hp=(1, 1))
     _step(game, _action(game, "use_slash"))
     _step(game, _action(game, "pass_slash_response"))
     _step(game, _action(game, "pass_rescue"))
@@ -594,7 +608,7 @@ def test_wine_play_phase_and_dying_rescue_purposes_are_not_merged() -> None:
 
 
 def test_wine_boosted_slash_cancelled_by_dodge_deals_no_damage() -> None:
-    game = ProductionBasicCardBatch(seed=49)
+    game = _fresh(seed=49)
     slash = _wine_buff_then_slash(game)
     dodge = _action(game, "play_dodge")
     assert dodge is not None
@@ -614,7 +628,7 @@ def test_wine_boosted_slash_cancelled_by_dodge_deals_no_damage() -> None:
 
 
 def test_wine_buff_cleared_at_turn_end_not_earlier() -> None:
-    game = ProductionBasicCardBatch(seed=49)
+    game = _fresh(seed=49)
     _step(game, _action(game, "use_wine_buff"))
     assert game.runtime.wine_buff_owner_id == "p1"
 
@@ -634,7 +648,7 @@ def test_wine_buff_cleared_at_turn_end_not_earlier() -> None:
 # ---------------------------------------------------------------------
 
 def test_all_six_basic_cards_complete_real_zone_lifecycle() -> None:
-    game = ProductionBasicCardBatch(seed=5)
+    game = _fresh(seed=5)
     result = game.run()
     assert result.winner_id in ("p1", "p2")
 
@@ -674,7 +688,7 @@ def test_all_six_basic_cards_complete_real_zone_lifecycle() -> None:
 
 
 def test_card_conservation_holds_through_every_step_and_game_end() -> None:
-    game = ProductionBasicCardBatch(seed=5)
+    game = _fresh(seed=5)
     game.state.assert_card_conservation()
     for _ in range(10):
         game.step()
@@ -689,7 +703,7 @@ def test_card_conservation_holds_through_every_step_and_game_end() -> None:
 
 
 def test_every_entity_card_occupies_exactly_one_zone() -> None:
-    game = ProductionBasicCardBatch(seed=5)
+    game = _fresh(seed=5)
     for state in (game.state, game.run().final_state):
         seen: list[str] = []
         for zone in state.zone_order:
@@ -707,7 +721,7 @@ def test_every_entity_card_occupies_exactly_one_zone() -> None:
 # ---------------------------------------------------------------------
 
 def test_actions_must_pass_enumerate_validate_apply_pipeline() -> None:
-    game = ProductionBasicCardBatch(seed=1)
+    game = _fresh(seed=1)
     slash = _action(game, "use_slash", card_key="sgs_basic_sha")
     assert slash is not None
     assert slash.action_id is not None
@@ -746,15 +760,15 @@ def test_actions_must_pass_enumerate_validate_apply_pipeline() -> None:
 
 
 def test_unimplemented_trick_cards_fail_closed_without_fallback() -> None:
-    game = ProductionBasicCardBatch(seed=49)
+    game = _fresh(seed=49)
     registry = game.formal_registry
-    assert "sgs_delayed_lebusi" in registry.unimplemented_card_keys
+    assert "sgs_armor_baguazhen" in registry.unimplemented_card_keys
     with pytest.raises(UnsupportedRuleError):
-        registry.adapter_for("sgs_delayed_lebusi")
+        registry.adapter_for("sgs_armor_baguazhen")
     with pytest.raises(UnsupportedRuleError):
-        registry.adapter_for("sgs_delayed_shandian")
+        registry.adapter_for("sgs_mount_defensive")
     with pytest.raises(UnsupportedRuleError):
-        registry.rule_spec_for("sgs_delayed_lebusi")
+        registry.rule_spec_for("sgs_armor_baguazhen")
     with pytest.raises(UnsupportedRuleError):
         registry.assert_no_unimplemented_fallback()
 
@@ -788,7 +802,7 @@ def test_unimplemented_trick_cards_fail_closed_without_fallback() -> None:
 
 
 def test_unimplemented_equipment_fails_closed_including_range() -> None:
-    game = ProductionBasicCardBatch(seed=49)
+    game = _fresh(seed=49)
     registry = game.formal_registry
     # CP-04K：11种武器牌本体已接入生产注册表；坐骑仍未实现并继续失败关闭。
     assert "sgs_weapon_qinggangjian" in registry.implemented_card_keys
@@ -832,9 +846,9 @@ def test_unimplemented_equipment_fails_closed_including_range() -> None:
 
 
 def test_test_only_adapters_never_enter_production_registry() -> None:
-    game = ProductionBasicCardBatch(seed=1)
+    game = _fresh(seed=1)
     registry = game.formal_registry
-    assert set(registry.adapters) == set(PRODUCTION_BASIC_CARD_KEYS) | set(PRODUCTION_TRICK_KEYS) | set(PRODUCTION_WEAPON_KEYS)
+    assert set(registry.adapters) == set(PRODUCTION_BASIC_CARD_KEYS) | set(PRODUCTION_TRICK_KEYS) | set(PRODUCTION_WEAPON_KEYS) | set(PRODUCTION_DELAYED_TRICK_KEYS)
     for key, adapter in registry.adapters.items():
         assert isinstance(adapter, BasicCardAdapter)
         assert not str(type(adapter).__module__).endswith(".duel")
@@ -921,7 +935,7 @@ def test_tampered_random_consumption_fails_closed() -> None:
 # ---------------------------------------------------------------------
 
 def test_finished_game_rejects_further_actions() -> None:
-    game = ProductionBasicCardBatch(seed=5)
+    game = _fresh(seed=5)
     result = game.run()
     assert game.is_finished
     assert game.winner_id == result.winner_id
@@ -943,18 +957,20 @@ def test_finished_game_rejects_further_actions() -> None:
 # ---------------------------------------------------------------------
 
 def test_run_rejects_invalid_max_steps_parameters() -> None:
-    game = ProductionBasicCardBatch(seed=1)
+    game = _fresh(seed=1)
     for bad_value in (0, -1, True, 1.5, "500"):
         with pytest.raises(ValueError, match="安全动作上限"):
             game.run(max_steps=bad_value)
-    assert game.step_count == 0
+    # CP-04L：_fresh 已推进 PREPARE→JUDGMENT→DRAW 三个阶段动作
+    assert game.step_count == 3
 
 
 def test_run_safety_limit_fails_closed_without_forced_win() -> None:
-    game = ProductionBasicCardBatch(seed=1)
+    game = _fresh(seed=1)
     with pytest.raises(ProductionBatchSafetyLimitError):
         game.run(max_steps=1)
-    assert game.step_count == 1
+    # CP-04L：_fresh 推进3个阶段动作后，run(max_steps=1)再执行1步
+    assert game.step_count == 4
     assert game.winner_id is None
     assert not game.is_finished
     assert not any(
@@ -964,14 +980,22 @@ def test_run_safety_limit_fails_closed_without_forced_win() -> None:
 
 
 def test_deck_exhaustion_fails_closed_through_public_turn_flow() -> None:
-    game = ProductionBasicCardBatch(seed=1, initial_hand_count=79)
+    game = _fresh(seed=1, initial_hand_count=79)
     script = ScriptedBatchController(
-        [{"operation": "end_play_phase"}, {"operation": "end_turn"}]
+        [
+            {"operation": "end_play_phase"},
+            {"operation": "end_turn"},
+            {"operation": "proceed_prepare"},
+            {"operation": "proceed_judgment"},
+            {"operation": "proceed_draw"},
+        ]
     )
-    game.step(script)
+    for _ in range(4):
+        game.step(script)
+    # CP-04L：p2进入摸牌阶段时牌堆与可重洗弃牌堆均不足2张，原子失败关闭
     with pytest.raises(ProductionBatchDeckExhaustedError):
         game.step(script)
-    assert game.step_count == 1
+    assert game.step_count == 7
     assert not game.is_finished
     assert game.winner_id is None
     assert len(game.state.card_ids_in(DRAW_PILE)) + len(
@@ -985,7 +1009,7 @@ def test_deck_exhaustion_fails_closed_through_public_turn_flow() -> None:
 
 
 def test_draw_reshuffle_continues_current_draw_with_auditable_events() -> None:
-    game = ProductionBasicCardBatch(seed=1, initial_hand_count=79)
+    game = _fresh(seed=1, initial_hand_count=79)
     script = ScriptedBatchController(
         [
             {"operation": "use_wine_buff"},
@@ -995,11 +1019,12 @@ def test_draw_reshuffle_continues_current_draw_with_auditable_events() -> None:
             {"operation": "end_turn"},
         ]
     )
-    for _ in range(5):
+    for _ in range(8):
         game.step(script)
 
     assert game.runtime.turn_number == 2
     assert game.current_player_id == "p2"
+    # CP-04L：p2经过PREPARE→JUDGMENT→DRAW→PLAY完整阶段流
     assert game.phase is ProductionPhase.PLAY
 
     reshuffles = [

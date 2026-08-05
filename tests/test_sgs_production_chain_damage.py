@@ -74,12 +74,20 @@ def _fresh(
     player_hp: tuple[int, int] = (4, 4),
     initial_hand_count: int = 4,
 ) -> ProductionBasicCardBatch:
-    return ProductionBasicCardBatch(
+    game = ProductionBasicCardBatch(
         seed=seed,
         player_hp=player_hp,
         initial_hand_count=initial_hand_count,
     )
-
+    for operation in ("proceed_prepare", "proceed_judgment", "proceed_draw"):
+        action = next(
+            a
+            for a in game.legal_actions()
+            if a.payload.get("operation") == operation
+        )
+        game.step(BatchActionIdController(action.action_id))
+    assert game.phase.value == "play"
+    return game
 
 def _me(game: ProductionBasicCardBatch) -> str:
     return game._first_player_id
