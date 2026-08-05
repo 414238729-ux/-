@@ -327,6 +327,171 @@ def _redact_private_hand_event(
     return dict(event)
 
 
+def _project_public_events(
+    events: Sequence[Mapping[str, object]],
+    viewer_id: str | None,
+) -> tuple[dict[str, object], ...]:
+    """按观察者身份投影公开事件流（CP-04L 审计修复 B1）。
+
+    同一次连续重洗产生的逐卡 ``card_moved(reason=reshuffle)`` 聚合为一条
+    公开汇总事件（只公开重洗事实与张数，不公开实体身份或洗后顺序）；
+    其余事件继续按隐藏手牌获得规则脱敏。权威回放记录本身不做任何改变，
+    本投影只作用于 player_visible 导出。
+    """
+
+    projected: list[dict[str, object]] = []
+    death_cleanup_pending: list[dict[str, object]] = []
+    private_gain_pending: list[dict[str, object]] = []
+
+    def _sorted_death_cleanup(
+        items: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        ordered = sorted(
+            items,
+            key=lambda item: str(item.get("card_instance_id", "")),
+        )
+        start = next(
+            (item.get("sequence") for item in items if item.get("sequence") is not None),
+            None,
+        )
+        if start is None:
+            return ordered
+        renumbered: list[dict[str, object]] = []
+        for offset, item in enumerate(ordered):
+            copy_item = dict(item)
+            copy_item["sequence"] = int(start) + offset
+            renumbered.append(copy_item)
+        return renumbered
+
+    def _is_private_gain_event(event: Mapping[str, object]) -> bool:
+        if event.get("event_type") == "card_gained":
+            return str(event.get("payload", {}).get("reason", "")) in (
+                _PRIVATE_GAIN_REASONS
+            )
+        if event.get("event_type") == "card_moved":
+            payload = event.get("payload", {})
+            if str(payload.get("reason", "")) not in _PRIVATE_GAIN_REASONS:
+                return False
+            source = payload.get("source")
+            destination = payload.get("destination")
+            return (
+                isinstance(source, Mapping)
+                and isinstance(destination, Mapping)
+                and source.get("kind") == "draw_pile"
+                and destination.get("kind") == "hand"
+            )
+        return False
+
+    def _sorted_private_gain(
+        items: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        """隐藏获得批次按实体ID稳定排序并重写批次内sequence。
+
+        摸牌事件的逐张顺序镜像隐藏摸牌顺序（含重洗后的新牌堆顶顺序）；
+        即使获得者本人视图也只暴露摸到哪些牌（集合），不暴露摸牌顺序。
+        """
+
+        ordered = sorted(
+            items,
+            key=lambda item: (
+                str(item.get("card_instance_id", "")),
+                0 if item.get("event_type") == "card_moved" else 1,
+            ),
+        )
+        start = next(
+            (
+                item.get("sequence")
+                for item in items
+                if item.get("sequence") is not None
+            ),
+            None,
+        )
+        if start is None:
+            return ordered
+        renumbered: list[dict[str, object]] = []
+        for offset, item in enumerate(ordered):
+            copy_item = dict(item)
+            copy_item["sequence"] = int(start) + offset
+            renumbered.append(copy_item)
+        return renumbered
+
+    for event in events:
+        if (
+            event.get("event_type") == "card_moved"
+            and isinstance(event.get("payload"), Mapping)
+            and event["payload"].get("reason") == "reshuffle"
+        ):
+            if projected and projected[-1].get("_reshuffle_aggregate") is True:
+                aggregate = projected[-1]
+                payload = aggregate["payload"]
+                assert isinstance(payload, dict)
+                payload["count"] = int(payload["count"]) + 1
+                continue
+            projected.append(
+                {
+                    "event_type": "card_moved",
+                    "card_instance_id": None,
+                    "card_key": None,
+                    "material_card_instance_ids": [],
+                    "card_user": None,
+                    "damage_source": None,
+                    "skill_owner": None,
+                    "equipment_owner": None,
+                    "kill_credit": None,
+                    "target_ids": [],
+                    "payload": {
+                        "reason": "reshuffle",
+                        "count": 1,
+                        "from_zone": {"kind": "discard_pile"},
+                        "to_zone": {"kind": "draw_pile"},
+                        "redacted": True,
+                        "redacted_by_viewer": viewer_id,
+                    },
+                    "_reshuffle_aggregate": True,
+                }
+            )
+            continue
+        redacted = _redact_private_hand_event(event, viewer_id)
+        if (
+            redacted.get("event_type") == "card_moved"
+            and redacted.get("payload", {}).get("reason") == "death_cleanup"
+        ):
+            # 死亡清理是公开化事件（死亡时手牌公开），但逐张清理顺序
+            # 与 sequence 一起镜像隐藏摸牌顺序；公开投影按实体ID稳定排序
+            # 并重写批次内 sequence，消除顺序通道。
+            if private_gain_pending:
+                projected.extend(_sorted_private_gain(private_gain_pending))
+                private_gain_pending = []
+            death_cleanup_pending.append(redacted)
+            continue
+        if _is_private_gain_event(redacted):
+            if death_cleanup_pending:
+                projected.extend(_sorted_death_cleanup(death_cleanup_pending))
+                death_cleanup_pending = []
+            private_gain_pending.append(redacted)
+            continue
+        if death_cleanup_pending:
+            projected.extend(_sorted_death_cleanup(death_cleanup_pending))
+            death_cleanup_pending = []
+        if private_gain_pending:
+            projected.extend(_sorted_private_gain(private_gain_pending))
+            private_gain_pending = []
+        projected.append(redacted)
+    if death_cleanup_pending:
+        projected.extend(_sorted_death_cleanup(death_cleanup_pending))
+    if private_gain_pending:
+        projected.extend(_sorted_private_gain(private_gain_pending))
+    # 移除内部聚合标记（不进入公开导出）
+    return tuple(
+        {
+            key: value
+            for key, value in item.items()
+            if key != "_reshuffle_aggregate"
+        }
+        for item in projected
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ProductionReexecutionReplay:
     """完整、可保存且可由真实规则路径重新执行的生产批次记录。"""
@@ -524,19 +689,82 @@ class ProductionReexecutionReplay:
         拒绝此类导出（缺少私有材料直接失败关闭）。
         """
 
+        if viewer_id is not None:
+            if not isinstance(viewer_id, str) or not viewer_id.strip():
+                raise ValueError(
+                    "viewer_id必须是None或非空字符串（正式会话合法角色ID）"
+                )
+            if viewer_id not in ("p1", "p2"):
+                raise ValueError(
+                    f"viewer_id={viewer_id!r}不是正式会话中的合法角色ID；"
+                    "不得把非法ID静默当作旁观者"
+                )
+
         value = self._material_dict()
         del value["authoritative_private"]
         header = dict(_plain(value["header"]))
         for key in ("seed", "initial_rng_state", "initial_rng_state_sha256"):
             header.pop(key, None)
+        for key in ("initial_execution_hash", "initial_game_state_hash"):
+            header.pop(key, None)
         header["rng_material_redacted"] = True
         value["header"] = header
         value["random_consumptions"] = []
         value["random_consumption_count"] = len(self.random_consumptions)
-        value["events"] = [
-            _redact_private_hand_event(event, viewer_id)
-            for event in value["events"]
-        ]
+        value["events"] = list(
+            _project_public_events(value["events"], viewer_id)
+        )
+        # 哈希旁路防护：权威事件哈希链与权威状态/执行哈希绑定未脱敏材料，
+        # 小候选空间（如两张牌重洗的两种排列）可被穷举恢复，必须从公开
+        # 投影移除；权威记录中的原始哈希全部保留。
+        value["event_hash_chain"] = []
+        outcome = dict(_plain(value["outcome"]))
+        for key in (
+            "event_chain_tip",
+            "final_execution_hash",
+            "final_game_state_hash",
+        ):
+            outcome.pop(key, None)
+        value["outcome"] = outcome
+        redacted_decisions: list[dict[str, object]] = []
+        for decision in value["decisions"]:
+            redacted_decision = dict(decision)
+            for key in (
+                "state_before_sha256",
+                "state_after_sha256",
+                "execution_before_sha256",
+                "execution_after_sha256",
+                "chosen_action_id",
+                "legal_action_set_sha256",
+            ):
+                redacted_decision.pop(key, None)
+            chosen_action = redacted_decision.get("chosen_action")
+            if isinstance(chosen_action, Mapping):
+                redacted_decision["chosen_action"] = {
+                    key: value
+                    for key, value in chosen_action.items()
+                    if key != "action_id"
+                }
+            legal_actions = redacted_decision.get("legal_actions")
+            if isinstance(legal_actions, (list, tuple)):
+                # 合法动作去掉 action_id（绑定状态的可枚举哈希）后按规范
+                # 序列化稳定排序：枚举顺序本身来自手牌区域顺序，未经排序
+                # 的原始顺序会向旁观者泄露隐藏手牌的相对摸牌顺序；排序后
+                # 只保留动作集合，不保留区域顺序。
+                def _public_action(action: Mapping[str, object]) -> dict:
+                    return {
+                        key: value
+                        for key, value in action.items()
+                        if key != "action_id"
+                    }
+
+                public_actions = [_public_action(action) for action in legal_actions]
+                redacted_decision["legal_actions"] = sorted(
+                    public_actions,
+                    key=lambda action: canonical_json(action),
+                )
+            redacted_decisions.append(redacted_decision)
+        value["decisions"] = redacted_decisions
         value["player_visible"] = True
         value["viewer_id"] = viewer_id
         value["player_visible_sha256"] = sha256_value(value)

@@ -1842,6 +1842,25 @@ class ProductionBasicCardBatch:
                         "zones": list(runtime.pending_zone_choice.zones),
                     }
                 ),
+                "pending_judgment": (
+                    None
+                    if runtime.pending_judgment is None
+                    else {
+                        "trick_instance_id": (
+                            runtime.pending_judgment.trick_instance_id
+                        ),
+                        "trick_key": runtime.pending_judgment.trick_key,
+                        "target_id": runtime.pending_judgment.target_id,
+                        "stage": runtime.pending_judgment.stage,
+                        "entry_index": runtime.pending_judgment.entry_index,
+                        "wuxie_nullified": (
+                            runtime.pending_judgment.wuxie_nullified
+                        ),
+                        "cleanup_done": (
+                            runtime.pending_judgment.cleanup_done
+                        ),
+                    }
+                ),
                 "pending_dying_id": runtime.pending_dying_id,
                 "rescue_index": runtime.rescue_index,
             },
@@ -2979,12 +2998,19 @@ class ProductionBasicCardBatch:
         if chain is None:
             raise ProductionBatchError("濒死救援完成但缺少传导挂起状态")
         if dying_id == chain.original_target_id:
-            next_state, finish_event = self._finish_processing(
-                state,
-                self._pending_damage_card_id(runtime),
-                self._pending_damage_rescue_reason(runtime),
-            )
-            self._events.extend((finish_event,))
+            if runtime.defer_damage_card_finish:
+                # 闪电等需要延迟根牌结算的伤害（CP-04L）：闪电本体在
+                # PROCESSING 中等待完整传导与伤害结算结束后，由
+                # _complete_root_resolution 统一弃置；此处不得提前 finish，
+                # 否则传导结束后重复弃置会失败关闭。
+                next_state = state
+            else:
+                next_state, finish_event = self._finish_processing(
+                    state,
+                    self._pending_damage_card_id(runtime),
+                    self._pending_damage_rescue_reason(runtime),
+                )
+                self._events.extend((finish_event,))
             return self._advance_chain(next_state, runtime)
         del rescued
         return self._advance_chain(state, runtime)
@@ -7611,6 +7637,7 @@ class ProductionBasicCardBatch:
         self, state: GameState, runtime: _BatchRuntime
     ) -> tuple[GameState, _BatchRuntime]:
         """动态LIFO：读取当前判定区、排除本阶段已处理实例、选entry_index最大者。"""
+        self._assert_judgment_entry_invariants(state, runtime)
         judgment_ids = state.card_ids_in(
             ZoneRef.judgment(runtime.current_player_id)
         )
@@ -7684,6 +7711,58 @@ class ProductionBasicCardBatch:
         )
         self._events.extend((started,))
         return state, next_runtime
+
+    def _assert_judgment_entry_invariants(
+        self, state: GameState, runtime: _BatchRuntime
+    ) -> None:
+        """判定区进入序号防御性不变量（CP-04L 审计修复 N4）。
+
+        选择下一张判定牌前整体校验：所有处于判定区的实体必须有合法整数
+        索引（bool 拒绝、正式约定从1开始）；活动判定区实体索引全局唯一
+        （judgment_entry_counter 全局单调）；counter 不得落后于任何现存
+        entry_index。任一不满足即失败关闭，不修改状态、事件、RNG 或
+        pending。
+        """
+
+        indices = runtime.judgment_entry_indices
+        active: list[tuple[str, int]] = []
+        for player in state.players:
+            if not player.alive:
+                continue
+            for instance_id in state.card_ids_in(
+                ZoneRef.judgment(player.player_id)
+            ):
+                index = indices.get(instance_id)
+                if index is None:
+                    raise ProductionBatchError(
+                        f"判定区实体{instance_id}缺少judgment_zone_entry_index；"
+                        "失败关闭"
+                    )
+                if (
+                    isinstance(index, bool)
+                    or not isinstance(index, int)
+                    or index < 1
+                ):
+                    raise ProductionBatchError(
+                        f"判定区实体{instance_id}的judgment_zone_entry_index非法；"
+                        "失败关闭"
+                    )
+                active.append((instance_id, index))
+        seen: dict[int, str] = {}
+        for instance_id, index in active:
+            previous = seen.get(index)
+            if previous is not None:
+                raise ProductionBatchError(
+                    f"判定区实体{instance_id}与{previous}的"
+                    f"judgment_zone_entry_index重复（{index}）；失败关闭"
+                )
+            seen[index] = instance_id
+        if active and runtime.judgment_entry_counter < max(
+            index for _, index in active
+        ):
+            raise ProductionBatchError(
+                "judgment_entry_counter落后于现存判定区entry_index；失败关闭"
+            )
 
     def _advance_past_judgment(
         self, state: GameState, runtime: _BatchRuntime

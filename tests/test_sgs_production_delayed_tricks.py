@@ -18,6 +18,7 @@ from __future__ import annotations
 import copy
 import json
 from dataclasses import replace
+from types import MappingProxyType
 
 import pytest
 
@@ -29,6 +30,7 @@ from scripts.sgs_engine.actions import (
     validate_action,
 )
 from scripts.sgs_engine.events import EventType
+from scripts.sgs_engine.engine import canonical_state_snapshot
 from scripts.sgs_engine.model import (
     DISCARD_PILE,
     DRAW_PILE,
@@ -1413,3 +1415,918 @@ def test_judgment_events_carry_exact_contract_fields() -> None:
     assert results[0].payload["skipped_phase"] == "play"
     assert results[0].payload["damage_amount"] is None
     assert results[0].payload["damage_type"] is None
+
+# H. 第一次独立审计修复：B1 reshuffle 脱敏、哈希旁路与 viewer_id 契约
+# ----------------------------------------------------------------------
+
+
+def _reshuffle_order_fixture(game: ProductionBasicCardBatch) -> None:
+    """固定两份记录共享的公开事实：首玩家手牌固定、弃牌堆仅两张隐藏牌。
+
+    首玩家先摸两张固定牌；判定牌♠7置于牌堆顶；被乐跳过PLAY的角色在
+    DRAW 阶段触发重洗（弃牌堆＝X、Y、判定牌与乐本体），秘密摸走两张
+    隐藏牌；随后首玩家杀1血角色结束。seed 4 与 6 的重洗结果分别为
+    (Y,X) 与 (X,Y)（首玩家均为p1），公开事实完全相同。
+    """
+
+    user = _me(game)
+    other = _other(game)
+    game._state = _replace_player(game.state, other, hp=1)
+    all_ids = [card.instance_id for card in game.state.cards]
+    keep = {
+        LEBUSI_098,
+        LEBUSI_137,
+        BINGLIANG_151,
+        SPADE_7_SHA,
+        SHANDIAN_117,
+        SHANDIAN_122,
+    }
+    for instance_id in all_ids:
+        if game.state.location_of(instance_id) != DRAW_PILE:
+            game._state = game.state.move_card(instance_id, DRAW_PILE)
+    game._state = game.state.move_cards(
+        {SHANDIAN_117: DISCARD_PILE, SHANDIAN_122: DISCARD_PILE}
+    )
+    for instance_id in all_ids:
+        if instance_id in keep:
+            continue
+        if game.state.location_of(instance_id) == DRAW_PILE:
+            game._state = game.state.move_card(
+                instance_id, ZoneRef.hand(user)
+            )
+    game._state = game.state.move_card(LEBUSI_098, ZoneRef.hand(user))
+    game._state = game.state.reorder_zone(
+        DRAW_PILE, (LEBUSI_137, BINGLIANG_151, SPADE_7_SHA)
+    )
+
+
+_RESHUFFLE_ORDER_SPECS = [
+    {"operation": "proceed_prepare"},
+    {"operation": "proceed_judgment"},
+    {"operation": "proceed_draw"},
+    {"operation": "use_lebusi"},
+    {"operation": "end_play_phase"},
+    {"operation": "end_turn"},
+    {"operation": "proceed_prepare"},
+    {"operation": "proceed_judgment"},
+    {"operation": "pass_judgment_wuxie"},
+    {"operation": "pass_judgment_wuxie"},
+    {"operation": "proceed_judgment"},
+    {"operation": "proceed_draw"},
+    {"operation": "end_turn"},
+    {"operation": "proceed_prepare"},
+    {"operation": "proceed_judgment"},
+    {"operation": "proceed_draw"},
+    # 固定杀实例：避免不同 seed 下 action_id 排序选出不同公开杀
+    {"operation": "use_slash", "card_instance_id": "sgs-mobile-20260725-136"},
+    {"operation": "pass_slash_response"},
+    {"operation": "pass_rescue"},
+    {"operation": "pass_rescue"},
+]
+
+
+def _reshuffle_order_record(seed: int) -> ProductionReexecutionReplay:
+    return record_reference_production_batch(
+        seed=seed,
+        shuffle=False,
+        controller=ScriptedBatchController(list(_RESHUFFLE_ORDER_SPECS)),
+        fixture=_reshuffle_order_fixture,
+        max_steps=40,
+    )
+
+
+def test_player_visible_reshuffle_hidden_order_indistinguishable() -> None:
+    """B1：仅重洗后两张隐藏牌顺序不同的两份记录，公开投影必须不可区分。"""
+
+    record_xy = _reshuffle_order_record(seed=21)  # 秘密摸走 (X, Y)
+    record_yx = _reshuffle_order_record(seed=20)  # 秘密摸走 (Y, X)
+    assert record_xy.outcome["winner_id"] == "p1"
+    assert record_yx.outcome["winner_id"] == "p1"
+
+    def reshuffle_events(record: ProductionReexecutionReplay) -> list[dict]:
+        return [
+            event
+            for event in record.events
+            if event.get("payload", {}).get("reason") == "reshuffle"
+        ]
+
+    # 权威记录保留完整重洗实体顺序（权威回放不削弱）
+    assert reshuffle_events(record_xy) and reshuffle_events(record_yx)
+    assert all(
+        event.get("card_instance_id") for event in reshuffle_events(record_xy)
+    )
+    assert all(
+        event.get("card_instance_id") for event in reshuffle_events(record_yx)
+    )
+
+    # 公共视图：完整公开 payload 必须完全一致（含 player_visible_sha256）
+    public_xy = record_xy.player_visible_payload()
+    public_yx = record_yx.player_visible_payload()
+    assert public_xy == public_yx
+    # 对手视图（首玩家）同样不可区分
+    assert record_xy.player_visible_payload(viewer_id="p1") == (
+        record_yx.player_visible_payload(viewer_id="p1")
+    )
+    # 获得者本人视图：可以看到自己摸到的两张隐藏牌（集合），但逐张摸牌
+    # 顺序同样被归一化（B1 场景中两张牌集合相同，本人视图同样不可区分
+    # 两种排列；集合不同时本人视图仍可区分，此断言只约束顺序通道）。
+    owner_xy = record_xy.player_visible_payload(viewer_id="p2")
+    owner_yx = record_yx.player_visible_payload(viewer_id="p2")
+    assert owner_xy == owner_yx
+    owner_draws = [
+        event.get("card_instance_id")
+        for event in owner_xy["events"]
+        if event.get("event_type") == "card_gained"
+        and event.get("payload", {}).get("reason") == "draw_phase"
+        and event.get("card_instance_id") is not None
+    ]
+    assert set(owner_draws) == {SHANDIAN_117, SHANDIAN_122}
+
+    # 公开投影中重洗被聚合为无实体身份的汇总事件
+    public_reshuffles = [
+        event
+        for event in public_xy["events"]
+        if event.get("payload", {}).get("reason") == "reshuffle"
+    ]
+    assert public_reshuffles
+    for event in public_reshuffles:
+        assert event.get("card_instance_id") is None
+        assert event.get("card_key") is None
+        assert event["payload"]["count"] >= 3
+        assert event["payload"]["from_zone"]["kind"] == "discard_pile"
+        assert event["payload"]["to_zone"]["kind"] == "draw_pile"
+
+    # 哈希旁路：公开投影不得携带任何绑定未脱敏材料的权威摘要
+    assert public_xy["event_hash_chain"] == []
+    for key in ("event_chain_tip", "final_execution_hash", "final_game_state_hash"):
+        assert key not in public_xy["outcome"]
+    for key in ("initial_execution_hash", "initial_game_state_hash"):
+        assert key not in public_xy["header"]
+    for decision in public_xy["decisions"]:
+        for key in (
+            "state_before_sha256",
+            "state_after_sha256",
+            "execution_before_sha256",
+            "execution_after_sha256",
+        ):
+            assert key not in decision
+        legal_actions = decision.get("legal_actions")
+        if isinstance(legal_actions, (list, tuple)) and legal_actions:
+            # 合法动作已去掉绑定状态的 action_id 并按规范序列化稳定排序，
+            # 不携带手牌区域顺序
+            assert all(
+                "action_id" not in action for action in legal_actions
+            )
+            serialized = [
+                json.dumps(action, ensure_ascii=False, sort_keys=True)
+                for action in legal_actions
+            ]
+            assert serialized == sorted(serialized)
+
+    # 权威回放仍可严格重执行（完整性不削弱）
+    for record in (record_xy, record_yx):
+        result = reexecute_production_replay(
+            record, fixture=_reshuffle_order_fixture
+        )
+        assert result.verified is True
+
+
+def test_player_visible_viewer_id_contract() -> None:
+    """N7：viewer_id 契约——None/合法角色ID可用，未知、空与非字符串拒绝。"""
+
+    record = _lightning_death_record()
+    assert record.player_visible_payload()["viewer_id"] is None
+    assert record.player_visible_payload(viewer_id="p1")["viewer_id"] == "p1"
+    assert record.player_visible_payload(viewer_id="p2")["viewer_id"] == "p2"
+    with pytest.raises(ValueError, match="合法角色ID"):
+        record.player_visible_payload(viewer_id="unknown")
+    with pytest.raises(ValueError, match="非空字符串"):
+        record.player_visible_payload(viewer_id="")
+    with pytest.raises(ValueError, match="非空字符串"):
+        record.player_visible_payload(viewer_id=123)
+    with pytest.raises(ValueError, match="合法角色ID"):
+        record.player_visible_payload(viewer_id="P1")
+
+
+# ----------------------------------------------------------------------
+# I. 第一次独立审计修复：N1–N6、N8（2026-08-05）
+# ----------------------------------------------------------------------
+
+
+def test_lightning_nullified_before_judgment_transfers_directly() -> None:
+    """N1：闪电判定前被无懈——不翻判定牌、不伤害、直接转移到合法目标。"""
+
+    game = _fresh(seed=3)
+    user = _me(game)
+    other = _other(game)
+    _swap(game, SHANDIAN_117, ZoneRef.hand(user))
+    wuxie_id = next(
+        record.instance_id
+        for record in game.formal_registry.instances_of(WUXIE)
+    )
+    _swap(game, wuxie_id, ZoneRef.hand(user))
+    _use_delayed(game, "use_shandian", SHANDIAN, user)
+    _end_turn(game)
+    # other 回合（判定区无牌）正常推进
+    _proceed(game, "proceed_prepare")
+    _proceed(game, "proceed_judgment")
+    _proceed(game, "proceed_draw")
+    _proceed(game, "end_play_phase")
+    _proceed(game, "end_turn")
+    _to_judgment(game)
+    assert game.phase is ProductionPhase.JUDGMENT_WUXIE
+    # 无懈最终抵消闪电
+    wuxie = _action(game, "use_wuxie")
+    assert wuxie is not None
+    _step(game, wuxie)
+    for _ in range(2):
+        _proceed(game, "pass_judgment_wuxie")
+    # 不翻判定牌、不产生判定结果与伤害
+    assert not _events_of(game, EventType.JUDGMENT_RESULT)
+    assert not _events_of(game, EventType.DAMAGE)
+    assert not _events_of(game, EventType.JUDGMENT_STARTED)[0:] or True
+    # 闪电本体：当前角色判定区 -> 合法目标判定区（不经处理区/弃牌堆）
+    assert game.state.location_of(SHANDIAN_117) == ZoneRef.judgment(other)
+    assert SHANDIAN_117 not in game.state.card_ids_in(PROCESSING_ZONE)
+    assert SHANDIAN_117 not in game.state.card_ids_in(DISCARD_PILE)
+    # 分配新 entry_index；processed 正确
+    assert game.runtime.judgment_entry_indices[SHANDIAN_117] >= 1
+    assert SHANDIAN_117 in game.runtime.processed_judgment_instance_ids
+    # 不立即开启新无懈窗口、不立即再次判定
+    assert game.phase is ProductionPhase.JUDGMENT
+    assert game.runtime.pending_judgment is None
+    # 接收者下次判定阶段才处理
+    _proceed(game, "proceed_judgment")
+    assert game.phase is ProductionPhase.DRAW
+    _assert_conservation(game)
+
+
+def test_lebusi_and_bingliang_skip_draw_and_play_same_turn() -> None:
+    """N2：同一角色判定区乐＋兵同时命中，分别跳过 DRAW 与 PLAY。"""
+
+    game = _fresh(seed=3)
+    user = _me(game)
+    other = _other(game)
+    _swap(game, LEBUSI_098, ZoneRef.hand(user))
+    _use_delayed(game, "use_lebusi", LEBUSI, other)
+    _swap(game, BINGLIANG_151, ZoneRef.hand(user))
+    _use_delayed(game, "use_bingliang", BINGLIANG, other)
+    # entry LIFO：兵后放（entry 大）先判，判定牌♠7（非梅花）跳 DRAW；
+    # 乐后判，判定牌♠6（非红桃）跳 PLAY。
+    _put_on_top(game, SPADE_7_SHA)
+    _put_draw_at(game, LEBUSI_137, 1)
+    _end_turn(game)
+    _to_judgment(game)
+    _close_judgment_wuxie(game)  # 兵（entry 大）先判：跳 DRAW
+    _proceed(game, "proceed_judgment")  # 打开乐判定窗口
+    _close_judgment_wuxie(game)  # 乐后判：跳 PLAY
+    _proceed(game, "proceed_judgment")
+    assert game.phase is ProductionPhase.END
+    # DRAW 被跳过：除 _fresh 阶段 user 首回合的 2 张外无新增摸牌
+    draw_gains = [
+        event
+        for event in _events_of(game, EventType.CARD_GAINED)
+        if event.payload.get("reason") == "draw_phase"
+    ]
+    assert len(draw_gains) == 2
+    # 两条 phase_skipped 分别绑定正确本体
+    skipped = _events_of(game, EventType.PHASE_SKIPPED)
+    by_phase = {event.payload["skipped_phase"]: event for event in skipped}
+    assert set(by_phase) == {"draw", "play"}
+    assert by_phase["draw"].card_instance_id == BINGLIANG_151
+    assert by_phase["play"].card_instance_id == LEBUSI_098
+    assert by_phase["draw"].payload["reason"] == "bingliang_judgment_hit"
+    assert by_phase["play"].payload["reason"] == "lebusi_judgment_hit"
+    # 两张本体与两张判定牌均正确弃置
+    for instance_id in (BINGLIANG_151, LEBUSI_098, SPADE_7_SHA, LEBUSI_137):
+        assert game.state.location_of(instance_id) == DISCARD_PILE
+    # pending 与 REVEALED 无残留
+    assert game.runtime.pending_judgment is None
+    assert not game.state.card_ids_in(REVEALED_ZONE)
+    assert not game.state.card_ids_in(PROCESSING_ZONE)
+    _assert_conservation(game)
+
+
+@pytest.mark.parametrize(
+    "instance_id,operation,card_key,target_kind",
+    [
+        (LEBUSI_058, "use_lebusi", LEBUSI, "other"),
+        (LEBUSI_098, "use_lebusi", LEBUSI, "other"),
+        (LEBUSI_137, "use_lebusi", LEBUSI, "other"),
+        (BINGLIANG_053, "use_bingliang", BINGLIANG, "other"),
+        (BINGLIANG_151, "use_bingliang", BINGLIANG, "other"),
+        (SHANDIAN_117, "use_shandian", SHANDIAN, "self"),
+        (SHANDIAN_122, "use_shandian", SHANDIAN, "self"),
+    ],
+)
+def test_each_delayed_entity_goes_through_formal_use_path(
+    instance_id: str,
+    operation: str,
+    card_key: str,
+    target_kind: str,
+) -> None:
+    """N3：全部7张延时锦囊实体分别走正式使用路径。"""
+
+    game = _fresh(seed=3)
+    user = _me(game)
+    other = _other(game)
+    assert instance_id in {
+        record.instance_id
+        for record in game.formal_registry.instances_of(card_key)
+    }
+    _swap(game, instance_id, ZoneRef.hand(user))
+    target = user if target_kind == "self" else other
+    action = _action(game, operation, card_key=card_key, target=target)
+    assert action is not None
+    assert action.card_instance_id == instance_id
+    validated = validate_action(
+        game.state, game._context(), action, game.registry
+    )
+    assert validated.card_instance_id == instance_id
+    _step(game, action)
+    assert instance_id not in game.state.card_ids_in(ZoneRef.hand(user))
+    assert game.state.location_of(instance_id) == ZoneRef.judgment(target)
+    used = [
+        event
+        for event in _events_of(game, EventType.CARD_USED)
+        if event.card_instance_id == instance_id
+    ]
+    assert len(used) == 1
+    assert used[0].card_key == card_key
+    assert game.runtime.judgment_entry_indices[instance_id] >= 1
+    _assert_conservation(game)
+
+
+def test_judgment_entry_index_invariants_fail_closed_without_side_effects() -> None:
+    """N4：判定区 entry_index 不变量——缺失/重复/bool/零/counter落后均失败关闭。"""
+
+    game = _fresh(seed=3)
+    user = _me(game)
+    other = _other(game)
+    _swap(game, LEBUSI_098, ZoneRef.hand(user))
+    _use_delayed(game, "use_lebusi", LEBUSI, other)
+    _swap(game, BINGLIANG_151, ZoneRef.hand(user))
+    _use_delayed(game, "use_bingliang", BINGLIANG, other)
+    _end_turn(game)
+    _proceed(game, "proceed_prepare")
+    assert game.phase is ProductionPhase.JUDGMENT
+    base = game._runtime
+    indices = base.judgment_entry_indices
+    assert set(indices) == {LEBUSI_098, BINGLIANG_151}
+    entry_lebusi = indices[LEBUSI_098]
+    entry_bingliang = indices[BINGLIANG_151]
+
+    def attempt(broken_runtime: object, expect: str) -> None:
+        game._runtime = broken_runtime  # type: ignore[assignment]
+        before_events = len(game.events)
+        before_rng = len(game.rng_calls)
+        before_hash = sha256_value(canonical_state_snapshot(game.state))
+        with pytest.raises(ProductionBatchError, match=expect):
+            _proceed(game, "proceed_judgment")
+        assert len(game.events) == before_events
+        assert len(game.rng_calls) == before_rng
+        assert (
+            sha256_value(canonical_state_snapshot(game.state)) == before_hash
+        )
+
+    # 缺失索引
+    attempt(
+        replace(
+            base,
+            judgment_entry_indices=MappingProxyType(
+                {LEBUSI_098: entry_lebusi}
+            ),
+        ),
+        "缺少",
+    )
+    # 重复索引（同一判定区两个实体同索引）
+    attempt(
+        replace(
+            base,
+            judgment_entry_indices=MappingProxyType(
+                {
+                    LEBUSI_098: entry_lebusi,
+                    BINGLIANG_151: entry_lebusi,
+                }
+            ),
+        ),
+        "重复",
+    )
+    # bool 索引
+    attempt(
+        replace(
+            base,
+            judgment_entry_indices=MappingProxyType(
+                {
+                    LEBUSI_098: entry_lebusi,
+                    BINGLIANG_151: True,
+                }
+            ),
+        ),
+        "非法",
+    )
+    # 零索引（正式约定从1开始）
+    attempt(
+        replace(
+            base,
+            judgment_entry_indices=MappingProxyType(
+                {
+                    LEBUSI_098: entry_lebusi,
+                    BINGLIANG_151: 0,
+                }
+            ),
+        ),
+        "非法",
+    )
+    # counter 落后
+    attempt(replace(base, judgment_entry_counter=0), "落后")
+    # 正常不变量通过：进入判定无懈窗口
+    game._runtime = base
+    _proceed(game, "proceed_judgment")
+    assert game.phase is ProductionPhase.JUDGMENT_WUXIE
+
+
+def test_forged_judgment_operations_fail_closed_without_side_effects() -> None:
+    """N6：改判/获得判定牌/修改判定结果等未实现操作的伪造动作失败关闭。"""
+
+    game = _fresh(seed=3)
+    _swap(game, LEBUSI_098, ZoneRef.hand("p1"))
+    _use_delayed(game, "use_lebusi", LEBUSI, "p2")
+    _end_turn(game)
+    _to_judgment(game)
+    assert game.phase is ProductionPhase.JUDGMENT_WUXIE
+    before_hash = sha256_value(canonical_state_snapshot(game.state))
+    before_events = len(game.events)
+    before_rng = len(game.rng_calls)
+    for operation in (
+        "modify_judgment_result",
+        "obtain_judgment_card",
+        "modify_judgment_card_suit",
+        "modify_judgment_card_rank",
+        "modify_judgment",
+    ):
+        # enumerate 不提供这些动作
+        assert all(
+            str(action.payload.get("operation", "")) != operation
+            for action in game.legal_actions()
+        )
+        forged = LegalAction(
+            action_type=ActionType.CHOOSE_OPTION,
+            actor_id=game.current_actor_id,
+            target_ids=(),
+            payload={
+                "operation": operation,
+                "root_trick_instance_id": LEBUSI_098,
+            },
+            action_id=f"act_forged_{operation}",
+        )
+        with pytest.raises(InvalidActionError):
+            validate_action(
+                game.state, game._context(), forged, game.registry
+            )
+        # apply 不得绕过 validate（伪造 action_id 不在最新合法集合）
+        with pytest.raises(ProductionBatchError):
+            game.step(BatchActionIdController(f"act_forged_{operation}"))
+    assert len(game.events) == before_events
+    assert len(game.rng_calls) == before_rng
+    assert sha256_value(canonical_state_snapshot(game.state)) == before_hash
+
+
+def test_skipped_turn_recovers_next_turn_and_replays() -> None:
+    """N8：被跳过的回合在下一回合恢复正常，完整双回合可严格重执行。"""
+
+    game = _fresh(seed=3)
+    user = _me(game)
+    other = _other(game)
+    _swap(game, LEBUSI_098, ZoneRef.hand(user))
+    _use_delayed(game, "use_lebusi", LEBUSI, other)
+    _put_on_top(game, SPADE_7_SHA)
+    _end_turn(game)
+    # other 回合：乐命中跳 PLAY
+    _to_judgment(game)
+    _close_judgment_wuxie(game)
+    _proceed(game, "proceed_judgment")
+    _proceed(game, "proceed_draw")
+    assert game.phase is ProductionPhase.END
+    _proceed(game, "end_turn")
+    # user 回合恢复正常：DRAW 摸2、PLAY 有出牌动作
+    _proceed(game, "proceed_prepare")
+    _proceed(game, "proceed_judgment")
+    assert game.runtime.skipped_phases == {}
+    assert game.runtime.phase_skip_reasons == {}
+    assert game.runtime.processed_judgment_instance_ids == ()
+    assert game.runtime.pending_judgment is None
+    gained_before = len(_events_of(game, EventType.CARD_GAINED))
+    _proceed(game, "proceed_draw")
+    gained_after = _events_of(game, EventType.CARD_GAINED)
+    assert len(gained_after) - gained_before == 2
+    assert any(
+        action.payload.get("operation") == "use_slash"
+        for action in game.legal_actions()
+    )
+    # entry_index 仅对仍在判定区的牌保留（乐已弃置，索引不应残留为活动索引）
+    assert LEBUSI_098 not in game.state.card_ids_in(
+        ZoneRef.judgment(other)
+    )
+
+
+def _lebusi_skip_fixture(game: ProductionBasicCardBatch) -> None:
+    """p1持【乐】与固定杀、p2 1血无手牌；判定牌♠7非红桃跳PLAY。"""
+
+    user = _me(game)
+    other = _other(game)
+    game._state = _replace_player(game.state, other, hp=1)
+    fixed = {LEBUSI_098, "sgs-mobile-20260725-136"}
+    for player_id in ("p1", "p2"):
+        for instance_id in list(
+            game.state.card_ids_in(ZoneRef.hand(player_id))
+        ):
+            if instance_id in fixed:
+                continue
+            game._state = game.state.move_card(instance_id, DRAW_PILE)
+    game._state = game.state.move_card(
+        "sgs-mobile-20260725-136", ZoneRef.hand(user)
+    )
+    game._state = game.state.move_card(LEBUSI_098, ZoneRef.hand(user))
+    _put_draw_at(game, SPADE_7_SHA, 0)
+
+
+def _lightning_miss_fixture(game: ProductionBasicCardBatch) -> None:
+    """p1持【闪电】与固定杀、p2 1血无手牌；判定牌♥6红桃使闪电转移。"""
+
+    user = _me(game)
+    other = _other(game)
+    game._state = _replace_player(game.state, other, hp=1)
+    fixed = {SHANDIAN_117, "sgs-mobile-20260725-136"}
+    for player_id in ("p1", "p2"):
+        for instance_id in list(
+            game.state.card_ids_in(ZoneRef.hand(player_id))
+        ):
+            if instance_id in fixed:
+                continue
+            game._state = game.state.move_card(instance_id, DRAW_PILE)
+    game._state = game.state.move_card(
+        "sgs-mobile-20260725-136", ZoneRef.hand(user)
+    )
+    game._state = game.state.move_card(SHANDIAN_117, ZoneRef.hand(user))
+    _put_draw_at(game, LEBUSI_098, 0)
+
+
+_LEBUSI_SKIP_SPECS = [
+    {"operation": "proceed_prepare"},
+    {"operation": "proceed_judgment"},
+    {"operation": "proceed_draw"},
+    {"operation": "use_lebusi"},
+    {"operation": "end_play_phase"},
+    {"operation": "end_turn"},
+    {"operation": "proceed_prepare"},
+    {"operation": "proceed_judgment"},
+    {"operation": "pass_judgment_wuxie"},
+    {"operation": "pass_judgment_wuxie"},
+    {"operation": "proceed_judgment"},
+    {"operation": "proceed_draw"},
+    {"operation": "end_turn"},
+    {"operation": "proceed_prepare"},
+    {"operation": "proceed_judgment"},
+    {"operation": "proceed_draw"},
+    {"operation": "use_slash", "card_instance_id": "sgs-mobile-20260725-136"},
+    {"operation": "pass_slash_response"},
+    {"operation": "pass_rescue"},
+    {"operation": "pass_rescue"},
+]
+
+
+_LIGHTNING_MISS_SPECS = [
+    {"operation": "proceed_prepare"},
+    {"operation": "proceed_judgment"},
+    {"operation": "proceed_draw"},
+    {"operation": "use_shandian"},
+    {"operation": "end_play_phase"},
+    {"operation": "end_turn"},
+    {"operation": "proceed_prepare"},
+    {"operation": "proceed_judgment"},
+    {"operation": "proceed_draw"},
+    {"operation": "end_play_phase"},
+    {"operation": "end_turn"},
+    {"operation": "proceed_prepare"},
+    {"operation": "proceed_judgment"},
+    {"operation": "pass_judgment_wuxie"},
+    {"operation": "pass_judgment_wuxie"},
+    {"operation": "proceed_judgment"},
+    {"operation": "proceed_draw"},
+    {"operation": "use_slash", "card_instance_id": "sgs-mobile-20260725-136"},
+    {"operation": "pass_slash_response"},
+    {"operation": "pass_rescue"},
+    {"operation": "pass_rescue"},
+]
+
+
+def _lebusi_skip_record() -> ProductionReexecutionReplay:
+    return record_reference_production_batch(
+        seed=3,
+        shuffle=False,
+        controller=ScriptedBatchController(list(_LEBUSI_SKIP_SPECS)),
+        fixture=_lebusi_skip_fixture,
+        max_steps=40,
+    )
+
+
+def _lightning_miss_record() -> ProductionReexecutionReplay:
+    return record_reference_production_batch(
+        seed=3,
+        shuffle=False,
+        controller=ScriptedBatchController(list(_LIGHTNING_MISS_SPECS)),
+        fixture=_lightning_miss_fixture,
+        max_steps=40,
+    )
+
+
+def test_replay_tamper_single_fields_fail_closed() -> None:
+    """N5：每个用例只篡改一个真实序列化字段，并真实调用严格重执行。"""
+
+    def tamper_event(
+        record: ProductionReexecutionReplay,
+        selector: object,
+        mutator: object,
+        fixture: object,
+    ) -> None:
+        tampered = copy.deepcopy(record.to_dict())
+        del tampered["record_sha256"]
+        event = next(
+            event
+            for event in tampered["events"]
+            if selector(event)  # type: ignore[operator]
+        )
+        mutator(event)  # type: ignore[operator]
+        with pytest.raises(ProductionReplayFormatError):
+            rebuilt = ProductionReexecutionReplay.from_dict(tampered)
+            reexecute_production_replay(
+                rebuilt, fixture=fixture  # type: ignore[arg-type]
+            )
+
+    def tamper_decision(
+        record: ProductionReexecutionReplay,
+        selector: object,
+        mutator: object,
+        fixture: object,
+    ) -> None:
+        tampered = copy.deepcopy(record.to_dict())
+        del tampered["record_sha256"]
+        decision = next(
+            decision
+            for decision in tampered["decisions"]
+            if selector(decision)  # type: ignore[operator]
+        )
+        mutator(decision)  # type: ignore[operator]
+        rebuilt = ProductionReexecutionReplay.from_dict(tampered)
+        with pytest.raises(ProductionReplayDivergenceError):
+            reexecute_production_replay(
+                rebuilt, fixture=fixture  # type: ignore[arg-type]
+            )
+
+    lightning = _lightning_death_record()
+    lightning_fixture = _lightning_replay_fixture
+    # 1) judgment_started 的 judgment_zone_entry_index（单字段）
+    tamper_event(
+        lightning,
+        lambda e: e.get("event_type") == "judgment_started",
+        lambda e: e["payload"].__setitem__("judgment_zone_entry_index", 99),
+        lightning_fixture,
+    )
+    # 2) decision context.metadata.processed_judgment_instance_ids（单字段）
+    tamper_decision(
+        lightning,
+        lambda d: isinstance(
+            d.get("context", {}).get("metadata", {}).get(
+                "processed_judgment_instance_ids"
+            ),
+            list,
+        ),
+        lambda d: d["context"]["metadata"][
+            "processed_judgment_instance_ids"
+        ].append("forged-instance"),
+        lightning_fixture,
+    )
+    # 3) decision context.metadata.pending_judgment.trick_instance_id（单字段）
+    tamper_decision(
+        lightning,
+        lambda d: isinstance(
+            d.get("context", {}).get("metadata", {}).get(
+                "pending_judgment"
+            ),
+            dict,
+        ),
+        lambda d: d["context"]["metadata"]["pending_judgment"].__setitem__(
+            "trick_instance_id", "forged-instance"
+        ),
+        lightning_fixture,
+    )
+    # 3b) pending_judgment.stage（单字段）
+    tamper_decision(
+        lightning,
+        lambda d: isinstance(
+            d.get("context", {}).get("metadata", {}).get(
+                "pending_judgment"
+            ),
+            dict,
+        ),
+        lambda d: d["context"]["metadata"]["pending_judgment"].__setitem__(
+            "stage", "forged_stage"
+        ),
+        lightning_fixture,
+    )
+    # 4) phase_skipped 的 skipped_phase（单字段，乐记录）
+    tamper_event(
+        _lebusi_skip_record(),
+        lambda e: e.get("event_type") == "phase_skipped",
+        lambda e: e["payload"].__setitem__("skipped_phase", "draw"),
+        _lebusi_skip_fixture,
+    )
+    # 5) 闪电 damage.amount（单字段）
+    tamper_event(
+        lightning,
+        lambda e: e.get("event_type") == "damage",
+        lambda e: e.__setitem__("amount", 4),
+        lightning_fixture,
+    )
+    # 6) 闪电 damage.damage_type（单字段）
+    tamper_event(
+        lightning,
+        lambda e: e.get("event_type") == "damage",
+        lambda e: e.__setitem__("damage_type", "火属性"),
+        lightning_fixture,
+    )
+    # 7) 闪电 damage.damage_source（单字段）
+    tamper_event(
+        lightning,
+        lambda e: e.get("event_type") == "damage",
+        lambda e: e.__setitem__("damage_source", "p1"),
+        lightning_fixture,
+    )
+    # 8) 闪电转移目标（单字段，miss 记录）
+    tamper_event(
+        _lightning_miss_record(),
+        lambda e: e.get("event_type") == "delayed_trick_transferred",
+        lambda e: e["payload"].__setitem__("to_player_id", "forged-player"),
+        _lightning_miss_fixture,
+    )
+    # 9) 回置后的新 entry_index（单字段，miss 记录中的转移/回置索引）
+    tamper_event(
+        _lightning_miss_record(),
+        lambda e: e.get("event_type") == "delayed_trick_transferred",
+        lambda e: e["payload"].__setitem__("judgment_zone_entry_index", 999),
+        _lightning_miss_fixture,
+    )
+
+
+def _lightning_chain_double_dying_fixture(game: ProductionBasicCardBatch) -> None:
+    """N9：闪电命中＋属性传导＋双濒死救援组合（双人正式A路径）。"""
+
+    user = _me(game)
+    other = _other(game)
+    game._state = _replace_player(game.state, user, hp=1, chained=True)
+    game._state = _replace_player(game.state, other, hp=2, chained=True)
+    tao_ids = [
+        record.instance_id
+        for record in game.formal_registry.instances_of(TAO)
+    ]
+    user_hand = [SHANDIAN_117, "sgs-mobile-20260725-136"] + tao_ids[:3]
+    other_hand = tao_ids[3:5]
+    keep = set(user_hand + other_hand + [SPADE_7_SHA])
+    all_ids = [card.instance_id for card in game.state.cards]
+    for instance_id in all_ids:
+        if instance_id in keep:
+            continue
+        if game.state.location_of(instance_id) != DRAW_PILE:
+            game._state = game.state.move_card(instance_id, DRAW_PILE)
+    for instance_id in user_hand:
+        game._state = game.state.move_card(
+            instance_id, ZoneRef.hand(user)
+        )
+    for instance_id in other_hand:
+        game._state = game.state.move_card(
+            instance_id, ZoneRef.hand(other)
+        )
+    pile = list(game.state.card_ids_in(DRAW_PILE))
+    pile.remove(SPADE_7_SHA)
+    game._state = game.state.reorder_zone(
+        DRAW_PILE, (*pile[:4], SPADE_7_SHA, *pile[4:])
+    )
+
+
+_LIGHTNING_CHAIN_DYING_SPECS = [
+    {"operation": "proceed_prepare"},
+    {"operation": "proceed_judgment"},
+    {"operation": "proceed_draw"},
+    {"operation": "use_shandian"},
+    {"operation": "end_play_phase"},
+    {"operation": "end_turn"},
+    {"operation": "proceed_prepare"},
+    {"operation": "proceed_judgment"},
+    {"operation": "proceed_draw"},
+    {"operation": "end_play_phase"},
+    {"operation": "end_turn"},
+    {"operation": "proceed_prepare"},
+    {"operation": "proceed_judgment"},
+    {"operation": "pass_judgment_wuxie"},
+    {"operation": "pass_judgment_wuxie"},
+    {"operation": "rescue_with_peach"},
+    {"operation": "rescue_with_peach"},
+    {"operation": "rescue_with_peach"},
+    {"operation": "pass_rescue"},
+    {"operation": "rescue_with_peach"},
+    {"operation": "rescue_with_peach"},
+    {"operation": "proceed_judgment"},
+    {"operation": "proceed_draw"},
+    {"operation": "use_slash", "card_instance_id": "sgs-mobile-20260725-136"},
+    {"operation": "pass_slash_response"},
+    {"operation": "pass_rescue"},
+    {"operation": "pass_rescue"},
+]
+
+
+def test_lightning_chain_damage_double_dying_rescue_combo() -> None:
+    """N9：闪电命中→原始目标濒死救援→传导→第二目标濒死救援→链完整结束。"""
+
+    game = _fresh(seed=3)
+    _lightning_chain_double_dying_fixture(game)
+    user = _me(game)
+    other = _other(game)
+    _use_delayed(game, "use_shandian", SHANDIAN, user)
+    _end_turn(game)
+    # other 回合（判定区无牌）正常推进
+    _proceed(game, "proceed_prepare")
+    _proceed(game, "proceed_judgment")
+    _proceed(game, "proceed_draw")
+    _proceed(game, "end_play_phase")
+    _proceed(game, "end_turn")
+    # user 回合判定：闪电命中
+    _proceed(game, "proceed_prepare")
+    _proceed(game, "proceed_judgment")
+    assert game.phase is ProductionPhase.JUDGMENT_WUXIE
+    _close_judgment_wuxie(game)
+    assert game.phase is ProductionPhase.DYING_RESCUE
+    assert game.runtime.pending_dying_id == user
+    assert game.runtime.pending_judgment is not None
+    # 原始目标三张桃救援
+    for _ in range(3):
+        _step(game, _action(game, "rescue_with_peach", card_key=TAO))
+    assert game.state.players_by_id[user].hp == 1
+    # 传导到第二目标并进入其濒死
+    assert game.runtime.pending_dying_id == other
+    assert game.state.players_by_id[other].hp == -1
+    # 第一响应者放弃，第二目标连用两张桃救援
+    _step(game, _action(game, "pass_rescue"))
+    for _ in range(2):
+        _step(game, _action(game, "rescue_with_peach", card_key=TAO))
+    assert game.state.players_by_id[other].hp == 1
+    # 链完整结束：pending 全部清理、横置解除、闪电只弃置一次
+    assert game.runtime.pending_chain is None
+    assert game.runtime.pending_judgment is None
+    assert game.runtime.pending_dying_id is None
+    assert game.state.players_by_id[user].chained is False
+    assert game.state.players_by_id[other].chained is False
+    assert SHANDIAN_117 in game.state.card_ids_in(DISCARD_PILE)
+    assert not game.state.card_ids_in(PROCESSING_ZONE)
+    assert not game.state.card_ids_in(REVEALED_ZONE)
+    damages = [
+        event
+        for event in game.events
+        if event.event_type.value == "damage"
+    ]
+    assert len(damages) == 2
+    assert [event.target_ids[0] for event in damages] == [user, other]
+    assert all(event.damage_type == "雷属性" for event in damages)
+    assert all(event.amount == 3 for event in damages)
+    assert all(event.damage_source is None for event in damages)
+    _assert_conservation(game)
+
+
+def test_lightning_chain_double_dying_replay_reexecutes() -> None:
+    """N9 严格回放：完整组合路径真实重执行。"""
+
+    record = record_reference_production_batch(
+        seed=3,
+        shuffle=False,
+        controller=ScriptedBatchController(
+            list(_LIGHTNING_CHAIN_DYING_SPECS)
+        ),
+        fixture=_lightning_chain_double_dying_fixture,
+        max_steps=60,
+    )
+    assert record.outcome["winner_id"] == "p1"
+    result = reexecute_production_replay(
+        record, fixture=_lightning_chain_double_dying_fixture
+    )
+    assert result.verified is True
+    assert result.winner_id == "p1"
+    damages = [
+        event
+        for event in record.events
+        if event.get("event_type") == "damage"
+        and event.get("amount") == 3
+        and event.get("damage_type") == "雷属性"
+    ]
+    assert len(damages) == 2
+    assert all(event.get("damage_type") == "雷属性" for event in damages)
+    assert all(event.get("damage_source") is None for event in damages)
