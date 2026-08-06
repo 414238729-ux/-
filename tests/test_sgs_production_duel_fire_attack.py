@@ -1716,6 +1716,10 @@ def test_fire_attack_player_visible_replay_only_publicizes_revealed() -> None:
     assert "authoritative_private" not in visible_blob
     assert "fire_attack_reveal_handles" not in visible_blob
     assert visible["player_visible"] is True
+    # B1-a/B1-b：公共视图 decisions 无私有动作与权威摘要
+    for decision in visible["decisions"]:
+        assert "chosen_action" not in decision
+        assert "legal_actions" not in decision
     # 未展示手牌实体在整份玩家可见导出中只允许出现在公共发牌记录里，
     # 不得因【火攻】展示机制而进入任何其他事件或决策材料。
     for instance_id in target_hand_ids:

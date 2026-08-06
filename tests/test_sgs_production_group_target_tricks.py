@@ -78,7 +78,6 @@ _GROUP_RESPONSE_PAYLOAD_KEYS = {
     "target_id",
     "target_index",
     "window_id",
-    "state_hash",
     "handle",
 }
 
@@ -1847,15 +1846,23 @@ def test_player_visible_replay_leaks_no_unplayed_hand_cards(
             decision
             for decision in view["decisions"]
             if decision.get("context", {}).get("actor_id") != "p2"
+            and "chosen_action" in decision
             and instance_id
             in json.dumps(
-                [decision["chosen_action"], *decision["legal_actions"]],
+                [
+                    decision["chosen_action"],
+                    *decision.get("legal_actions", []),
+                ],
                 ensure_ascii=False,
             )
         ]
         assert not leaked_outside_owner, (
             f"实体{instance_id}在非所有者决策材料中被泄露"
         )
+    # B1-b：公共视图下所有非行动者决策均已省略私有动作
+    for decision in view["decisions"]:
+        assert "chosen_action" not in decision
+        assert "legal_actions" not in decision
     # 双视角：所有者p2视图中保留自己的初始发牌实例记录
     owner_view = record.player_visible_payload(viewer_id="p2")
     for instance_id in never_publicized:
@@ -1872,19 +1879,37 @@ def test_player_visible_replay_leaks_no_unplayed_hand_cards(
             event.get("card_instance_id") == instance_id
             for event in opponent_view["events"]
         ), f"实体{instance_id}在对手视图中被泄露"
-    # 群体响应动作负载只含固定键集，不携带牌面或实体ID
+    # 公共视图已省略全部私有动作（B1-b）
     for decision in view["decisions"]:
-        for action in [decision.get("chosen_action")]:
-            operation = action.get("payload", {}).get("operation")
-            if operation in ("play_slash_for_nanman", "play_jink_for_wanjian"):
-                assert set(action["payload"]) == _GROUP_RESPONSE_PAYLOAD_KEYS
-                assert action.get("card_instance_id") is None
-                assert action.get("skill_id") is None
-        for action in decision.get("legal_actions", []):
-            operation = action.get("payload", {}).get("operation")
-            if operation in ("play_slash_for_nanman", "play_jink_for_wanjian"):
-                assert set(action["payload"]) == _GROUP_RESPONSE_PAYLOAD_KEYS
-                assert action.get("card_instance_id") is None
+        assert "chosen_action" not in decision
+        assert "legal_actions" not in decision
+    # 行动者本人视图的群体响应动作负载只含固定键集，不携带牌面或实体ID
+    for viewer_id in ("p1", "p2"):
+        actor_view = record.player_visible_payload(viewer_id=viewer_id)
+        for decision in actor_view["decisions"]:
+            if decision.get("context", {}).get("actor_id") != viewer_id:
+                continue
+            for action in [decision.get("chosen_action")]:
+                operation = action.get("payload", {}).get("operation")
+                if operation in (
+                    "play_slash_for_nanman",
+                    "play_jink_for_wanjian",
+                ):
+                    assert set(action["payload"]) == (
+                        _GROUP_RESPONSE_PAYLOAD_KEYS
+                    )
+                    assert action.get("card_instance_id") is None
+                    assert action.get("skill_id") is None
+            for action in decision.get("legal_actions", []):
+                operation = action.get("payload", {}).get("operation")
+                if operation in (
+                    "play_slash_for_nanman",
+                    "play_jink_for_wanjian",
+                ):
+                    assert set(action["payload"]) == (
+                        _GROUP_RESPONSE_PAYLOAD_KEYS
+                    )
+                    assert action.get("card_instance_id") is None
 
 
 def test_authoritative_replay_reexecutes_rather_than_restores(

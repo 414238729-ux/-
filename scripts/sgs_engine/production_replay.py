@@ -269,6 +269,53 @@ _PRIVATE_GAIN_REASONS: frozenset[str] = frozenset(
     {"initial_hand", "draw_phase"}
 )
 
+# 绑定隐藏权威状态的摘要键：公开投影必须递归移除（B1-a）。
+# context_sha256 只绑定公开上下文（不含手牌/牌堆秘密），予以保留。
+_HIDDEN_DIGEST_KEYS: frozenset[str] = frozenset(
+    {
+        "state_hash",
+        "state_sha256",
+        "execution_hash",
+        "execution_sha256",
+        "event_hash",
+        "event_chain_tip",
+        "record_sha256",
+        "legal_action_set_sha256",
+        "chosen_action_id",
+        "action_id",
+    }
+)
+
+
+def _redact_hidden_digests(value: object) -> object:
+    """递归移除动作负载与选择数据中的全部权威状态摘要（B1-a）。
+
+    对 payload、嵌套 payload、目标选择数据、响应上下文等所有层级生效；
+    任何以隐藏权威状态为输入的 *_sha256 都不进入公开投影，仅保留
+    ``context_sha256``（绑定公开上下文）与 ``player_visible_sha256``
+    （基于已脱敏投影独立计算）。
+    """
+
+    if isinstance(value, Mapping):
+        redacted: dict[str, object] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                redacted[key] = _redact_hidden_digests(item)
+                continue
+            lowered = key.lower()
+            if key in _HIDDEN_DIGEST_KEYS:
+                continue
+            if (
+                lowered.endswith("_sha256")
+                and lowered not in ("context_sha256", "player_visible_sha256")
+            ):
+                continue
+            redacted[key] = _redact_hidden_digests(item)
+        return redacted
+    if isinstance(value, (list, tuple)):
+        return [_redact_hidden_digests(item) for item in value]
+    return value
+
 
 def _redact_private_hand_event(
     event: Mapping[str, object], viewer_id: str | None
@@ -337,7 +384,70 @@ def _project_public_events(
     公开汇总事件（只公开重洗事实与张数，不公开实体身份或洗后顺序）；
     其余事件继续按隐藏手牌获得规则脱敏。权威回放记录本身不做任何改变，
     本投影只作用于 player_visible 导出。
+
+    B1-c：隐藏获得以来源区域语义判定——任何从 DRAW_PILE 进入某玩家
+    HAND 的实体（card_moved 与其配对的 card_gained），无论 reason 为何
+    （initial_hand／draw_phase／tiesuo_recast／无中生有等），其牌面实体
+    信息默认只对获得者本人可见；对手与公共视图只见获得数量、recipient
+    与 reason。公开区域（REVEALED／装备区等）进入手牌保持公开。
     """
+
+    hidden_draw_recipients: dict[str, str] = {}
+    for event in events:
+        if (
+            event.get("event_type") == "card_moved"
+            and isinstance(event.get("payload"), Mapping)
+            and event.get("card_instance_id") is not None
+        ):
+            payload = event["payload"]
+            source = payload.get("source")
+            destination = payload.get("destination")
+            if (
+                isinstance(source, Mapping)
+                and isinstance(destination, Mapping)
+                and source.get("kind") == "draw_pile"
+                and destination.get("kind") == "hand"
+            ):
+                hidden_draw_recipients[str(event["card_instance_id"])] = str(
+                    destination.get("owner_id") or ""
+                )
+
+    def _is_hidden_gain(event: Mapping[str, object]) -> bool:
+        if event.get("event_type") == "card_moved":
+            payload = event.get("payload", {})
+            source = payload.get("source")
+            destination = payload.get("destination")
+            return (
+                isinstance(source, Mapping)
+                and isinstance(destination, Mapping)
+                and source.get("kind") == "draw_pile"
+                and destination.get("kind") == "hand"
+            )
+        if event.get("event_type") == "card_gained":
+            return event.get("card_instance_id") in hidden_draw_recipients
+        return False
+
+    def _redact_for_viewer(event: Mapping[str, object]) -> dict[str, object]:
+        redacted = _redact_private_hand_event(event, viewer_id)
+        if redacted.get("event_type") == "card_gained":
+            instance_id = redacted.get("card_instance_id")
+            recipient = (redacted.get("target_ids") or [None])[0]
+            if (
+                instance_id in hidden_draw_recipients
+                and hidden_draw_recipients[instance_id] == recipient
+                and recipient != viewer_id
+            ):
+                redacted = dict(redacted)
+                redacted["card_instance_id"] = None
+                redacted["card_key"] = None
+                redacted["payload"] = {
+                    "reason": str(
+                        redacted.get("payload", {}).get("reason", "")
+                    ),
+                    "redacted": True,
+                    "redacted_by_viewer": viewer_id,
+                }
+        return redacted
 
     projected: list[dict[str, object]] = []
     death_cleanup_pending: list[dict[str, object]] = []
@@ -360,27 +470,8 @@ def _project_public_events(
         for offset, item in enumerate(ordered):
             copy_item = dict(item)
             copy_item["sequence"] = int(start) + offset
-            renumbered.append(copy_item)
+            renumbered.append(_redact_for_viewer(copy_item))
         return renumbered
-
-    def _is_private_gain_event(event: Mapping[str, object]) -> bool:
-        if event.get("event_type") == "card_gained":
-            return str(event.get("payload", {}).get("reason", "")) in (
-                _PRIVATE_GAIN_REASONS
-            )
-        if event.get("event_type") == "card_moved":
-            payload = event.get("payload", {})
-            if str(payload.get("reason", "")) not in _PRIVATE_GAIN_REASONS:
-                return False
-            source = payload.get("source")
-            destination = payload.get("destination")
-            return (
-                isinstance(source, Mapping)
-                and isinstance(destination, Mapping)
-                and source.get("kind") == "draw_pile"
-                and destination.get("kind") == "hand"
-            )
-        return False
 
     def _sorted_private_gain(
         items: list[dict[str, object]],
@@ -406,20 +497,20 @@ def _project_public_events(
             ),
             None,
         )
-        if start is None:
-            return ordered
         renumbered: list[dict[str, object]] = []
         for offset, item in enumerate(ordered):
             copy_item = dict(item)
-            copy_item["sequence"] = int(start) + offset
-            renumbered.append(copy_item)
+            if start is not None:
+                copy_item["sequence"] = int(start) + offset
+            renumbered.append(_redact_for_viewer(copy_item))
         return renumbered
 
     for event in events:
+        redacted = _redact_for_viewer(event)
         if (
-            event.get("event_type") == "card_moved"
-            and isinstance(event.get("payload"), Mapping)
-            and event["payload"].get("reason") == "reshuffle"
+            redacted.get("event_type") == "card_moved"
+            and isinstance(redacted.get("payload"), Mapping)
+            and redacted["payload"].get("reason") == "reshuffle"
         ):
             if projected and projected[-1].get("_reshuffle_aggregate") is True:
                 aggregate = projected[-1]
@@ -451,7 +542,6 @@ def _project_public_events(
                 }
             )
             continue
-        redacted = _redact_private_hand_event(event, viewer_id)
         if (
             redacted.get("event_type") == "card_moved"
             and redacted.get("payload", {}).get("reason") == "death_cleanup"
@@ -462,13 +552,13 @@ def _project_public_events(
             if private_gain_pending:
                 projected.extend(_sorted_private_gain(private_gain_pending))
                 private_gain_pending = []
-            death_cleanup_pending.append(redacted)
+            death_cleanup_pending.append(event)
             continue
-        if _is_private_gain_event(redacted):
+        if _is_hidden_gain(event):
             if death_cleanup_pending:
                 projected.extend(_sorted_death_cleanup(death_cleanup_pending))
                 death_cleanup_pending = []
-            private_gain_pending.append(redacted)
+            private_gain_pending.append(event)
             continue
         if death_cleanup_pending:
             projected.extend(_sorted_death_cleanup(death_cleanup_pending))
@@ -738,31 +828,36 @@ class ProductionReexecutionReplay:
                 "legal_action_set_sha256",
             ):
                 redacted_decision.pop(key, None)
-            chosen_action = redacted_decision.get("chosen_action")
-            if isinstance(chosen_action, Mapping):
-                redacted_decision["chosen_action"] = {
-                    key: value
-                    for key, value in chosen_action.items()
-                    if key != "action_id"
-                }
-            legal_actions = redacted_decision.get("legal_actions")
-            if isinstance(legal_actions, (list, tuple)):
-                # 合法动作去掉 action_id（绑定状态的可枚举哈希）后按规范
-                # 序列化稳定排序：枚举顺序本身来自手牌区域顺序，未经排序
-                # 的原始顺序会向旁观者泄露隐藏手牌的相对摸牌顺序；排序后
-                # 只保留动作集合，不保留区域顺序。
-                def _public_action(action: Mapping[str, object]) -> dict:
-                    return {
-                        key: value
-                        for key, value in action.items()
-                        if key != "action_id"
-                    }
-
-                public_actions = [_public_action(action) for action in legal_actions]
-                redacted_decision["legal_actions"] = sorted(
-                    public_actions,
-                    key=lambda action: canonical_json(action),
-                )
+            actor_id = str(
+                decision.get("context", {}).get("actor_id", "")
+            )
+            if viewer_id == actor_id:
+                # 行动者本人视图：保留本人当时的合法动作，但递归移除
+                # 全部权威状态摘要（B1-a）并稳定排序（不保留手牌区域
+                # 顺序）；本人动作负载中其他角色的隐藏句柄等仍按项目
+                # 句柄机制处理，此处不做额外推断。
+                chosen_action = decision.get("chosen_action")
+                if isinstance(chosen_action, Mapping):
+                    redacted_decision["chosen_action"] = _redact_hidden_digests(
+                        chosen_action
+                    )
+                legal_actions = decision.get("legal_actions")
+                if isinstance(legal_actions, (list, tuple)):
+                    public_actions = [
+                        _redact_hidden_digests(action)
+                        for action in legal_actions
+                    ]
+                    redacted_decision["legal_actions"] = sorted(
+                        public_actions,
+                        key=lambda action: canonical_json(action),
+                    )
+            else:
+                # 非行动者／公共视图：省略本人私有动作集合（数量本身可
+                # 能泄露手牌构成），对外可见结果由公开事件表达；保留
+                # decision index、context（actor_id/phase/公开元数据）
+                # 与随机消费计数等公开事实。
+                redacted_decision.pop("legal_actions", None)
+                redacted_decision.pop("chosen_action", None)
             redacted_decisions.append(redacted_decision)
         value["decisions"] = redacted_decisions
         value["player_visible"] = True

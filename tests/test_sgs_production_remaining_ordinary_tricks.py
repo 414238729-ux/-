@@ -1902,15 +1902,30 @@ def test_player_visible_replay_shows_pool_but_no_private_material(
             decision
             for decision in view["decisions"]
             if decision.get("context", {}).get("actor_id") != other_player
+            and "chosen_action" in decision
             and instance_id
             in json.dumps(
-                [decision["chosen_action"], *decision["legal_actions"]],
+                [
+                    decision["chosen_action"],
+                    *decision.get("legal_actions", []),
+                ],
                 ensure_ascii=False,
             )
         ]
         assert not leaked_outside_owner, (
             f"实体{instance_id}在非所有者决策材料中被泄露"
         )
+    # B1-b：公共视图下所有非行动者决策均已省略私有动作
+    for decision in view["decisions"]:
+        assert "chosen_action" not in decision
+        assert "legal_actions" not in decision
+    # 五谷选牌窗口：公共视图无私有动作（与本人视图对照）
+    owner_view = record.player_visible_payload(viewer_id="p2")
+    assert any(
+        "legal_actions" in decision
+        for decision in owner_view["decisions"]
+        if decision.get("context", {}).get("actor_id") == "p2"
+    )
     # 玩家可见导出缺少权威私有材料，权威重执行必须失败关闭
     with pytest.raises(ProductionReplayFormatError):
         ProductionReexecutionReplay.from_dict(view)

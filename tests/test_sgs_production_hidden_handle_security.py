@@ -721,4 +721,5 @@ def test_original_zone_target_test_count_unchanged() -> None:
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.startswith("def test_")
     )
-    assert count == 50
+    # CP-04L 第二次复审修复新增 1 项 zone-choice 窗口投影测试（2026-08-06）
+    assert count == 51

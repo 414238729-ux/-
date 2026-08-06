@@ -1045,6 +1045,40 @@ def test_replay_reexecutes_guohe_discard_hand_path() -> None:
     assert result.winner_id == record.outcome["winner_id"]
 
 
+def test_player_visible_zone_choice_window_actor_projection() -> None:
+    """B1-a/B1-b：zone-choice 窗口公共视图无私有动作与权威摘要。"""
+
+    record = record_reference_production_batch(
+        seed=3,
+        controller=ScriptedBatchController(
+            [
+                {"operation": "use_guohe", "card_key": GUOHE},
+                {"operation": "pass_trick_response"},
+                {"operation": "pass_trick_response"},
+                {"operation": "choose_target_zone_card", "zone": "hand"},
+            ]
+        ),
+    )
+    public = record.player_visible_payload()
+    for decision in public["decisions"]:
+        assert "chosen_action" not in decision
+        assert "legal_actions" not in decision
+        assert "state_before_sha256" not in decision
+        assert "state_after_sha256" not in decision
+    actor = record.player_visible_payload(viewer_id="p1")
+    for decision in actor["decisions"]:
+        if decision.get("context", {}).get("actor_id") != "p1":
+            assert "chosen_action" not in decision
+            assert "legal_actions" not in decision
+        else:
+            for action in decision.get("legal_actions", []):
+                assert "state_hash" not in action
+                assert "state_sha256" not in action
+                assert "action_id" not in action
+    # 权威回放仍可严格重执行
+    assert reexecute_production_replay(record).verified is True
+
+
 def test_replay_reexecutes_shunshou_gain_hand_path() -> None:
     record = record_reference_production_batch(
         seed=2,

@@ -2169,6 +2169,10 @@ def test_player_visible_replay_leaks_no_other_hands_or_handle_maps() -> None:
     visible = record.player_visible_payload()
     assert visible["player_visible"] is True
     assert "authoritative_private" not in visible
+    # B1-a/B1-b：公共视图 decisions 无私有动作与权威摘要
+    for decision in visible["decisions"]:
+        assert "chosen_action" not in decision
+        assert "legal_actions" not in decision
     # 玩家可见导出不得包含会话秘密与句柄到实体的映射
     assert "session_secret_hex" not in str(visible)
     assert "borrowed_sword_slash_handles" not in str(visible)

@@ -273,7 +273,7 @@
       "id": "CP-04L-PRODUCTION-DELAYED-TRICK-JUDGMENT-INFRASTRUCTURE",
       "status": "committed_pending_audit",
       "commit": "35c06bd50a431a62e7c3ad01d10384bf6884c403",
-      "commit_note": "本批（【乐不思蜀】＋【兵粮寸断】＋【闪电】＋判定与阶段基础设施，CP-04L）已由用户在外部PowerShell创建真实实现提交：提交信息为 feat: implement delayed tricks and judgment infrastructure，完整提交哈希为 35c06bd50a431a62e7c3ad01d10384bf6884c403；基线提交 185cc555324b077d0e81bef10a4518ba2dae3748（里程碑标签 milestone-b2-borrowed-sword-weapon-system-audited 指向该基线）；完整 pytest 1707 passed（0 failed、0 skipped）；尚未完成独立审计（independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET），不得视为 audited；检查点文档提交与里程碑标签待后续收尾，不在此虚构。第一次独立审计结论 AUDIT_FAILED_BLOCKING_ISSUES（唯一阻塞项 B1：player_visible 未脱敏 reshuffle 事件泄露洗后牌堆顺序）；B1 实质修复与N1–N9 关闭工作已完成于当前工作树，尚待用户提交与最终复审；审计修复提交哈希尚未产生，不在此虚构。",
+      "commit_note": "本批（【乐不思蜀】＋【兵粮寸断】＋【闪电】＋判定与阶段基础设施，CP-04L）已由用户在外部PowerShell创建真实实现提交：提交信息为 feat: implement delayed tricks and judgment infrastructure，完整提交哈希为 35c06bd50a431a62e7c3ad01d10384bf6884c403；基线提交 185cc555324b077d0e81bef10a4518ba2dae3748（里程碑标签 milestone-b2-borrowed-sword-weapon-system-audited 指向该基线）；完整 pytest 1707 passed（0 failed、0 skipped）；尚未完成独立审计（independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET），不得视为 audited；检查点文档提交与里程碑标签待后续收尾，不在此虚构。第一次独立审计结论 AUDIT_FAILED_BLOCKING_ISSUES（唯一阻塞项 B1：player_visible 未脱敏 reshuffle 事件泄露洗后牌堆顺序）；B1 实质修复与N1–N9 关闭工作已完成于当前工作树，尚待用户提交与最终复审；审计修复提交哈希尚未产生，不在此虚构。第一次审计修复提交 96f536e1f392fd97faf61518a849a0d515b6a82e（fix: close delayed trick audit gaps）后，第二次最终复审结论 AUDIT_FAILED_BLOCKING_ISSUES：发现 B1-a（动作负载 state_hash 等权威状态摘要旁路）、B1-b（legal_actions/chosen_action 泄露行动者完整手牌）、B1-c（tiesuo_recast 等隐藏摸牌未统一脱敏）三个 player_visible 阻塞问题，以及两个复审观察项（N5 篡改测试结构、judgment_entry_indices 陈旧残留）；本轮已完成 B1-a/B1-b/B1-c 修复与两个观察项关闭（完整 pytest 1733 passed），尚待用户提交与再次复审；本轮修复提交哈希尚未产生，不在此虚构。",
       "independent_audit_done": false,
       "audit_conclusion": "NOT_AUDITED_YET",
       "milestone_tag": null,
@@ -290,24 +290,31 @@
         "initial_conclusion": "AUDIT_FAILED_BLOCKING_ISSUES",
         "final_reaudit_conclusion": null,
         "audited_at": null,
-        "auditor_note": "第一次独立只读审计结论 AUDIT_FAILED_BLOCKING_ISSUES（2026-08-05）。唯一阻塞项 B1：player_visible 公开投影原样保留 reason=reshuffle 的逐卡card_moved 事件（card_instance_id/card_key/逐张顺序）以及绑定未脱敏材料的权威哈希（event_hash_chain、initial/final 状态与执行哈希、决策级state/execution 哈希、action_id），旁观者可恢复洗后牌堆顺序。修复方案：同一次连续 reshuffle 聚合为无实体身份的公开汇总事件（count/from_zone/to_zone），移除全部权威哈希旁路，隐藏获得事件与死亡清理按实体ID稳定排序并重写批次内 sequence，decisions 的 action_id 删除并稳定排序，viewer_id 契约失败关闭（N7）。N1–N9 关闭工作已完成于当前工作树，尚待用户提交与最终复审；审计修复提交哈希尚未产生，不得虚构；在最终复审前 CP-04L 不得视为 audited。",
+        "auditor_note": "第一次独立只读审计结论 AUDIT_FAILED_BLOCKING_ISSUES（唯一阻塞项 B1：player_visible 未脱敏 reshuffle 事件），修复提交 96f536e1f392fd97faf61518a849a0d515b6a82e（fix: close delayed trick audit gaps）。第二次最终复审结论 AUDIT_FAILED_BLOCKING_ISSUES（2026-08-06）：确认 reshuffle 聚合脱敏、viewer_id 契约、N1–N9 主体与闪电根牌延迟完成修复均已正确且未回归；新发现三个 player_visible 阻塞问题——B1-a：decisions 动作负载中的 state_hash 等权威状态摘要可被小候选空间穷举恢复；B1-b：对手与公共视图可从 PLAY 阶段 legal_actions/chosen_action 直接枚举行动者完整手牌；B1-c：tiesuo_recast 等隐藏摸牌 reason 不在脱敏白名单。另有两个复审观察项：N5 篡改测试中 from_dict 先抛异常导致 reexecute 未实际调用；judgment_entry_indices 在延时锦囊离开判定区后残留陈旧索引。本轮修复：递归移除动作负载与选择数据中的全部权威摘要（B1-a）、decisions 按观察者投影（行动者本人可见、非行动者/公共视图省略私有动作）（B1-b）、隐藏摸牌统一以来源区域语义脱敏（B1-c）、N5 拆分为格式层与语义层两类明确测试、判定区离开路径清理 entry_index 并扩展不变量；完整 pytest 1733 passed（1724 保留为第一次修复后历史结果）。本轮修复工作树完成待用户提交与再次复审；修复提交哈希尚未产生，不得虚构；在再次复审通过前 CP-04L 不得视为 audited。",
         "implementation_commit": "35c06bd50a431a62e7c3ad01d10384bf6884c403",
         "checkpoint_commit": null,
         "audit_gap_fix_commit": null,
         "final_audit_conclusion": null,
         "milestone_tag": null,
         "final_status": "committed_pending_audit",
-        "blocking_issue": "B1：player_visible 未脱敏 reshuffle 事件，直接泄露洗牌后的完整牌堆顺序、顶牌和对手隐藏摸牌"
+        "blocking_issue": "B1：player_visible 未脱敏 reshuffle 事件，直接泄露洗牌后的完整牌堆顺序、顶牌和对手隐藏摸牌",
+        "reaudit_conclusion": "AUDIT_FAILED_BLOCKING_ISSUES",
+        "reaudit_blocking_issues": [
+          "B1-a",
+          "B1-b",
+          "B1-c"
+        ],
+        "first_audit_fix_commit": "96f536e1f392fd97faf61518a849a0d515b6a82e"
       }
     }
   ],
   "final_verification": {
     "pytest": {
       "command": ".\\venv\\Scripts\\python.exe -m pytest -q --basetemp \".\\.pytest-temp\\run\" -p no:cacheprovider",
-      "passed": 1724,
+      "passed": 1733,
       "failed": 0,
       "skipped": 0,
-      "note": "1724=1707+17：CP-04L 第一次独立审计修复（2026-08-05）新增 17 项（B1 小候选空间攻击与哈希旁路、viewer_id 契约、N1 闪电判定前被无懈、N2 乐＋兵同时跳过、N3 全部7张实体正式使用路径、N4 判定区 entry_index 不变量失败关闭、N5 单字段严格回放篡改、N6 未实现判定操作伪造动作失败关闭、N8 被跳过回合后下一回合恢复、N9 闪电＋传导＋双濒死救援组合及其严格回放）；1707 保留为修复前历史结果；完整 pytest 1724 passed（失败0、跳过0）；compileall 通过；源码完整性审计 scanned_file_count=118、defect_count=0、audit_item_count=55；审计修复工作树完成待用户提交，独立审计尚未复审（NOT_AUDITED_YET）。"
+      "note": "1733=1724+9：CP-04L 第二次最终复审修复（2026-08-06）新增 9 项（B1-a state_hash 递归脱敏攻击、B1-b 行动者手牌攻击、B1-c tiesuo_recast 隐藏获得攻击、判定窗口行动者投影、公开/隐藏获得成对回归、judgment_entry_indices 清理与陈旧失败关闭、zone-choice 窗口投影，以及 N5 拆分后新增的语义层重执行篡改测试）；1707 与 1724 保留为历史结果；完整 pytest 1733 passed（失败0、跳过0）；compileall 通过；源码完整性审计 scanned_file_count=118、defect_count=0、audit_item_count=55；第二次复审修复工作树完成待用户提交与再次复审，独立审计结论保持 NOT_AUDITED_YET。"
     },
     "compileall": {
       "command": ".\\\\.venv\\\\Scripts\\\\python.exe -m compileall -q scripts tests",
@@ -649,10 +656,10 @@
     }
   },
   "sha256": {
-    "docs/ENGINE_STATUS.md": "9f52f21d0be33ad07a5bb3873e7bcbb73b795e0f18c3243d28ea2541bfab02ea",
-    "docs/IMPLEMENTATION_MATRIX.md": "71fc591c78174f8def34f22d2b7e57b0f4920d1cd61177edb6ed7fa789057307",
+    "docs/ENGINE_STATUS.md": "5ebaf48057c0f39f6a6b86d5cd8a5bc374cd21fa17e094b7494b6e57b7efecb7",
+    "docs/IMPLEMENTATION_MATRIX.md": "f2738de508334adc44ae0e4f10d8074b13967c46eb1b1e515ee23509d58d878d",
     "docs/LEGACY_RESULTS_INVALID.md": "267d51329b65b4435ed770b9fe90a0d53148d17cc9b0dae3e6d3406b06c0c0cc",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "f3b48992e2a4925853b1ac370960ecd4a37f4c0fafb66aad95b0315e071314f7",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "22bb0c9377cbe5f470fa6b764d2d58b653eef8fc27c6e9f29cd267d9e6b43d6f",
     "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "23b56a0edf0c85657b332100538013de16be4d71ea6a8214ac862a6708105af6",
     "knowledge/三国杀牌堆数据.csv": "8cb8da4177f11962776ae0f7e0154ed4ce56e293e96ac457874d48650517de18",
     "scripts/sgs_dev_runner.py": "6f88baa78fc9c22106188defda7190cd2a4412325db46f3964d217fd0e61c755",
@@ -663,26 +670,26 @@
     "scripts/sgs_engine/engine.py": "1a983ef03cc607644d27ac1902c961e687f1eab254679c81a6ab2e5235d824c7",
     "scripts/sgs_engine/events.py": "ca4c2e1d90ed2a950eb145327de322ef13d98cb17cf744709c022127dc2bc059",
     "scripts/sgs_engine/model.py": "54e9ddaacbd57bed216e5a98cbfded9ce1b89fe5a94b8141e6d77c46d3d9f014",
-    "scripts/sgs_engine/production_batch.py": "9f2685926526f0b2fc26745c854a6ba1246385e3e502da76f14fab1072a62ac0",
+    "scripts/sgs_engine/production_batch.py": "0d17524f7452b3732ccfada1178f9efb0e16c6d9eb81410fe114305b67069bdd",
     "scripts/sgs_engine/production_cards.py": "fc4ab8682da5588dcf6f28dddcfa14612af9f4b00ad9cafcd9068f09ba4ba9ed",
-    "scripts/sgs_engine/production_replay.py": "d8e8f60859256ed357f250cdc742c305e58c7d3bb59bbcb55ac0c014a72fb0b4",
+    "scripts/sgs_engine/production_replay.py": "5b1e2e3efe7d4e4a34a99695349d63f7b21838730ad3e7d64b1533e8b347def6",
     "scripts/sgs_engine/replay.py": "27cd09a98e9ea09d03a6de3542d13abc94341fde4d33a5fdc5e8bdc5497580b1",
     "scripts/sgs_engine/rng.py": "3cb67017556535802c2b323e8002217961955ffee7ff161de85d804d86d5ead6",
     "scripts/sgs_engine_gate.py": "acdfa735982f234462080de4b4137e1b1f3cfcadb709b7258ffb73c4aeb2e925",
     "scripts/sgs_formal_runner.py": "840aa483354a80bcb8867c197352d34f32f985a92cb2287dc2593812c0260be2",
     "scripts/sgs_source_integrity_audit.py": "046aa2a68ed3c3da6df0e8ee9389fe27f8ff4120bc4475f8317fec5a899d8909",
     "tests/test_sgs_production_basic_cards.py": "2f7439d4dfb836c1efa1ec66ef6ac78dc48362a50e84c0630aded9ea0dddc22c",
-    "tests/test_sgs_production_duel_fire_attack.py": "a2cf7ad7635fb1e2aada3c65a884ca89dbb5382b1f01bf7de5fc26b0040a00ca",
-    "tests/test_sgs_production_group_target_tricks.py": "d1023ccf6e7a8d96130feee3bfa6f290c13f3d2d494dad5fd344291698e84e02",
-    "tests/test_sgs_production_hidden_handle_security.py": "797133f03b3307593502f5dfc81217f82b5b2449eff777350afa215ffb4d2718",
+    "tests/test_sgs_production_duel_fire_attack.py": "6d5ac4a398b574ccc32101a731fdb84b33428525525e9971933d959855c7960d",
+    "tests/test_sgs_production_group_target_tricks.py": "cd5ad2cc6e42d725475f59e8315734c0c3cf589258c4db0e3a511b68448b47df",
+    "tests/test_sgs_production_hidden_handle_security.py": "2a100715553dc34531fa4b768367dfac42b793929d26fa644f0e2c15e17fe5e3",
     "tests/test_sgs_production_single_target_tricks.py": "b540c681a306961c5ce8a67436d153c6ff815b3a06b37ed911d284bf50aa253c",
-    "tests/test_sgs_production_zone_target_tricks.py": "16c04b865a92642a1484b5bc3dc207115de30ac28dc3c604dfa9b299a356f29b",
+    "tests/test_sgs_production_zone_target_tricks.py": "1e3d43a37bd032b19386cf533a7bfe3f53d8a04c17d2e8f3aa4a2c3eba99fe25",
     "hash_note": "本表为当前工作树文件按Git规范化blob字节（core.autocrlf=true，CRLF统一为LF，UTF-8无BOM）计算的SHA-256；仅作状态记录，不参与门禁校验；docs/CHECKPOINT_MANIFEST.json自身不进入本表",
     "tests/test_sgs_production_chain_damage.py": "779a55170dc7fbcff88265cf49f780eb95fd2566a4b1a1ff0718e6930ad908fc",
-    "tests/test_sgs_production_remaining_ordinary_tricks.py": "8d60dca9ca5cba76b92dba2314acb5ec9f0b68c43307f91c46363b4554ef14a2",
+    "tests/test_sgs_production_remaining_ordinary_tricks.py": "3e4d0eeb76f30364cb6b9cc06067fa043c14f7a0c58b3ea8bdff648c8e5fc830",
     "knowledge/三国杀卡牌效果.md": "e08e79330d60ebcb3c0e7e8f3cb543d8464f50abd3d0c6b396d6c019ff0f13f9",
     "tests/test_sgs_engine_events.py": "bbfe87c398e2fb5f9fa7eea7b7bb481bd56060ccea3898a0836559e3a1ac7d81",
-    "tests/test_sgs_production_borrowed_sword_weapon_system.py": "24182a422ffa79f9cfeed5fabcd39deb4123c804dccbdba1a5c2427d659d3028",
-    "tests/test_sgs_production_delayed_tricks.py": "9a70f63b7a1228057b1aeaa2893d9a5a92c2aca21e7fe7eeddc70e01dd9859c1"
+    "tests/test_sgs_production_borrowed_sword_weapon_system.py": "872e189a765d626a1a4473c58e3b1eaf8fb3515b360c849ee621b5d5b5a2bcf4",
+    "tests/test_sgs_production_delayed_tricks.py": "da79f8b59dcd463afe70b78c7717e27c87301300ccec2be29b0c4df6ceea4a51"
   }
 }

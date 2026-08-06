@@ -7367,9 +7367,20 @@ class ProductionBasicCardBatch:
                 },
             )
             finish_events = [*finish_events, judgment_finish]
-        # 死亡区域清理：死亡角色手牌区、装备区、判定区全部牌进入弃牌堆
+        # 死亡区域清理：死亡角色手牌区、装备区、判定区全部牌进入弃牌堆；
+        # 判定区实体离开后其 entry_index 一并移除（复审观察项二）。
+        dying_judgment_ids = set(
+            next_state.card_ids_in(ZoneRef.judgment(dying_id))
+        )
         next_state, cleanup_events = self._death_zone_cleanup(
             next_state, dying_id
+        )
+        judgment_entry_indices_after_death = MappingProxyType(
+            {
+                key: value
+                for key, value in runtime.judgment_entry_indices.items()
+                if key not in dying_judgment_ids
+            }
         )
         borrowed = runtime.pending_borrowed_sword
         if (
@@ -7451,6 +7462,7 @@ class ProductionBasicCardBatch:
             pending_chain=None,
             pending_judgment=None,
             processed_judgment_instance_ids=(),
+            judgment_entry_indices=judgment_entry_indices_after_death,
             skipped_phases=MappingProxyType({}),
             phase_skip_reasons=MappingProxyType({}),
             defer_damage_card_finish=False,
@@ -7757,6 +7769,15 @@ class ProductionBasicCardBatch:
                     f"judgment_zone_entry_index重复（{index}）；失败关闭"
                 )
             seen[index] = instance_id
+        active_instance_ids = {instance_id for instance_id, _ in active}
+        stale = sorted(
+            set(indices).difference(active_instance_ids)
+        )
+        if stale:
+            raise ProductionBatchError(
+                f"判定区实体{'、'.join(stale)}的judgment_zone_entry_index"
+                "残留（已不在判定区）；失败关闭"
+            )
         if active and runtime.judgment_entry_counter < max(
             index for _, index in active
         ):
@@ -7873,6 +7894,9 @@ class ProductionBasicCardBatch:
             phase=ProductionPhase.JUDGMENT,
             pending_judgment=None,
             processed_judgment_instance_ids=processed,
+            judgment_entry_indices=self._without_judgment_index(
+                runtime, trick_id
+            ),
         )
         return next_state, next_runtime
 
@@ -8046,6 +8070,9 @@ class ProductionBasicCardBatch:
                 phase=ProductionPhase.JUDGMENT,
                 pending_judgment=None,
                 processed_judgment_instance_ids=processed,
+                judgment_entry_indices=self._without_judgment_index(
+                    base_runtime, trick_id
+                ),
             )
             return next_state, next_runtime
         # 闪电
@@ -8061,6 +8088,9 @@ class ProductionBasicCardBatch:
         resolving_runtime = replace(
             runtime,
             pending_judgment=replace(pending, stage="resolving_effect"),
+            judgment_entry_indices=self._without_judgment_index(
+                runtime, trick_id
+            ),
         )
         return self._apply_damage_and_maybe_chain(
             next_state,
@@ -8165,11 +8195,33 @@ class ProductionBasicCardBatch:
             pending_judgment=None,
             processed_judgment_instance_ids=processed,
             judgment_entry_indices=MappingProxyType(
-                {**runtime.judgment_entry_indices, trick_id: new_index}
+                {
+                    **{
+                        key: value
+                        for key, value in runtime.judgment_entry_indices.items()
+                        if key != trick_id
+                    },
+                    trick_id: new_index,
+                }
             ),
             judgment_entry_counter=new_index,
         )
         return next_state, next_runtime
+
+    def _without_judgment_index(
+        self,
+        runtime: _BatchRuntime,
+        instance_id: str,
+    ) -> Mapping[str, int]:
+        """移除指定实例的判定区进入索引（CP-04L 复审观察项二）。"""
+
+        return MappingProxyType(
+            {
+                key: value
+                for key, value in runtime.judgment_entry_indices.items()
+                if key != instance_id
+            }
+        )
 
     def _move_zone_to_processing(
         self,
