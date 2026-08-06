@@ -8,9 +8,10 @@
 【桃园结义】、【铁索连环】、【五谷丰登】）、【借刀杀人】、11种武器牌本体
 （主动装备、同槽替换、攻击范围动态计算）以及三种延时锦囊（【乐不思蜀】、
 【兵粮寸断】、【闪电】）与正式回合阶段（PREPARE／JUDGMENT／DRAW／PLAY／END）、
-判定牌生命周期、判定前无懈链和动态LIFO判定队列已接入生产注册表与权威核心
-调用路径；武器专属技能保持 partial 并按集中式门禁失败关闭；防具、坐骑、
-武将技能、弃牌阶段、改判、多人模式、AI 和正式整局仍未完成；调用
+判定牌生命周期、判定前无懈链和动态LIFO判定队列，以及四种防具（【八卦阵】、
+【仁王盾】、【藤甲】、【白银狮子】）与统一伤害修正／防止基础设施已接入生产
+注册表与权威核心调用路径；武器专属技能保持 partial 并按集中式门禁失败关闭；
+坐骑、武将技能、弃牌阶段、改判、多人模式、AI 和正式整局仍未完成；调用
 ``AuthoritativeCoreSession.run_game`` 会明确抛出 ``UnsupportedRuleError``。
 """
 
@@ -137,10 +138,16 @@ from .production_cards import (
     actual_distance,
     PRODUCTION_DELAYED_TRICK_KEYS,
     PRODUCTION_WEAPON_KEYS,
+    PRODUCTION_ARMOR_KEYS,
     attack_range_of,
     check_weapon_skill_gate,
     is_valid_slash_target,
     weapon_attack_ranges,
+    ArmorCardAdapter,
+    BaguaZhenAdapter,
+    RenwangDunAdapter,
+    TengjiaAdapter,
+    BaiyinShiziAdapter,
 )
 from .production_replay import (
     ProductionReexecutionReplay,
@@ -196,9 +203,15 @@ __all__ = [
     "BatchReferenceController",
     "CARD_NAMES_BY_KEY",
     "DEFAULT_ATTACK_RANGE",
+    "PRODUCTION_ARMOR_KEYS",
     "DodgeAdapter",
     "FormalCardRegistry",
     "BingliangAdapter",
+    "ArmorCardAdapter",
+    "BaguaZhenAdapter",
+    "RenwangDunAdapter",
+    "TengjiaAdapter",
+    "BaiyinShiziAdapter",
     "DelayedTrickAdapter",
     "HuogongAdapter",
     "JiedaoSharenAdapter",

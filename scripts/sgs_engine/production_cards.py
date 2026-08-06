@@ -78,6 +78,10 @@ CARD_NAMES_BY_KEY: Mapping[str, str] = {
     "sgs_delayed_lebusi": "乐不思蜀",
     "sgs_delayed_bingliang": "兵粮寸断",
     "sgs_delayed_shandian": "闪电",
+    "sgs_armor_baguazhen": "八卦阵",
+    "sgs_armor_renwangdun": "仁王盾",
+    "sgs_armor_tengjia": "藤甲",
+    "sgs_armor_baiyinshizi": "白银狮子",
 }
 
 SLASH_CARD_KEYS: tuple[str, ...] = (
@@ -127,6 +131,13 @@ PRODUCTION_DELAYED_TRICK_KEYS: tuple[str, ...] = (
     "sgs_delayed_lebusi",
     "sgs_delayed_bingliang",
     "sgs_delayed_shandian",
+)
+
+PRODUCTION_ARMOR_KEYS: tuple[str, ...] = (
+    "sgs_armor_baguazhen",
+    "sgs_armor_renwangdun",
+    "sgs_armor_tengjia",
+    "sgs_armor_baiyinshizi",
 )
 
 DEFAULT_STRUCTURED_CARD_CSV_PATH = Path("knowledge") / "三国杀卡牌结构化数据.csv"
@@ -2293,6 +2304,225 @@ class WeaponCardAdapter(BasicCardAdapter):
         )
 
 
+class ArmorCardAdapter(BasicCardAdapter):
+    """四种防具牌本体的通用生产适配器（CP-04M）。
+
+    只实现牌本体与统一防具效果入口：出牌阶段主动使用、防具进入armor槽、
+    同槽替换把旧防具原子移入弃牌堆、装备区公开。各防具的持续效果（八卦阵
+    判定、仁王盾黑杀无效、藤甲免疫与火属性伤害+1、白银狮子限伤与离区恢复）
+    由生产批处理会话的统一防具解析管线按 Knowledge 实现，不在此复制独立
+    伤害或判定逻辑；坐骑与其余武器专属技能继续失败关闭。
+    """
+
+    def __init__(
+        self,
+        card_key: str,
+        session: "ProductionBasicCardBatch | None" = None,
+    ) -> None:
+        super().__init__(session)
+        if card_key not in PRODUCTION_ARMOR_KEYS:
+            raise ValueError(f"{card_key}不是本批次的防具卡牌键")
+        self.card_key = card_key
+        self.card_name = CARD_NAMES_BY_KEY[card_key]
+
+    def rule_spec(self) -> dict[str, object]:
+        return {
+            "card_key": self.card_key,
+            "card_name": self.card_name,
+            "use_timing": "own_play_phase",
+            "use_limit": "unlimited_base;requires_entity_card",
+            "target_count": 0,
+            "target_filter": "self_equip_armor_slot",
+            "equipment_slot": "armor",
+            "skill_status": "implemented",
+            "skill_effect": self._armor_effect_summary(),
+            "movement_lifecycle": "hand->processing->armor_slot",
+            "replacement": "old_armor_atomic_to_discard",
+            "adapter_version": self.adapter_version,
+            "implemented": self.implemented,
+            "tested": self.tested,
+            "production_adapter": self.production_adapter,
+        }
+
+    def _armor_effect_summary(self) -> str:
+        raise NotImplementedError
+
+    def enumerate_legal_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        session = self._require_session()
+        phase = session.phase.value
+        if phase == "play":
+            return self._enumerate_equip_use(state, context)
+        if (
+            phase in ("slash_response", "wanjian_response")
+            and self.card_key == "sgs_armor_baguazhen"
+        ):
+            return self._enumerate_bagua_activate(state, context)
+        return ()
+
+    def _enumerate_equip_use(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        session = self._require_session()
+        if context.actor_id != session.runtime.current_player_id:
+            return ()
+        actions: list[LegalAction] = []
+        for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
+            card = state.cards_by_id[instance_id]
+            if card.card_key != self.card_key:
+                continue
+            actions.append(
+                LegalAction(
+                    action_type=ActionType.USE_CARD,
+                    actor_id=context.actor_id,
+                    card_instance_id=instance_id,
+                    target_ids=(context.actor_id,),
+                    payload={
+                        "operation": "use_armor",
+                        "card_key": self.card_key,
+                        "card_name": self.card_name,
+                    },
+                )
+            )
+        return tuple(actions)
+
+    def _enumerate_bagua_activate(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        """【八卦阵】发动判定：响应【杀】／【万箭齐发】窗口内可选发动。"""
+        session = self._require_session()
+        runtime = session.runtime
+        if runtime.bagua_attempted:
+            return ()
+        phase = session.phase
+        if phase.value == "slash_response":
+            if runtime.pending_slash is None:
+                return ()
+            if context.actor_id != runtime.pending_slash.target_id:
+                return ()
+            response_to_card_key = state.cards_by_id[
+                runtime.pending_slash.slash_instance_id
+            ].card_key
+            window_id = runtime.response_window_id
+        elif phase.value == "wanjian_response":
+            group = runtime.pending_group_trick
+            if group is None or group.responder_id is None:
+                return ()
+            if context.actor_id != group.responder_id:
+                return ()
+            response_to_card_key = group.trick_key
+            window_id = (
+                f"{group.trick_key}:{runtime.turn_number}:"
+                f"{group.trick_instance_id}:gt{group.current_target_index}"
+            )
+        else:
+            return ()
+        if window_id is None:
+            return ()
+        armor_ids = state.card_ids_in(ZoneRef.equipment(context.actor_id, "armor"))
+        if len(armor_ids) != 1:
+            return ()
+        armor_id = armor_ids[0]
+        if state.cards_by_id[armor_id].card_key != self.card_key:
+            return ()
+        return (
+            LegalAction(
+                action_type=ActionType.PASS,
+                actor_id=context.actor_id,
+                card_instance_id=armor_id,
+                target_ids=(context.actor_id,),
+                payload={
+                    "operation": "activate_bagua",
+                    "card_key": self.card_key,
+                    "card_name": self.card_name,
+                    "response_to_card_key": response_to_card_key,
+                    "response_window_id": window_id,
+                },
+            ),
+        )
+
+    def apply_action(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        session = self._require_session()
+        phase = session.phase.value
+        if phase == "play":
+            return session.apply_armor_use(state, context, action, self)
+        if phase in ("slash_response", "wanjian_response"):
+            if (
+                self.card_key == "sgs_armor_baguazhen"
+                and str(action.payload.get("operation", "")) == "activate_bagua"
+            ):
+                return session.apply_bagua_activate(state, context, action, self)
+            raise InvalidActionError(
+                f"{self.card_name}生产适配器不能处理当前阶段的动作"
+            )
+        raise InvalidActionError(
+            f"{self.card_name}生产适配器不能处理当前阶段的动作"
+        )
+
+
+class BaguaZhenAdapter(ArmorCardAdapter):
+    """【八卦阵】的生产适配器（CP-04M）。"""
+
+    def __init__(
+        self, session: "ProductionBasicCardBatch | None" = None
+    ) -> None:
+        super().__init__("sgs_armor_baguazhen", session)
+
+    def _armor_effect_summary(self) -> str:
+        return (
+            "need_use_or_play_dodge:optional_judgment;"
+            "red_judgment_virtual_dodge(use_for_slash/play_for_wanjian);"
+            "black_judgment_fail_continue_real_response;"
+            "no_judgment_wuxie_window"
+        )
+
+
+class RenwangDunAdapter(ArmorCardAdapter):
+    """【仁王盾】的生产适配器（CP-04M）。"""
+
+    def __init__(
+        self, session: "ProductionBasicCardBatch | None" = None
+    ) -> None:
+        super().__init__("sgs_armor_renwangdun", session)
+
+    def _armor_effect_summary(self) -> str:
+        return "black_slash_invalid_against_owner;red_slash_unaffected"
+
+
+class TengjiaAdapter(ArmorCardAdapter):
+    """【藤甲】的生产适配器（CP-04M）。"""
+
+    def __init__(
+        self, session: "ProductionBasicCardBatch | None" = None
+    ) -> None:
+        super().__init__("sgs_armor_tengjia", session)
+
+    def _armor_effect_summary(self) -> str:
+        return (
+            "normal_slash_nanman_wanjian_invalid_against_owner;"
+            "fire_damage_plus_one;thunder_unaffected"
+        )
+
+
+class BaiyinShiziAdapter(ArmorCardAdapter):
+    """【白银狮子】的生产适配器（CP-04M）。"""
+
+    def __init__(
+        self, session: "ProductionBasicCardBatch | None" = None
+    ) -> None:
+        super().__init__("sgs_armor_baiyinshizi", session)
+
+    def _armor_effect_summary(self) -> str:
+        return (
+            "damage_ge_two_capped_to_one;"
+            "leaving_armor_slot_recovers_one_hp_within_max;"
+            "death_cleanup_no_recovery"
+        )
+
+
 class JiedaoSharenAdapter(TrickCardAdapter):
     """【借刀杀人】的生产适配器（CP-04K）。
 
@@ -2446,6 +2676,10 @@ def _default_adapters() -> dict[str, RuleAdapter]:
         "sgs_delayed_lebusi": LebusiAdapter(),
         "sgs_delayed_bingliang": BingliangAdapter(),
         "sgs_delayed_shandian": ShandianAdapter(),
+        "sgs_armor_baguazhen": BaguaZhenAdapter(),
+        "sgs_armor_renwangdun": RenwangDunAdapter(),
+        "sgs_armor_tengjia": TengjiaAdapter(),
+        "sgs_armor_baiyinshizi": BaiyinShiziAdapter(),
     }
 
 

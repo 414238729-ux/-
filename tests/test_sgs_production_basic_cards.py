@@ -35,6 +35,7 @@ from scripts.sgs_engine.production_batch import (
     ProductionPhase,
 )
 from scripts.sgs_engine.production_cards import (
+    PRODUCTION_ARMOR_KEYS,
     PRODUCTION_BASIC_CARD_KEYS,
     PRODUCTION_TRICK_KEYS,
     PRODUCTION_DELAYED_TRICK_KEYS,
@@ -114,7 +115,7 @@ def test_formal_160_deck_production_card_keys_map_to_production_adapters() -> No
 
     assert registry.card_count == 160
     assert len(registry.instance_ids) == len(set(registry.instance_ids)) == 160
-    assert set(registry.implemented_card_keys) == set(PRODUCTION_BASIC_CARD_KEYS) | set(PRODUCTION_TRICK_KEYS) | set(PRODUCTION_WEAPON_KEYS) | set(PRODUCTION_DELAYED_TRICK_KEYS)
+    assert set(registry.implemented_card_keys) == set(PRODUCTION_BASIC_CARD_KEYS) | set(PRODUCTION_TRICK_KEYS) | set(PRODUCTION_WEAPON_KEYS) | set(PRODUCTION_DELAYED_TRICK_KEYS) | set(PRODUCTION_ARMOR_KEYS)
     for key in PRODUCTION_BASIC_CARD_KEYS:
         adapter = registry.adapter_for(key)
         assert isinstance(adapter, BasicCardAdapter)
@@ -762,13 +763,13 @@ def test_actions_must_pass_enumerate_validate_apply_pipeline() -> None:
 def test_unimplemented_trick_cards_fail_closed_without_fallback() -> None:
     game = _fresh(seed=49)
     registry = game.formal_registry
-    assert "sgs_armor_baguazhen" in registry.unimplemented_card_keys
+    assert "sgs_mount_offensive" in registry.unimplemented_card_keys
     with pytest.raises(UnsupportedRuleError):
-        registry.adapter_for("sgs_armor_baguazhen")
+        registry.adapter_for("sgs_mount_offensive")
     with pytest.raises(UnsupportedRuleError):
         registry.adapter_for("sgs_mount_defensive")
     with pytest.raises(UnsupportedRuleError):
-        registry.rule_spec_for("sgs_armor_baguazhen")
+        registry.rule_spec_for("sgs_mount_offensive")
     with pytest.raises(UnsupportedRuleError):
         registry.assert_no_unimplemented_fallback()
 
@@ -848,7 +849,7 @@ def test_unimplemented_equipment_fails_closed_including_range() -> None:
 def test_test_only_adapters_never_enter_production_registry() -> None:
     game = _fresh(seed=1)
     registry = game.formal_registry
-    assert set(registry.adapters) == set(PRODUCTION_BASIC_CARD_KEYS) | set(PRODUCTION_TRICK_KEYS) | set(PRODUCTION_WEAPON_KEYS) | set(PRODUCTION_DELAYED_TRICK_KEYS)
+    assert set(registry.adapters) == set(PRODUCTION_BASIC_CARD_KEYS) | set(PRODUCTION_TRICK_KEYS) | set(PRODUCTION_WEAPON_KEYS) | set(PRODUCTION_DELAYED_TRICK_KEYS) | set(PRODUCTION_ARMOR_KEYS)
     for key, adapter in registry.adapters.items():
         assert isinstance(adapter, BasicCardAdapter)
         assert not str(type(adapter).__module__).endswith(".duel")

@@ -48,6 +48,10 @@ class EventType(str, Enum):
     EQUIPMENT_EQUIPPED = "equipment_equipped"
     EQUIPMENT_REMOVED = "equipment_removed"
     EQUIPMENT_REPLACED = "equipment_replaced"
+    ARMOR_JUDGMENT_STARTED = "armor_judgment_started"
+    ARMOR_JUDGMENT_RESULT = "armor_judgment_result"
+    ARMOR_RECOVERED = "armor_recovered"
+    DAMAGE_PREVENTED = "damage_prevented"
 
 
 def _validate_id(value: object, field_name: str) -> None:
@@ -662,6 +666,145 @@ def validate_event_contract(event: GameEvent) -> GameEvent:
                 "传导结束事件stop_reason只能是completed、prevented_zero、"
                 "winner或no_candidates"
             )
+    if event.event_type is EventType.ARMOR_JUDGMENT_STARTED:
+        if event.card_instance_id is None or event.card_key is None:
+            raise ValueError("防具判定开始事件必须提供防具实体牌ID与card_key")
+        if len(event.target_ids) != 1:
+            raise ValueError("防具判定开始事件必须且只能指定一名判定角色")
+        payload = event.payload
+        if set(payload) != {
+            "armor_instance_id",
+            "armor_key",
+            "target_id",
+            "response_to_card_key",
+            "response_window_id",
+        }:
+            raise ValueError(
+                "防具判定开始事件payload字段必须恰好为armor_instance_id、"
+                "armor_key、target_id、response_to_card_key与response_window_id"
+            )
+        if payload["armor_instance_id"] != event.card_instance_id:
+            raise ValueError("防具判定开始事件armor_instance_id必须等于实体牌ID")
+        if payload["armor_key"] != event.card_key:
+            raise ValueError("防具判定开始事件armor_key必须等于card_key")
+        if payload["target_id"] != event.target_ids[0]:
+            raise ValueError("防具判定开始事件target_id必须等于target_ids唯一角色")
+        _validate_nonempty_text(
+            payload["response_to_card_key"], "防具判定开始事件response_to_card_key"
+        )
+        _validate_nonempty_text(
+            payload["response_window_id"], "防具判定开始事件response_window_id"
+        )
+    if event.event_type is EventType.ARMOR_JUDGMENT_RESULT:
+        if event.card_instance_id is None or event.card_key is None:
+            raise ValueError("防具判定结果事件必须提供判定牌实体牌ID与card_key")
+        if len(event.target_ids) != 1:
+            raise ValueError("防具判定结果事件必须且只能指定一名判定角色")
+        payload = event.payload
+        if set(payload) != {
+            "armor_instance_id",
+            "judgment_card_instance_id",
+            "judgment_suit",
+            "judgment_color",
+            "success",
+            "virtual_response_kind",
+        }:
+            raise ValueError(
+                "防具判定结果事件payload字段必须恰好为armor_instance_id、"
+                "judgment_card_instance_id、judgment_suit、judgment_color、"
+                "success与virtual_response_kind"
+            )
+        if payload["judgment_card_instance_id"] != event.card_instance_id:
+            raise ValueError(
+                "防具判定结果事件judgment_card_instance_id必须等于判定牌实体ID"
+            )
+        if payload["armor_instance_id"] == event.card_instance_id:
+            raise ValueError("防具判定结果事件的判定牌不得与防具本体相同")
+        _validate_nonempty_text(
+            payload["armor_instance_id"], "防具判定结果事件armor_instance_id"
+        )
+        _validate_nonempty_text(
+            payload["judgment_suit"], "防具判定结果事件judgment_suit"
+        )
+        if payload["judgment_color"] not in ("红", "黑"):
+            raise ValueError("防具判定结果事件judgment_color只能是红或黑")
+        success = payload["success"]
+        if not isinstance(success, bool):
+            raise ValueError("防具判定结果事件success必须是布尔值")
+        kind = payload["virtual_response_kind"]
+        if success:
+            if kind not in ("use_dodge", "play_jink"):
+                raise ValueError(
+                    "防具判定成功时virtual_response_kind必须是use_dodge或play_jink"
+                )
+        elif kind is not None:
+            raise ValueError("防具判定失败时virtual_response_kind必须为空")
+    if event.event_type is EventType.ARMOR_RECOVERED:
+        if event.card_instance_id is None or event.card_key is None:
+            raise ValueError("防具恢复事件必须提供防具实体牌ID与card_key")
+        if len(event.target_ids) != 1:
+            raise ValueError("防具恢复事件必须且只能指定一名恢复角色")
+        payload = event.payload
+        if set(payload) != {
+            "armor_instance_id",
+            "armor_key",
+            "owner_id",
+            "hp_before",
+            "hp_after",
+            "reason",
+        }:
+            raise ValueError(
+                "防具恢复事件payload字段必须恰好为armor_instance_id、"
+                "armor_key、owner_id、hp_before、hp_after与reason"
+            )
+        if payload["armor_instance_id"] != event.card_instance_id:
+            raise ValueError("防具恢复事件armor_instance_id必须等于实体牌ID")
+        if payload["armor_key"] != event.card_key:
+            raise ValueError("防具恢复事件armor_key必须等于card_key")
+        if payload["owner_id"] != event.target_ids[0]:
+            raise ValueError("防具恢复事件owner_id必须等于target_ids唯一角色")
+        for field_name in ("hp_before", "hp_after"):
+            value = payload[field_name]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(
+                    f"防具恢复事件{field_name}必须是非负整数"
+                )
+        if not isinstance(payload["reason"], str) or not payload["reason"]:
+            raise ValueError("防具恢复事件reason必须是非空字符串")
+    if event.event_type is EventType.DAMAGE_PREVENTED:
+        if event.card_instance_id is None or event.card_key is None:
+            raise ValueError("伤害防止事件必须提供根实体牌ID与card_key")
+        if len(event.target_ids) != 1:
+            raise ValueError("伤害防止事件必须且只能指定一名受害角色")
+        payload = event.payload
+        if set(payload) != {
+            "victim_id",
+            "card_key",
+            "declared_amount",
+            "final_amount",
+            "modifiers",
+            "armor_ignored",
+        }:
+            raise ValueError(
+                "伤害防止事件payload字段必须恰好为victim_id、card_key、"
+                "declared_amount、final_amount、modifiers与armor_ignored"
+            )
+        if payload["victim_id"] != event.target_ids[0]:
+            raise ValueError("伤害防止事件victim_id必须等于target_ids唯一角色")
+        if payload["card_key"] != event.card_key:
+            raise ValueError("伤害防止事件payload.card_key必须等于card_key")
+        declared = payload["declared_amount"]
+        if isinstance(declared, bool) or not isinstance(declared, int) or declared <= 0:
+            raise ValueError("伤害防止事件declared_amount必须是正整数")
+        final = payload["final_amount"]
+        if final != 0:
+            raise ValueError("伤害防止事件final_amount必须为0")
+        modifiers = _validate_string_sequence(
+            payload["modifiers"], "伤害防止事件modifiers", unique=True
+        )
+        if not modifiers:
+            raise ValueError("伤害防止事件modifiers不能为空")
+        _validate_boolean(payload["armor_ignored"], "伤害防止事件armor_ignored")
     if event.event_type is EventType.CARD_RECAST:
         if event.card_instance_id is None or event.card_key is None:
             raise ValueError("重铸事件必须提供实体牌ID与card_key")

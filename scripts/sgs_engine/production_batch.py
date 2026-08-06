@@ -80,6 +80,7 @@ from .production_cards import (
     WugufengdengAdapter,
     WuxiekejiAdapter,
     WuzhongshengyouAdapter,
+    PRODUCTION_ARMOR_KEYS,
     SLASH_CARD_KEYS,
     actual_distance,
     check_weapon_skill_gate,
@@ -394,6 +395,7 @@ class _BatchRuntime:
     pending_damage_death_reason: str | None = None
     pending_chain: _PendingChainDamage | None = None
     winner_id: str | None = None
+    bagua_attempted: bool = False
 
     def audit_value(self) -> dict[str, object]:
         pending = None
@@ -507,6 +509,7 @@ class _BatchRuntime:
                 self.borrowed_sword_slash_snapshot_digest
             ),
             "winner_id": self.winner_id,
+            "bagua_attempted": self.bagua_attempted,
         }
 
     def _pending_borrowed_sword_value(
@@ -1172,6 +1175,137 @@ def _assert_deck_available(
             f"{label}需要{count}张牌，但牌堆与可重洗弃牌堆合计不足；"
             "生产批处理会话失败关闭且当前动作未被提交"
         )
+
+
+@dataclass(frozen=True, slots=True)
+class ArmorDamageResolution:
+    """统一防具伤害修正结果（CP-04M）。
+
+    ``final_amount`` 是经过全部已实现防具修正后的最终实际伤害（非负）；
+    ``modifiers`` 按确定顺序记录实际生效的修正原因；``prevented`` 表示
+    最终伤害为0（本批四种防具不会自然归零，该分支由统一接口保留给未来
+    防止类效果）；``armor_ignored`` 表示本次效果处于“无视防具”上下文，
+    全部防具修正被抑制。
+    """
+
+    declared_amount: int
+    final_amount: int
+    modifiers: tuple[str, ...]
+    prevented: bool
+    armor_ignored: bool
+
+
+def _armor_slot_instance(state: GameState, owner_id: str) -> str | None:
+    """读取角色防具槽的唯一实体（0或1张；多张即状态损坏失败关闭）。"""
+
+    ids = state.card_ids_in(ZoneRef.equipment(owner_id, "armor"))
+    if len(ids) > 1:
+        raise ProductionBatchError(
+            f"角色{owner_id}的防具槽必须至多包含一张防具牌；当前为{len(ids)}张"
+        )
+    return ids[0] if ids else None
+
+
+def resolve_armor_damage(
+    state: GameState,
+    *,
+    victim_id: str,
+    damage_type: str,
+    declared_amount: int,
+    ignore_armor: bool = False,
+) -> ArmorDamageResolution:
+    """统一防具伤害修正：藤甲火属性伤害+1，再按白银狮子限制（2点或更多
+    改为1点）。修正顺序确定、可序列化、可回放；最终伤害不得为负。
+
+    ``ignore_armor=True`` 表示当前效果处于“无视防具”上下文（未来武器
+    技能接入的统一入口）；此时全部防具修正被抑制。本批四种防具不会把
+    伤害归零，``prevented`` 分支由统一接口保留。"""
+
+    if not isinstance(state, GameState):
+        raise TypeError("统一防具解析必须接收GameState")
+    if victim_id not in state.players_by_id:
+        raise ValueError(f"找不到防具解析目标角色{victim_id!r}")
+    if not isinstance(damage_type, str) or not damage_type.strip():
+        raise ValueError("伤害属性必须是非空字符串")
+    if isinstance(declared_amount, bool) or not isinstance(declared_amount, int):
+        raise TypeError("声明伤害必须是整数")
+    if declared_amount < 0:
+        raise ValueError("声明伤害不能为负数")
+    if not isinstance(ignore_armor, bool):
+        raise TypeError("无视防具上下文必须是布尔值")
+
+    modifiers: list[str] = []
+    final_amount = declared_amount
+    armor_id = _armor_slot_instance(state, victim_id)
+    if armor_id is None or ignore_armor:
+        return ArmorDamageResolution(
+            declared_amount=declared_amount,
+            final_amount=final_amount,
+            modifiers=tuple(modifiers),
+            prevented=final_amount == 0,
+            armor_ignored=ignore_armor,
+        )
+    armor_key = state.cards_by_id[armor_id].card_key
+    if armor_key == "sgs_armor_tengjia" and damage_type == "火属性":
+        final_amount += 1
+        modifiers.append("tengjia_fire_plus_one")
+    if armor_key == "sgs_armor_baiyinshizi" and final_amount >= 2:
+        final_amount = 1
+        modifiers.append("baiyin_cap_one")
+    if final_amount < 0:
+        raise ProductionBatchError("防具修正后伤害不得为负；失败关闭")
+    return ArmorDamageResolution(
+        declared_amount=declared_amount,
+        final_amount=final_amount,
+        modifiers=tuple(modifiers),
+        prevented=final_amount == 0,
+        armor_ignored=False,
+    )
+
+
+def armor_invalidates_effect(
+    state: GameState,
+    *,
+    victim_id: str,
+    card_instance_id: str,
+    card_key: str,
+    ignore_armor: bool = False,
+) -> tuple[str, str] | None:
+    """统一防具“牌无效”判断：返回（无效原因，防具实体ID）或None。
+
+    仁王盾：黑色“杀”（普通／火／雷【杀】按实体牌颜色判断）对装备者无效；
+    藤甲：普通【杀】、【南蛮入侵】、【万箭齐发】对装备者无效。无色牌与
+    无视防具上下文不触发。返回原因用于在响应窗口前产生统一取消事件，
+    不在【杀】代码中静默return。"""
+
+    if not isinstance(state, GameState):
+        raise TypeError("统一防具无效判断必须接收GameState")
+    if victim_id not in state.players_by_id:
+        raise ValueError(f"找不到防具无效判断目标角色{victim_id!r}")
+    if not isinstance(card_instance_id, str) or not card_instance_id.strip():
+        raise ValueError("防具无效判断必须提供实体牌ID")
+    if not isinstance(card_key, str) or not card_key.strip():
+        raise ValueError("防具无效判断必须提供卡牌键")
+    if not isinstance(ignore_armor, bool):
+        raise TypeError("无视防具上下文必须是布尔值")
+    if ignore_armor:
+        return None
+    armor_id = _armor_slot_instance(state, victim_id)
+    if armor_id is None:
+        return None
+    armor_key = state.cards_by_id[armor_id].card_key
+    if armor_key == "sgs_armor_renwangdun" and card_key in SLASH_CARD_KEYS:
+        card = state.cards_by_id[card_instance_id]
+        if card.color == "黑":
+            return "renwangdun_black_slash", armor_id
+        return None
+    if armor_key == "sgs_armor_tengjia" and card_key in (
+        "sgs_basic_sha",
+        "sgs_trick_nanmanruqin",
+        "sgs_trick_wanjianqifa",
+    ):
+        return "tengjia_invalidates", armor_id
+    return None
 
 
 def _chain_trigger_conditions(
@@ -2229,6 +2363,10 @@ class ProductionBasicCardBatch:
                 return self._formal_registry.adapter_for(
                     action.payload.get("card_key", "")
                 ).apply_action(state, context, action)
+            if operation == "use_armor":
+                return self._formal_registry.adapter_for(
+                    action.payload.get("card_key", "")
+                ).apply_action(state, context, action)
             if operation in (
                 "use_lebusi",
                 "use_bingliang",
@@ -2254,6 +2392,10 @@ class ProductionBasicCardBatch:
             if operation == "play_dodge":
                 return self._formal_registry.adapter_for(
                     "sgs_basic_shan"
+                ).apply_action(state, context, action)
+            if operation == "activate_bagua":
+                return self._formal_registry.adapter_for(
+                    "sgs_armor_baguazhen"
                 ).apply_action(state, context, action)
             if action.action_type is ActionType.PASS and operation == (
                 "pass_slash_response"
@@ -2343,6 +2485,10 @@ class ProductionBasicCardBatch:
             if operation == "play_jink_for_wanjian":
                 return self._formal_registry.adapter_for(
                     "sgs_trick_wanjianqifa"
+                ).apply_action(state, context, action)
+            if operation == "activate_bagua":
+                return self._formal_registry.adapter_for(
+                    "sgs_armor_baguazhen"
                 ).apply_action(state, context, action)
             if action.action_type is ActionType.PASS and operation == (
                 "pass_wanjian_jink"
@@ -2622,14 +2768,55 @@ class ProductionBasicCardBatch:
         death_reason: str,
         rescue_reason: str,
         defer_root_finish: bool = False,
+        ignore_armor: bool = False,
     ) -> tuple[GameState, _BatchRuntime]:
         """统一正式伤害管线：原始伤害、横置解除、传导根与濒死挂起。
 
         ``defer_root_finish`` 供闪电等根牌使用：根牌完成时点由
         ``_complete_root_resolution`` 控制（传导/濒死子结算完成后再弃置），
-        避免在传导开始前提前弃置本体。"""
+        避免在传导开始前提前弃置本体。``ignore_armor`` 表示“无视防具”
+        上下文（统一接口，本批无真实武器调用者），修正顺序由统一
+        ``resolve_armor_damage`` 决定并进入事件审计。"""
 
         victim = state.players_by_id[victim_id]
+        resolution = resolve_armor_damage(
+            state,
+            victim_id=victim_id,
+            damage_type=damage_type,
+            declared_amount=amount,
+            ignore_armor=ignore_armor,
+        )
+        amount = resolution.final_amount
+        if amount == 0:
+            # 最终伤害为0：不扣减HP、不进入濒死、不触发传导；记录统一
+            # 防止事件并按根牌完成出口收尾（不产生 damage 事件）。
+            prevented_event = GameEvent(
+                event_type=EventType.DAMAGE_PREVENTED,
+                card_instance_id=card_instance_id,
+                card_key=card_key,
+                card_user=card_user,
+                target_ids=(victim_id,),
+                payload={
+                    "victim_id": victim_id,
+                    "card_key": card_key,
+                    "declared_amount": resolution.declared_amount,
+                    "final_amount": 0,
+                    "modifiers": list(resolution.modifiers),
+                    "armor_ignored": resolution.armor_ignored,
+                },
+            )
+            self._events.extend((prevented_event,))
+            if defer_root_finish:
+                if runtime.pending_chain is not None:
+                    return self._advance_chain(state, runtime)
+                return self._complete_root_resolution(state, runtime)
+            next_state, finish_event = self._finish_processing(
+                state, card_instance_id, resolved_reason
+            )
+            self._events.extend((finish_event,))
+            if runtime.pending_chain is not None:
+                return self._advance_chain(next_state, runtime)
+            return self._complete_root_resolution(next_state, runtime)
         next_state = _replace_player(state, victim_id, hp=victim.hp - amount)
         damage_event = DamageEvent(
             target_id=victim_id,
@@ -2640,7 +2827,13 @@ class ProductionBasicCardBatch:
             card_user=card_user,
             damage_source=source_id,
             kill_credit=kill_credit,
-            payload=dict(payload or {}),
+            payload={
+                **(dict(payload or {})),
+                "declared_amount": resolution.declared_amount,
+                "final_amount": amount,
+                "modifiers": list(resolution.modifiers),
+                "armor_ignored": resolution.armor_ignored,
+            },
         )
         (damage_event,) = self._events.extend((damage_event,))
         next_runtime = runtime
@@ -2724,13 +2917,30 @@ class ProductionBasicCardBatch:
 
         if target_id in chain.processed_target_ids:
             raise ProductionBatchError("传导目标被重复处理")
+        armor_resolution: ArmorDamageResolution | None = None
         if amount is None:
-            amount = _chain_recipient_base(chain.chain_base_damage, None)
+            base = _chain_recipient_base(chain.chain_base_damage, None)
+            # 每名传导目标独立应用自身防具修正（藤甲火+1、白银狮子限伤）；
+            # 局部变化只影响该角色，不改变后续候选使用的传导基础伤害。
+            armor_resolution = resolve_armor_damage(
+                state,
+                victim_id=target_id,
+                damage_type=chain.damage_type,
+                declared_amount=base,
+            )
+            amount = armor_resolution.final_amount
         else:
             if isinstance(amount, bool) or not isinstance(amount, int):
                 raise TypeError("注入的传导目标伤害必须是整数")
             if amount < 0:
                 raise ValueError("注入的传导目标伤害不能为负数")
+            armor_resolution = ArmorDamageResolution(
+                declared_amount=amount,
+                final_amount=amount,
+                modifiers=(),
+                prevented=amount == 0,
+                armor_ignored=False,
+            )
         victim = state.players_by_id[target_id]
         chained_old = victim.chained
         unchain, result = _chain_recipient_outcome(amount)
@@ -2780,6 +2990,10 @@ class ProductionBasicCardBatch:
                 "root_damage_event_id": chain.root_damage_event_id,
                 "chain_base_damage": chain.chain_base_damage,
                 "chain_target_index": chain.current_index,
+                "declared_amount": armor_resolution.declared_amount,
+                "final_amount": amount,
+                "modifiers": list(armor_resolution.modifiers),
+                "armor_ignored": armor_resolution.armor_ignored,
             },
         )
         self._events.extend((damage_event,))
@@ -3080,6 +3294,46 @@ class ProductionBasicCardBatch:
                        context.actor_id: runtime.slash_used_counts.get(
                            context.actor_id, 0
                        ) + 1}
+        invalidation = armor_invalidates_effect(
+            state,
+            victim_id=target,
+            card_instance_id=action.card_instance_id,
+            card_key=adapter.card_key,
+        )
+        if invalidation is not None:
+            # 仁王盾／藤甲令【杀】对目标无效：不开闪响应窗口、不造成伤害、
+            # 不消耗【闪】、不触发濒死或传导；杀仍算已经使用并进入弃牌堆。
+            invalid_reason, armor_id = invalidation
+            next_state, finish_event = self._finish_processing(
+                next_state,
+                action.card_instance_id,
+                f"slash_invalidated_by_{invalid_reason}",
+            )
+            cancelled_event = GameEvent(
+                event_type=EventType.CARD_EFFECT_CANCELLED,
+                card_instance_id=action.card_instance_id,
+                card_key=adapter.card_key,
+                card_user=context.actor_id,
+                target_ids=(target,),
+                payload={
+                    "reason": invalid_reason,
+                    "armor_instance_id": armor_id,
+                    "armor_key": _card_key(state, armor_id),
+                    "invalidated_by_armor": True,
+                },
+            )
+            self._events.extend((cancelled_event, finish_event))
+            next_runtime = replace(
+                runtime,
+                slash_used_counts=MappingProxyType(next_counts),
+                wine_buff_owner_id=None,
+                bagua_attempted=False,
+            )
+            next_state, next_runtime = self._complete_root_resolution(
+                next_state, next_runtime
+            )
+            self._commit_runtime(runtime, next_runtime)
+            return next_state
         next_runtime = replace(
             runtime,
             phase=ProductionPhase.SLASH_RESPONSE,
@@ -3093,6 +3347,7 @@ class ProductionBasicCardBatch:
             ),
             response_window_order=(target,),
             response_window_source_sequence=used_sequence,
+            bagua_attempted=False,
         )
         self._commit_runtime(runtime, next_runtime)
         return next_state
@@ -3957,10 +4212,20 @@ class ProductionBasicCardBatch:
         choice: _PendingZoneChoice,
         user_id: str,
         from_hidden: bool,
-    ) -> tuple[GameState, tuple[GameEvent, GameEvent, GameEvent]]:
+    ) -> tuple[GameState, tuple[GameEvent, ...]]:
         """【过河拆桥】把目标区域牌直接置入弃牌堆，不经过先获得再弃置。"""
 
         next_state = state.move_card(instance_id, DISCARD_PILE)
+        extra_events: list[GameEvent] = []
+        if zone == ZoneRef.equipment(choice.target_id, "armor"):
+            # 防具离区统一钩子：白银狮子被弃置时恢复装备者1点体力。
+            next_state, recovery_events = self._apply_armor_leave_recovery(
+                next_state,
+                instance_id=instance_id,
+                owner_id=choice.target_id,
+                reason="guohechaiqiao_discard",
+            )
+            extra_events.extend(recovery_events)
         card_key = _card_key(state, instance_id)
         move_event = GameEvent(
             event_type=EventType.CARD_MOVED,
@@ -4002,7 +4267,12 @@ class ProductionBasicCardBatch:
                 "from_hidden_zone": from_hidden,
             },
         )
-        return next_state, (move_event, lost_event, discarded_event)
+        return next_state, (
+            move_event,
+            lost_event,
+            discarded_event,
+            *extra_events,
+        )
 
     def _gain_target_zone_card_into_user_hand(
         self,
@@ -4012,11 +4282,21 @@ class ProductionBasicCardBatch:
         choice: _PendingZoneChoice,
         user_id: str,
         from_hidden: bool,
-    ) -> tuple[GameState, tuple[GameEvent, GameEvent, GameEvent]]:
+    ) -> tuple[GameState, tuple[GameEvent, ...]]:
         """【顺手牵羊】把目标区域牌直接从原区域移入使用者手牌。"""
 
         destination = ZoneRef.hand(user_id)
         next_state = state.move_card(instance_id, destination)
+        extra_events: list[GameEvent] = []
+        if zone == ZoneRef.equipment(choice.target_id, "armor"):
+            # 防具离区统一钩子：白银狮子被获得时恢复装备者1点体力。
+            next_state, recovery_events = self._apply_armor_leave_recovery(
+                next_state,
+                instance_id=instance_id,
+                owner_id=choice.target_id,
+                reason="shunshouqianyang_gain",
+            )
+            extra_events.extend(recovery_events)
         card_key = _card_key(state, instance_id)
         move_event = GameEvent(
             event_type=EventType.CARD_MOVED,
@@ -4057,7 +4337,12 @@ class ProductionBasicCardBatch:
                 "from_hidden_zone": from_hidden,
             },
         )
-        return next_state, (move_event, lost_event, gained_event)
+        return next_state, (
+            move_event,
+            lost_event,
+            gained_event,
+            *extra_events,
+        )
 
     # ------------------------------------------------------------------
     # 【决斗】交替打出【杀】（普通锦囊第三批）
@@ -4755,65 +5040,120 @@ class ProductionBasicCardBatch:
         action: LegalAction,
         adapter: WeaponCardAdapter,
     ) -> GameState:
-        """从手牌主动装备武器：处理区→weapon槽，同槽替换原子化。
+        """从手牌主动装备武器：处理区→weapon槽，同槽替换原子化（CP-04K）。"""
+        return self._apply_equipment_use(
+            state,
+            context,
+            action,
+            adapter,
+            slot="weapon",
+            operation="use_weapon",
+            reason_prefix="weapon_equip",
+        )
 
-        旧武器因替换进入弃牌堆，不伪造“玩家主动弃牌”；装备、移除与
-        替换三个最小装备事件按固定顺序登记，进入事件哈希链。"""
+    def apply_armor_use(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: object,
+    ) -> GameState:
+        """从手牌主动装备防具：处理区→armor槽，同槽替换原子化（CP-04M）。
+
+        旧防具因替换进入弃牌堆并触发统一装备离区事件；白银狮子离区恢复
+        挂在统一离区钩子上，不在单张锦囊代码里特殊处理。"""
+        return self._apply_equipment_use(
+            state,
+            context,
+            action,
+            adapter,
+            slot="armor",
+            operation="use_armor",
+            reason_prefix="armor_equip",
+        )
+
+    def _apply_equipment_use(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: object,
+        *,
+        slot: str,
+        operation: str,
+        reason_prefix: str,
+    ) -> GameState:
+        """通用装备主动使用：手牌→处理区→装备槽，同槽替换原子化。
+
+        旧装备因替换进入弃牌堆，不伪造“玩家主动弃置”；装备、移除与
+        替换三个最小装备事件按固定顺序登记，进入事件哈希链；防具槽替换
+        时旧防具离区先挂统一离区钩子（白银狮子恢复），再登记移除事件。"""
 
         runtime = self._runtime
         if runtime.phase is not ProductionPhase.PLAY:
-            raise InvalidActionError("武器只能在出牌阶段装备")
+            raise InvalidActionError("装备只能在出牌阶段进行")
         if context.actor_id != runtime.current_player_id:
-            raise InvalidActionError("只有当前回合角色可以装备武器")
+            raise InvalidActionError("只有当前回合角色可以装备")
         if action.card_instance_id is None:
-            raise InvalidActionError("装备武器必须指定实体牌")
+            raise InvalidActionError("装备必须指定实体牌")
         card = state.cards_by_id[action.card_instance_id]
-        if card.card_key != adapter.card_key:
-            raise InvalidActionError("武器动作的实体牌与适配器卡牌键不一致")
-        if str(action.payload.get("card_key", "")) != adapter.card_key:
-            raise InvalidActionError("武器动作负载与适配器卡牌键不一致")
+        if card.card_key != getattr(adapter, "card_key", None):
+            raise InvalidActionError("装备动作的实体牌与适配器卡牌键不一致")
+        if str(action.payload.get("card_key", "")) != getattr(
+            adapter, "card_key", None
+        ):
+            raise InvalidActionError("装备动作负载与适配器卡牌键不一致")
         if state.location_of(action.card_instance_id) != ZoneRef.hand(
             context.actor_id
         ):
             raise InvalidActionError("只能装备行动角色真实手牌中的实体牌")
-        if card.card_type != "装备牌" or card.equipment_slot != "weapon":
-            raise InvalidActionError("该实体牌不是武器槽装备牌")
+        if card.card_type != "装备牌" or card.equipment_slot != slot:
+            raise InvalidActionError(f"该实体牌不是{slot}槽装备牌")
         if action.target_ids != (context.actor_id,):
-            raise InvalidActionError("武器装备只能以自己为目标")
+            raise InvalidActionError(f"{slot}装备只能以自己为目标")
 
         next_state, enter_event = self._move_to_processing(
             state,
             action.card_instance_id,
             context.actor_id,
-            "weapon_equip:enter_processing",
+            f"{reason_prefix}:enter_processing",
         )
         used_event = GameEvent(
             event_type=EventType.CARD_USED,
             card_instance_id=action.card_instance_id,
-            card_key=adapter.card_key,
+            card_key=card.card_key,
             card_user=context.actor_id,
             target_ids=(context.actor_id,),
             payload={
                 "purpose": "equip",
-                "equipment_slot": "weapon",
-                "card_name": adapter.card_name,
+                "equipment_slot": slot,
+                "card_name": getattr(adapter, "card_name", card.card_name),
             },
         )
         self._events.extend((used_event, enter_event))
 
-        slot = ZoneRef.equipment(context.actor_id, "weapon")
-        old_ids = next_state.card_ids_in(slot)
+        target_slot = ZoneRef.equipment(context.actor_id, slot)
+        old_ids = next_state.card_ids_in(target_slot)
         if len(old_ids) > 1:
-            raise ProductionBatchError("武器槽必须至多包含一张武器牌")
+            raise ProductionBatchError(f"{slot}槽必须至多包含一张装备牌")
         equip_events: list[GameEvent] = []
         if old_ids:
             old_id = old_ids[0]
             next_state = next_state.move_cards(
                 {
                     old_id: DISCARD_PILE,
-                    action.card_instance_id: slot,
+                    action.card_instance_id: target_slot,
                 }
             )
+            if slot == "armor":
+                # 统一装备离区钩子：白银狮子离开装备区时恢复1点体力。
+                next_state, recovery_events = self._apply_armor_leave_recovery(
+                    next_state,
+                    instance_id=old_id,
+                    owner_id=context.actor_id,
+                    reason="equip_replaced",
+                )
+                equip_events.extend(recovery_events)
             equip_events.append(
                 GameEvent(
                     event_type=EventType.CARD_MOVED,
@@ -4821,10 +5161,10 @@ class ProductionBasicCardBatch:
                     card_key=_card_key(state, old_id),
                     card_user=context.actor_id,
                     payload={
-                        "source": _zone_payload(slot),
+                        "source": _zone_payload(target_slot),
                         "destination": _zone_payload(DISCARD_PILE),
-                        "reason": "weapon_equip:replaced_old_to_discard",
-                        "equipment_slot": "weapon",
+                        "reason": f"{reason_prefix}:replaced_old_to_discard",
+                        "equipment_slot": slot,
                     },
                 )
             )
@@ -4835,36 +5175,36 @@ class ProductionBasicCardBatch:
                     card_key=_card_key(state, old_id),
                     equipment_owner=context.actor_id,
                     target_ids=(context.actor_id,),
-                    payload={"slot": "weapon", "reason": "replaced"},
+                    payload={"slot": slot, "reason": "replaced"},
                 )
             )
             equip_events.append(
                 GameEvent(
                     event_type=EventType.EQUIPMENT_REPLACED,
                     card_instance_id=action.card_instance_id,
-                    card_key=adapter.card_key,
+                    card_key=card.card_key,
                     equipment_owner=context.actor_id,
                     target_ids=(context.actor_id,),
                     payload={
-                        "slot": "weapon",
+                        "slot": slot,
                         "old_instance_id": old_id,
                         "new_instance_id": action.card_instance_id,
                     },
                 )
             )
         else:
-            next_state = next_state.move_card(action.card_instance_id, slot)
+            next_state = next_state.move_card(action.card_instance_id, target_slot)
         equip_events.append(
             GameEvent(
                 event_type=EventType.CARD_MOVED,
                 card_instance_id=action.card_instance_id,
-                card_key=adapter.card_key,
+                card_key=card.card_key,
                 card_user=context.actor_id,
                 payload={
                     "source": _zone_payload(PROCESSING_ZONE),
-                    "destination": _zone_payload(slot),
-                    "reason": "weapon_equip:equipped",
-                    "equipment_slot": "weapon",
+                    "destination": _zone_payload(target_slot),
+                    "reason": f"{reason_prefix}:equipped",
+                    "equipment_slot": slot,
                 },
             )
         )
@@ -4872,14 +5212,337 @@ class ProductionBasicCardBatch:
             GameEvent(
                 event_type=EventType.EQUIPMENT_EQUIPPED,
                 card_instance_id=action.card_instance_id,
-                card_key=adapter.card_key,
+                card_key=card.card_key,
                 equipment_owner=context.actor_id,
                 target_ids=(context.actor_id,),
-                payload={"slot": "weapon", "reason": "equip"},
+                payload={"slot": slot, "reason": "equip"},
             )
         )
         self._events.extend(tuple(equip_events))
         return next_state
+
+    def _apply_armor_leave_recovery(
+        self,
+        state: GameState,
+        *,
+        instance_id: str,
+        owner_id: str,
+        reason: str,
+    ) -> tuple[GameState, tuple[GameEvent, ...]]:
+        """统一装备离区钩子（CP-04M）：【白银狮子】离开装备区时恢复1点体力。
+
+        只处理防具实体从本人防具槽离区的情形；恢复不超过体力上限；角色
+        已死亡或满体力时不恢复（死亡清理路径不调用本钩子，任务口径：
+        死亡清理不非法恢复）。同一实例每次离区只触发一次。"""
+
+        card = state.cards_by_id[instance_id]
+        if card.card_key != "sgs_armor_baiyinshizi":
+            return state, ()
+        owner = state.players_by_id[owner_id]
+        if not owner.alive or owner.hp >= owner.max_hp:
+            return state, ()
+        next_state = _replace_player(
+            state, owner_id, hp=min(owner.max_hp, owner.hp + 1)
+        )
+        event = GameEvent(
+            event_type=EventType.ARMOR_RECOVERED,
+            card_instance_id=instance_id,
+            card_key=card.card_key,
+            target_ids=(owner_id,),
+            payload={
+                "armor_instance_id": instance_id,
+                "armor_key": card.card_key,
+                "owner_id": owner_id,
+                "hp_before": owner.hp,
+                "hp_after": next_state.players_by_id[owner_id].hp,
+                "reason": reason,
+            },
+        )
+        return next_state, (event,)
+
+    def apply_bagua_activate(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: object,
+    ) -> GameState:
+        """【八卦阵】发动判定：需要使用／打出【闪】的响应窗口内可选发动。
+
+        判定为红色时视为使用／打出一张虚拟【闪】（响应【杀】只产生
+        card_used，响应【万箭齐发】只产生 card_played，不创建正式牌堆
+        实体）；判定为黑色时本次发动失败，角色仍可继续选择真实【闪】或
+        不响应（同一窗口不得再次发动）。判定牌从牌堆顶公开后置入弃牌堆；
+        判定前不打开【无懈可击】窗口；牌堆与可重洗弃牌堆合计不足时原子
+        失败关闭。全部改动在一个 step 内提交，可严格重执行。"""
+
+        runtime = self._runtime
+        phase = runtime.phase
+        if phase not in (
+            ProductionPhase.SLASH_RESPONSE,
+            ProductionPhase.WANJIAN_RESPONSE,
+        ):
+            raise InvalidActionError("【八卦阵】只能在需要闪的响应窗口发动")
+        if runtime.bagua_attempted:
+            raise InvalidActionError("本响应窗口已经发动过【八卦阵】")
+        if phase is ProductionPhase.SLASH_RESPONSE:
+            pending = runtime.pending_slash
+            if pending is None or context.actor_id != pending.target_id:
+                raise InvalidActionError("只有当前【杀】目标可以发动【八卦阵】")
+            response_to_card_key = state.cards_by_id[
+                pending.slash_instance_id
+            ].card_key
+            window_id = runtime.response_window_id
+            if window_id is None:
+                raise InvalidActionError("【杀】响应窗口缺少窗口标识")
+        else:
+            group = runtime.pending_group_trick
+            if (
+                group is None
+                or group.responder_id is None
+                or context.actor_id != group.responder_id
+            ):
+                raise InvalidActionError(
+                    "只有当前【万箭齐发】响应目标可以发动【八卦阵】"
+                )
+            response_to_card_key = group.trick_key
+            window_id = (
+                f"{group.trick_key}:{runtime.turn_number}:"
+                f"{group.trick_instance_id}:gt{group.current_target_index}"
+            )
+        if action.payload.get("response_window_id") != window_id:
+            raise InvalidActionError("【八卦阵】发动动作绑定的响应窗口已过期")
+        if action.payload.get("response_to_card_key") != response_to_card_key:
+            raise InvalidActionError(
+                "【八卦阵】发动动作绑定的响应对象与当前窗口不一致"
+            )
+        armor_ids = state.card_ids_in(
+            ZoneRef.equipment(context.actor_id, "armor")
+        )
+        if len(armor_ids) != 1:
+            raise InvalidActionError("【八卦阵】发动要求装备区恰好一张防具")
+        armor_id = armor_ids[0]
+        if state.cards_by_id[armor_id].card_key != "sgs_armor_baguazhen":
+            raise InvalidActionError("【八卦阵】发动要求装备【八卦阵】")
+        if action.card_instance_id != armor_id:
+            raise InvalidActionError("【八卦阵】发动动作的实体牌与装备区不一致")
+        if str(action.payload.get("card_key", "")) != "sgs_armor_baguazhen":
+            raise InvalidActionError("【八卦阵】发动动作负载与适配器卡牌键不一致")
+
+        # 判定（原子）：先预检牌量，再取判定牌公开并弃置
+        _assert_deck_available(state, 1, "八卦阵判定需要1张牌")
+        started_event = GameEvent(
+            event_type=EventType.ARMOR_JUDGMENT_STARTED,
+            card_instance_id=armor_id,
+            card_key="sgs_armor_baguazhen",
+            target_ids=(context.actor_id,),
+            payload={
+                "armor_instance_id": armor_id,
+                "armor_key": "sgs_armor_baguazhen",
+                "target_id": context.actor_id,
+                "response_to_card_key": response_to_card_key,
+                "response_window_id": window_id,
+            },
+        )
+        next_state, take_events, judge_id, judge_card = (
+            self._bagua_take_judgment_card(
+                state, armor_id, context.actor_id
+            )
+        )
+        success = judge_card.color == "红"
+        virtual_kind: str | None
+        if success:
+            virtual_kind = (
+                "use_dodge"
+                if phase is ProductionPhase.SLASH_RESPONSE
+                else "play_jink"
+            )
+        else:
+            virtual_kind = None
+        result_event = GameEvent(
+            event_type=EventType.ARMOR_JUDGMENT_RESULT,
+            card_instance_id=judge_id,
+            card_key=judge_card.card_key,
+            target_ids=(context.actor_id,),
+            payload={
+                "armor_instance_id": armor_id,
+                "judgment_card_instance_id": judge_id,
+                "judgment_suit": judge_card.suit,
+                "judgment_color": judge_card.color,
+                "success": success,
+                "virtual_response_kind": virtual_kind,
+            },
+        )
+        self._events.extend((started_event, *take_events, result_event))
+        next_runtime = replace(runtime, bagua_attempted=True)
+        if not success:
+            # 判定失败：保持当前响应窗口，角色仍可选择真实【闪】或不响应。
+            self._commit_runtime(runtime, next_runtime)
+            return next_state
+        if phase is ProductionPhase.SLASH_RESPONSE:
+            pending = runtime.pending_slash
+            assert pending is not None
+            virtual_dodge = GameEvent(
+                event_type=EventType.CARD_USED,
+                card_instance_id=None,
+                card_key="sgs_basic_shan",
+                card_user=context.actor_id,
+                target_ids=(context.actor_id,),
+                payload={
+                    "response_to": pending.slash_instance_id,
+                    "purpose": "bagua_virtual_dodge",
+                    "physical_or_virtual": "virtual",
+                    "virtual_source": "sgs_armor_baguazhen",
+                    "creates_card_used_event": True,
+                    "creates_card_played_event": False,
+                },
+            )
+            next_state, slash_finish = self._finish_processing(
+                next_state,
+                pending.slash_instance_id,
+                "slash_cancelled_by_bagua",
+            )
+            cancelled_event = GameEvent(
+                event_type=EventType.CARD_EFFECT_CANCELLED,
+                card_instance_id=pending.slash_instance_id,
+                card_key=_card_key(state, pending.slash_instance_id),
+                card_user=pending.attacker_id,
+                target_ids=(context.actor_id,),
+                payload={
+                    "reason": "bagua_dodge",
+                    "armor_instance_id": armor_id,
+                    "virtual_response": True,
+                },
+            )
+            self._events.extend(
+                (virtual_dodge, cancelled_event, slash_finish)
+            )
+            next_state, next_runtime = self._complete_root_resolution(
+                next_state, next_runtime
+            )
+        else:
+            group = runtime.pending_group_trick
+            assert group is not None and group.responder_id is not None
+            current = group.target_sequence[group.current_target_index]
+            virtual_jink = GameEvent(
+                event_type=EventType.CARD_PLAYED,
+                card_instance_id=None,
+                card_key="sgs_basic_shan",
+                card_user=context.actor_id,
+                target_ids=(current,),
+                payload={
+                    "response_to": group.trick_instance_id,
+                    "root_trick_instance_id": group.trick_instance_id,
+                    "response_action": "play",
+                    "purpose": "bagua_virtual_jink",
+                    "physical_or_virtual": "virtual",
+                    "virtual_source": "sgs_armor_baguazhen",
+                    "creates_card_used_event": False,
+                    "creates_card_played_event": True,
+                    "counts_for_use_or_play_total": True,
+                    "group_target_id": current,
+                    "group_target_index": group.current_target_index,
+                    "group_target_count": len(group.target_sequence),
+                    "group_user_id": group.user_id,
+                },
+            )
+            resolved = self._group_resolved_event(
+                next_state, group, current, result="responded"
+            )
+            self._events.extend((virtual_jink, resolved))
+            next_state, next_runtime = self._advance_group_target(
+                next_state, next_runtime, group, current
+            )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def _bagua_take_judgment_card(
+        self,
+        state: GameState,
+        armor_id: str,
+        target_id: str,
+    ) -> tuple[GameState, tuple[GameEvent, ...], str, object]:
+        """八卦阵判定牌生命周期：牌堆顶→REVEALED→公开→弃牌堆。
+
+        与延时锦囊判定共用同一判定基础设施（预检、重洗、REVEALED 区、
+        判定牌弃置去向）；判定牌与防具本体实例ID必须不同；结束后
+        REVEALED 不得残留。"""
+
+        _assert_deck_available(state, 1, "八卦阵判定需要1张牌")
+        next_state = state
+        events: list[GameEvent] = []
+        if not next_state.card_ids_in(DRAW_PILE):
+            discard_ids = list(next_state.card_ids_in(DISCARD_PILE))
+            self._rng.shuffle(discard_ids)
+            sources = {
+                instance_id: next_state.location_of(instance_id)
+                for instance_id in discard_ids
+            }
+            next_state = next_state.reorder_zone(DRAW_PILE, tuple(discard_ids))
+            events.extend(
+                GameEvent(
+                    event_type=EventType.CARD_MOVED,
+                    card_instance_id=instance_id,
+                    card_key=_card_key(next_state, instance_id),
+                    payload={
+                        "source": _zone_payload(sources[instance_id]),
+                        "destination": _zone_payload(DRAW_PILE),
+                        "reason": "reshuffle",
+                    },
+                )
+                for instance_id in discard_ids
+            )
+        judge_id = next_state.card_ids_in(DRAW_PILE)[0]
+        if judge_id == armor_id:
+            raise ProductionBatchError(
+                "八卦阵判定牌不得与防具本体相同；失败关闭"
+            )
+        judge_card = next_state.cards_by_id[judge_id]
+        take_event = GameEvent(
+            event_type=EventType.CARD_MOVED,
+            card_instance_id=judge_id,
+            card_key=judge_card.card_key,
+            payload={
+                "source": _zone_payload(DRAW_PILE),
+                "destination": _zone_payload(REVEALED_ZONE),
+                "reason": "bagua_judgment_take",
+                "armor_instance_id": armor_id,
+            },
+        )
+        next_state = next_state.move_card(judge_id, REVEALED_ZONE)
+        reveal_event = GameEvent(
+            event_type=EventType.CARD_REVEALED,
+            card_instance_id=judge_id,
+            card_key=judge_card.card_key,
+            target_ids=(target_id,),
+            payload={
+                "reason": "bagua_judgment",
+                "instance_id": judge_id,
+                "card_key": judge_card.card_key,
+                "name": judge_card.card_name,
+                "suit": judge_card.suit,
+                "rank": judge_card.rank,
+                "target_id": target_id,
+                "armor_instance_id": armor_id,
+            },
+        )
+        resolve_event = GameEvent(
+            event_type=EventType.CARD_MOVED,
+            card_instance_id=judge_id,
+            card_key=judge_card.card_key,
+            payload={
+                "source": _zone_payload(REVEALED_ZONE),
+                "destination": _zone_payload(DISCARD_PILE),
+                "reason": "judgment_card_resolved",
+                "armor_instance_id": armor_id,
+            },
+        )
+        next_state = next_state.move_card(judge_id, DISCARD_PILE)
+        return next_state, (
+            take_event,
+            reveal_event,
+            resolve_event,
+        ), judge_id, judge_card
 
     def apply_jiedao_use(
         self,
@@ -5671,6 +6334,39 @@ class ProductionBasicCardBatch:
             "sgs_trick_nanmanruqin",
             "sgs_trick_wanjianqifa",
         ):
+            invalidation = armor_invalidates_effect(
+                state,
+                victim_id=current,
+                card_instance_id=group.trick_instance_id,
+                card_key=group.trick_key,
+            )
+            if invalidation is not None:
+                # 【藤甲】令【南蛮入侵】／【万箭齐发】对当前目标无效：
+                # 不打开响应阶段、不要求打出【杀】／【闪】、不造成伤害。
+                invalid_reason, armor_id = invalidation
+                cancelled_event = GameEvent(
+                    event_type=EventType.CARD_EFFECT_CANCELLED,
+                    card_instance_id=group.trick_instance_id,
+                    card_key=group.trick_key,
+                    card_user=group.user_id,
+                    target_ids=(current,),
+                    payload={
+                        "reason": invalid_reason,
+                        "armor_instance_id": armor_id,
+                        "armor_key": _card_key(state, armor_id),
+                        "invalidated_by_armor": True,
+                        "root_trick_instance_id": group.trick_instance_id,
+                        "target_index": group.current_target_index,
+                        "target_count": len(group.target_sequence),
+                    },
+                )
+                resolved = self._group_resolved_event(
+                    state, group, current, result="armor_invalidated"
+                )
+                self._events.extend((cancelled_event, resolved))
+                return self._advance_group_target(
+                    state, runtime, group, current
+                )
             return self._open_group_response_phase(
                 state, runtime, group, current
             )
@@ -5746,6 +6442,7 @@ class ProductionBasicCardBatch:
             response_window_source_sequence=None,
             group_response_handles=handles,
             group_response_snapshot_digest=digest,
+            bagua_attempted=False,
         )
         return state, next_runtime
 
@@ -8405,6 +9102,7 @@ class ProductionBasicCardBatch:
             skipped_phases=MappingProxyType({}),
             phase_skip_reasons=MappingProxyType({}),
             defer_damage_card_finish=False,
+            bagua_attempted=False,
         )
         self._commit_runtime(runtime, next_runtime)
         return next_state

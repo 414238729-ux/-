@@ -1148,3 +1148,282 @@ def test_judgment_events_reject_invalid_construction(
     }
     with pytest.raises(ValueError, match=match):
         factories[event_type](**override)  # type: ignore[arg-type]
+
+
+# ----------------------------------------------------------------------
+# 防具事件契约（CP-04M）
+# ----------------------------------------------------------------------
+
+
+def _armor_judgment_started_event(
+    *,
+    armor_id: str = "sgs-mobile-20260725-045",
+    target_id: str = "p2",
+    response_to_card_key: str = "sgs_basic_sha",
+    window_id: str = "slash:1:sgs-mobile-20260725-140",
+    payload: dict[str, object] | None = None,
+    target_ids: tuple[str, ...] | None = None,
+) -> GameEvent:
+    return GameEvent(
+        event_type=EventType.ARMOR_JUDGMENT_STARTED,
+        card_instance_id=armor_id,
+        card_key="sgs_armor_baguazhen",
+        target_ids=target_ids or (target_id,),
+        payload=(
+            payload
+            if payload is not None
+            else {
+                "armor_instance_id": armor_id,
+                "armor_key": "sgs_armor_baguazhen",
+                "target_id": target_id,
+                "response_to_card_key": response_to_card_key,
+                "response_window_id": window_id,
+            }
+        ),
+    )
+
+
+def _armor_judgment_result_event(
+    *,
+    armor_id: str = "sgs-mobile-20260725-045",
+    judgment_card_id: str = "sgs-mobile-20260725-098",
+    target_id: str = "p2",
+    success: bool = True,
+    kind: str | None = "use_dodge",
+    payload: dict[str, object] | None = None,
+    target_ids: tuple[str, ...] | None = None,
+) -> GameEvent:
+    resolved_judgment_card_id = judgment_card_id
+    if payload is not None and "judgment_card_instance_id" in payload:
+        resolved_judgment_card_id = str(payload["judgment_card_instance_id"])
+    return GameEvent(
+        event_type=EventType.ARMOR_JUDGMENT_RESULT,
+        card_instance_id=resolved_judgment_card_id,
+        card_key="sgs_delayed_lebusi",
+        target_ids=target_ids or (target_id,),
+        payload=(
+            payload
+            if payload is not None
+            else {
+                "armor_instance_id": armor_id,
+                "judgment_card_instance_id": judgment_card_id,
+                "judgment_suit": "♥",
+                "judgment_color": "红",
+                "success": success,
+                "virtual_response_kind": kind,
+            }
+        ),
+    )
+
+
+def _armor_recovered_event(
+    *,
+    armor_id: str = "sgs-mobile-20260725-043",
+    owner_id: str = "p1",
+    hp_before: int = 3,
+    hp_after: int = 4,
+    reason: str = "equip_replaced",
+    payload: dict[str, object] | None = None,
+    target_ids: tuple[str, ...] | None = None,
+) -> GameEvent:
+    return GameEvent(
+        event_type=EventType.ARMOR_RECOVERED,
+        card_instance_id=armor_id,
+        card_key="sgs_armor_baiyinshizi",
+        target_ids=target_ids or (owner_id,),
+        payload=(
+            payload
+            if payload is not None
+            else {
+                "armor_instance_id": armor_id,
+                "armor_key": "sgs_armor_baiyinshizi",
+                "owner_id": owner_id,
+                "hp_before": hp_before,
+                "hp_after": hp_after,
+                "reason": reason,
+            }
+        ),
+    )
+
+
+def _damage_prevented_event(
+    *,
+    victim_id: str = "p1",
+    card_key: str = "sgs_basic_sha",
+    declared_amount: int = 1,
+    modifiers: tuple[str, ...] = ("prevented",),
+    payload: dict[str, object] | None = None,
+    target_ids: tuple[str, ...] | None = None,
+) -> GameEvent:
+    return GameEvent(
+        event_type=EventType.DAMAGE_PREVENTED,
+        card_instance_id="sgs-mobile-20260725-140",
+        card_key=card_key,
+        target_ids=target_ids or (victim_id,),
+        payload=(
+            payload
+            if payload is not None
+            else {
+                "victim_id": victim_id,
+                "card_key": card_key,
+                "declared_amount": declared_amount,
+                "final_amount": 0,
+                "modifiers": list(modifiers),
+                "armor_ignored": False,
+            }
+        ),
+    )
+
+
+def test_armor_judgment_started_valid_contract() -> None:
+    event = _armor_judgment_started_event()
+    assert event.event_type is EventType.ARMOR_JUDGMENT_STARTED
+    assert event.payload["armor_instance_id"] == event.card_instance_id
+    assert event.payload["target_id"] == event.target_ids[0]
+
+
+def test_armor_judgment_result_valid_contract() -> None:
+    event = _armor_judgment_result_event()
+    assert event.event_type is EventType.ARMOR_JUDGMENT_RESULT
+    assert event.payload["judgment_card_instance_id"] == event.card_instance_id
+    assert event.payload["judgment_color"] == "红"
+    assert event.payload["success"] is True
+    failed = _armor_judgment_result_event(
+        judgment_card_id="sgs-mobile-20260725-058",
+        success=False,
+        kind=None,
+    )
+    assert failed.payload["success"] is False
+
+
+def test_armor_recovered_valid_contract() -> None:
+    event = _armor_recovered_event()
+    assert event.event_type is EventType.ARMOR_RECOVERED
+    assert event.payload["owner_id"] == event.target_ids[0]
+    assert event.payload["hp_after"] == event.payload["hp_before"] + 1
+
+
+def test_damage_prevented_valid_contract() -> None:
+    event = _damage_prevented_event()
+    assert event.event_type is EventType.DAMAGE_PREVENTED
+    assert event.payload["victim_id"] == event.target_ids[0]
+    assert event.payload["final_amount"] == 0
+    assert event.payload["declared_amount"] == 1
+
+
+@pytest.mark.parametrize(
+    ("event_type", "override", "match"),
+    [
+        (
+            EventType.ARMOR_JUDGMENT_STARTED,
+            {"payload": {"armor_key": "sgs_armor_baguazhen", "target_id": "p2", "response_to_card_key": "sgs_basic_sha", "response_window_id": "w"}},
+            "字段必须恰好",
+        ),
+        (
+            EventType.ARMOR_JUDGMENT_STARTED,
+            {"payload": {"armor_instance_id": "other", "armor_key": "sgs_armor_baguazhen", "target_id": "p2", "response_to_card_key": "sgs_basic_sha", "response_window_id": "w"}},
+            "必须等于实体牌ID",
+        ),
+        (
+            EventType.ARMOR_JUDGMENT_STARTED,
+            {"payload": {"armor_instance_id": "sgs-mobile-20260725-045", "armor_key": "sgs_armor_baguazhen", "target_id": "p1", "response_to_card_key": "sgs_basic_sha", "response_window_id": "w"}},
+            "必须等于target_ids",
+        ),
+        (
+            EventType.ARMOR_JUDGMENT_STARTED,
+            {"payload": {"armor_instance_id": "sgs-mobile-20260725-045", "armor_key": "sgs_armor_baguazhen", "target_id": "p2", "response_to_card_key": "", "response_window_id": "w"}},
+            "必须是非空字符串",
+        ),
+        (
+            EventType.ARMOR_JUDGMENT_RESULT,
+            {"payload": {"armor_instance_id": "sgs-mobile-20260725-045", "judgment_suit": "♥", "judgment_color": "红", "success": True, "virtual_response_kind": "use_dodge"}},
+            "字段必须恰好",
+        ),
+        (
+            EventType.ARMOR_JUDGMENT_RESULT,
+            {"payload": {"armor_instance_id": "sgs-mobile-20260725-045", "judgment_card_instance_id": "sgs-mobile-20260725-045", "judgment_suit": "♣", "judgment_color": "黑", "success": False, "virtual_response_kind": None}},
+            "判定牌不得与防具本体相同",
+        ),
+        (
+            EventType.ARMOR_JUDGMENT_RESULT,
+            {"payload": {"armor_instance_id": "sgs-mobile-20260725-045", "judgment_card_instance_id": "sgs-mobile-20260725-098", "judgment_suit": "♥", "judgment_color": "蓝", "success": True, "virtual_response_kind": "use_dodge"}},
+            "只能是红或黑",
+        ),
+        (
+            EventType.ARMOR_JUDGMENT_RESULT,
+            {"payload": {"armor_instance_id": "sgs-mobile-20260725-045", "judgment_card_instance_id": "sgs-mobile-20260725-098", "judgment_suit": "♥", "judgment_color": "红", "success": 1, "virtual_response_kind": "use_dodge"}},
+            "success必须是布尔值",
+        ),
+        (
+            EventType.ARMOR_JUDGMENT_RESULT,
+            {"payload": {"armor_instance_id": "sgs-mobile-20260725-045", "judgment_card_instance_id": "sgs-mobile-20260725-098", "judgment_suit": "♥", "judgment_color": "红", "success": True, "virtual_response_kind": None}},
+            "必须是use_dodge或play_jink",
+        ),
+        (
+            EventType.ARMOR_JUDGMENT_RESULT,
+            {"payload": {"armor_instance_id": "sgs-mobile-20260725-045", "judgment_card_instance_id": "sgs-mobile-20260725-098", "judgment_suit": "♥", "judgment_color": "红", "success": False, "virtual_response_kind": "use_dodge"}},
+            "失败时virtual_response_kind必须为空",
+        ),
+        (
+            EventType.ARMOR_RECOVERED,
+            {"payload": {"armor_key": "sgs_armor_baiyinshizi", "owner_id": "p1", "hp_before": 3, "hp_after": 4, "reason": "equip_replaced"}},
+            "字段必须恰好",
+        ),
+        (
+            EventType.ARMOR_RECOVERED,
+            {"payload": {"armor_instance_id": "sgs-mobile-20260725-043", "armor_key": "sgs_armor_baiyinshizi", "owner_id": "p2", "hp_before": 3, "hp_after": 4, "reason": "equip_replaced"}},
+            "必须等于target_ids",
+        ),
+        (
+            EventType.ARMOR_RECOVERED,
+            {"payload": {"armor_instance_id": "sgs-mobile-20260725-043", "armor_key": "sgs_armor_baiyinshizi", "owner_id": "p1", "hp_before": True, "hp_after": 4, "reason": "equip_replaced"}},
+            "必须是非负整数",
+        ),
+        (
+            EventType.ARMOR_RECOVERED,
+            {"payload": {"armor_instance_id": "sgs-mobile-20260725-043", "armor_key": "sgs_armor_baiyinshizi", "owner_id": "p1", "hp_before": 3, "hp_after": 4, "reason": ""}},
+            "必须是非空字符串",
+        ),
+        (
+            EventType.DAMAGE_PREVENTED,
+            {"payload": {"card_key": "sgs_basic_sha", "declared_amount": 1, "final_amount": 0, "modifiers": ["prevented"], "armor_ignored": False}},
+            "字段必须恰好",
+        ),
+        (
+            EventType.DAMAGE_PREVENTED,
+            {"payload": {"victim_id": "p2", "card_key": "sgs_basic_sha", "declared_amount": 1, "final_amount": 0, "modifiers": ["prevented"], "armor_ignored": False}},
+            "必须等于target_ids",
+        ),
+        (
+            EventType.DAMAGE_PREVENTED,
+            {"payload": {"victim_id": "p1", "card_key": "sgs_basic_sha", "declared_amount": 0, "final_amount": 0, "modifiers": ["prevented"], "armor_ignored": False}},
+            "必须是正整数",
+        ),
+        (
+            EventType.DAMAGE_PREVENTED,
+            {"payload": {"victim_id": "p1", "card_key": "sgs_basic_sha", "declared_amount": 1, "final_amount": 1, "modifiers": ["prevented"], "armor_ignored": False}},
+            "必须为0",
+        ),
+        (
+            EventType.DAMAGE_PREVENTED,
+            {"payload": {"victim_id": "p1", "card_key": "sgs_basic_sha", "declared_amount": 1, "final_amount": 0, "modifiers": [], "armor_ignored": False}},
+            "不能为空",
+        ),
+        (
+            EventType.DAMAGE_PREVENTED,
+            {"payload": {"victim_id": "p1", "card_key": "sgs_basic_sha", "declared_amount": 1, "final_amount": 0, "modifiers": ["prevented"], "armor_ignored": 1}},
+            "必须是布尔值",
+        ),
+    ],
+)
+def test_armor_events_reject_invalid_construction(
+    event_type: EventType, override: dict[str, object], match: str
+) -> None:
+    factories = {
+        EventType.ARMOR_JUDGMENT_STARTED: _armor_judgment_started_event,
+        EventType.ARMOR_JUDGMENT_RESULT: _armor_judgment_result_event,
+        EventType.ARMOR_RECOVERED: _armor_recovered_event,
+        EventType.DAMAGE_PREVENTED: _damage_prevented_event,
+    }
+    with pytest.raises(ValueError, match=match):
+        factories[event_type](**override)  # type: ignore[arg-type]

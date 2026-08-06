@@ -359,8 +359,8 @@ def test_implemented_and_remaining_card_counts_updated() -> None:
     game = _fresh(3)
     registry = game.formal_registry
     assert {NANMAN, WANJIAN, TAOYUAN} <= set(registry.implemented_card_keys)
-    assert len(registry.implemented_card_keys) == 32
-    assert len(registry.unimplemented_card_keys) == 6
+    assert len(registry.implemented_card_keys) == 36
+    assert len(registry.unimplemented_card_keys) == 2
     assert {NANMAN, WANJIAN, TAOYUAN} <= set(PRODUCTION_TRICK_KEYS)
     assert set(GROUP_TRICK_KEYS) == {NANMAN, WANJIAN, TAOYUAN}
     assert (
@@ -368,14 +368,14 @@ def test_implemented_and_remaining_card_counts_updated() -> None:
             len(registry.instances_of(key))
             for key in registry.implemented_card_keys
         )
-        == 147
+        == 153
     )
 
 
 def test_other_unimplemented_cards_stay_fail_closed() -> None:
     game = _fresh(3)
     registry = game.formal_registry
-    for key in ("sgs_armor_baguazhen",):
+    for key in ("sgs_mount_defensive", "sgs_mount_offensive"):
         assert key in registry.unimplemented_card_keys
         with pytest.raises(UnsupportedRuleError):
             registry.adapter_for(key)

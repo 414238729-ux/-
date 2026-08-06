@@ -850,7 +850,7 @@ def test_wuzhong_draw_reshuffles_when_draw_pile_exhausted() -> None:
 def test_other_normal_tricks_stay_fail_closed() -> None:
     game = _fresh(seed=3)
     registry = game.formal_registry
-    for key in ("sgs_armor_baguazhen",):
+    for key in ("sgs_mount_defensive",):
         assert key in registry.unimplemented_card_keys
         with pytest.raises(UnsupportedRuleError):
             registry.adapter_for(key)
@@ -860,7 +860,7 @@ def test_other_normal_tricks_stay_fail_closed() -> None:
     assert "sgs_trick_shunshouqianyang" not in registry.unimplemented_card_keys
     assert "sgs_trick_nanmanruqin" not in registry.unimplemented_card_keys
     with pytest.raises(UnsupportedRuleError):
-        registry.rule_spec_for("sgs_armor_baguazhen")
+        registry.rule_spec_for("sgs_mount_defensive")
     with pytest.raises(UnsupportedRuleError):
         registry.assert_no_unimplemented_fallback()
     implemented = set(PRODUCTION_BASIC_CARD_KEYS) | set(PRODUCTION_TRICK_KEYS)
