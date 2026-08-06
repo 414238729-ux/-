@@ -52,7 +52,9 @@
     "cp04l_worktree_branch": "deepseek-delayed-trick-infrastructure",
     "cp04l_worktree_branch_note": "本批（【乐不思蜀】＋【兵粮寸断】＋【闪电】＋判定与阶段基础设施，CP-04L）实现所在分支；基线提交 185cc555324b077d0e81bef10a4518ba2dae3748（docs: finalize borrowed sword and weapon system audit milestone，里程碑标签 milestone-b2-borrowed-sword-weapon-system-audited 指向该基线）；实现提交 35c06bd50a431a62e7c3ad01d10384bf6884c403（feat: implement delayed tricks and judgment infrastructure）、检查点文档提交 4f2c9b61fccb4337a8e84ae560835d705be65bda、第一次审计修复提交 96f536e1f392fd97faf61518a849a0d515b6a82e（fix: close delayed trick audit gaps）与最终修复提交 eeeaf558cdaeeea0eb90456f907f83dce52286f3（fix: harden player-visible replay privacy）均在此分支历史；2026-08-05 第一次独立审计 AUDIT_FAILED_BLOCKING_ISSUES（唯一阻塞项 B1：player_visible 未脱敏 reshuffle 事件），2026-08-06 第二次最终复审 AUDIT_FAILED_BLOCKING_ISSUES（B1-a／B1-b／B1-c 与两个复审观察项），最终修复后 Grok 网页端独立静态审计 STATIC_AUDIT_PASSED（经 GitHub 连接器读取精确目标提交 eeeaf558，未亲自运行 pytest／Git／本地虚拟环境；1733 passed 等运行结果来自本地修复会话），最终审计结论 AUDIT_PASSED（2026-08-06）；文档收口提交 ba64b750fabd99f2bfc93697cea83e1272216d02（docs: finalize delayed trick and judgment audit milestone）；里程碑标签 milestone-b2-delayed-trick-judgment-infrastructure-audited 已实际建立并推送，本地与 GitHub 远程标签均已验证存在并指向 ba64b750fabd99f2bfc93697cea83e1272216d02。",
     "delayed_trick_judgment_infrastructure_implement_commit": "35c06bd50a431a62e7c3ad01d10384bf6884c403",
-    "delayed_trick_judgment_infrastructure_implement_commit_note": "三种延时锦囊＋判定与阶段基础设施批次（CP-04L：【乐不思蜀】【兵粮寸断】【闪电】）已由用户在外部PowerShell提交，提交信息为 feat: implement delayed tricks and judgment infrastructure，完整提交哈希为 35c06bd50a431a62e7c3ad01d10384bf6884c403；基线提交 185cc555324b077d0e81bef10a4518ba2dae3748（里程碑标签 milestone-b2-borrowed-sword-weapon-system-audited 指向该基线）；检查点文档提交 4f2c9b61fccb4337a8e84ae560835d705be65bda（docs: record delayed trick and judgment checkpoint）；2026-08-05 第一次独立审计 AUDIT_FAILED_BLOCKING_ISSUES（唯一阻塞项 B1：player_visible 未脱敏 reshuffle 事件），第一次审计修复提交 96f536e1f392fd97faf61518a849a0d515b6a82e（fix: close delayed trick audit gaps，完整 pytest 1724 passed）；2026-08-06 第二次最终复审 AUDIT_FAILED_BLOCKING_ISSUES（B1-a state_hash 等权威状态摘要旁路、B1-b legal_actions/chosen_action 泄露行动者完整手牌、B1-c tiesuo_recast 等隐藏摸牌泄漏，以及 N5 篡改测试结构、judgment_entry_indices 陈旧残留两个复审观察项）；最终修复提交 eeeaf558cdaeeea0eb90456f907f83dce52286f3（fix: harden player-visible replay privacy，本地修复会话完整 pytest 1733 passed）；Grok 网页端独立静态审计 STATIC_AUDIT_PASSED（经 GitHub 连接器读取精确目标提交 eeeaf558，完整读取18个强制生产、测试和状态文件，PARTIAL_READ=无、NOT_READ=无，未亲自运行 pytest／Git／本地虚拟环境）；最终审计结论 AUDIT_PASSED（2026-08-06，status=audited、independent_audit_done=true、audit_conclusion=AUDIT_PASSED、milestone_tag=已建立标签 milestone-b2-delayed-trick-judgment-infrastructure-audited（文档收口提交 ba64b750fabd99f2bfc93697cea83e1272216d02，本地与 GitHub 远程标签均已验证存在）、worktree_commit_pending=false）"
+    "delayed_trick_judgment_infrastructure_implement_commit_note": "三种延时锦囊＋判定与阶段基础设施批次（CP-04L：【乐不思蜀】【兵粮寸断】【闪电】）已由用户在外部PowerShell提交，提交信息为 feat: implement delayed tricks and judgment infrastructure，完整提交哈希为 35c06bd50a431a62e7c3ad01d10384bf6884c403；基线提交 185cc555324b077d0e81bef10a4518ba2dae3748（里程碑标签 milestone-b2-borrowed-sword-weapon-system-audited 指向该基线）；检查点文档提交 4f2c9b61fccb4337a8e84ae560835d705be65bda（docs: record delayed trick and judgment checkpoint）；2026-08-05 第一次独立审计 AUDIT_FAILED_BLOCKING_ISSUES（唯一阻塞项 B1：player_visible 未脱敏 reshuffle 事件），第一次审计修复提交 96f536e1f392fd97faf61518a849a0d515b6a82e（fix: close delayed trick audit gaps，完整 pytest 1724 passed）；2026-08-06 第二次最终复审 AUDIT_FAILED_BLOCKING_ISSUES（B1-a state_hash 等权威状态摘要旁路、B1-b legal_actions/chosen_action 泄露行动者完整手牌、B1-c tiesuo_recast 等隐藏摸牌泄漏，以及 N5 篡改测试结构、judgment_entry_indices 陈旧残留两个复审观察项）；最终修复提交 eeeaf558cdaeeea0eb90456f907f83dce52286f3（fix: harden player-visible replay privacy，本地修复会话完整 pytest 1733 passed）；Grok 网页端独立静态审计 STATIC_AUDIT_PASSED（经 GitHub 连接器读取精确目标提交 eeeaf558，完整读取18个强制生产、测试和状态文件，PARTIAL_READ=无、NOT_READ=无，未亲自运行 pytest／Git／本地虚拟环境）；最终审计结论 AUDIT_PASSED（2026-08-06，status=audited、independent_audit_done=true、audit_conclusion=AUDIT_PASSED、milestone_tag=已建立标签 milestone-b2-delayed-trick-judgment-infrastructure-audited（文档收口提交 ba64b750fabd99f2bfc93697cea83e1272216d02，本地与 GitHub 远程标签均已验证存在）、worktree_commit_pending=false）",
+    "cp04m_worktree_branch": "deepseek-armor-damage-prevention",
+    "cp04m_worktree_branch_note": "本批（四种防具＋伤害修正／防止基础设施，CP-04M）实现所在分支；基线提交 fc3df95202b23dccfd9abf5e476485a224d6fc2c（docs: mark delayed trick milestone repository state finalized，里程碑标签 milestone-b2-delayed-trick-judgment-infrastructure-audited 指向该基线）；实现提交 29ab73e006408e1e1582a300801e7aa6e04bd9c4（feat: implement armor and damage prevention infrastructure）已由用户在外部PowerShell提交；独立审计尚未进行（NOT_AUDITED_YET）。"
   },
   "feature_status": {
     "authoritative_core_foundation": true,
@@ -70,7 +72,8 @@
     "production_remaining_ordinary_trick_batch": true,
     "production_chain_damage_infrastructure": true,
     "production_borrowed_sword_weapon_system": true,
-    "production_delayed_trick_judgment_infrastructure": true
+    "production_delayed_trick_judgment_infrastructure": true,
+    "production_armor_damage_prevention_infrastructure": true
   },
   "stage_status": {
     "1_source_and_callchain_audit": "passed",
@@ -309,15 +312,45 @@
         ],
         "first_audit_fix_commit": "96f536e1f392fd97faf61518a849a0d515b6a82e"
       }
+    },
+    {
+      "id": "CP-04M-PRODUCTION-ARMOR-DAMAGE-PREVENTION-INFRASTRUCTURE",
+      "status": "committed_pending_audit",
+      "commit": "29ab73e006408e1e1582a300801e7aa6e04bd9c4",
+      "commit_note": "本批（【八卦阵】＋【仁王盾】＋【藤甲】＋【白银狮子】＋伤害修正／防止基础设施，CP-04M）已由用户在外部PowerShell提交真实实现提交：完整提交哈希 29ab73e006408e1e1582a300801e7aa6e04bd9c4（feat: implement armor and damage prevention infrastructure）；实现父提交 fc3df95202b23dccfd9abf5e476485a224d6fc2c（milestone-b2-delayed-trick-judgment-infrastructure-audited）；独立审计尚未进行（NOT_AUDITED_YET），不得提前写成audited；检查点文档提交待用户外部提交后回填。",
+      "independent_audit_done": false,
+      "audit_conclusion": "NOT_AUDITED_YET",
+      "milestone_tag": null,
+      "worktree_commit_pending": true,
+      "evidence": "scripts/sgs_engine/production_cards.py、scripts/sgs_engine/production_batch.py、scripts/sgs_engine/events.py、tests/test_sgs_production_armor_damage_prevention.py、tests/test_sgs_engine_events.py；正式160张牌堆四种防具6张实体批次",
+      "scope": "formal；四种防具6张实体接入生产注册表与权威核心；统一防具伤害修正管线（藤甲火属性伤害+1、白银狮子限伤）、仁王盾黑杀无效、藤甲免疫普通杀／南蛮／万箭、八卦阵响应窗口内可选判定与虚拟闪、白银狮子统一离区恢复、统一无视防具接口、prevented_zero 语义与伤害事件审计字段；不构成武器技能完成、坐骑完成、装备系统全部完成、正式单挑完成或里程碑B完成",
+      "implementation_commit": "29ab73e006408e1e1582a300801e7aa6e04bd9c4",
+      "implementation_commit_message": "feat: implement armor and damage prevention infrastructure",
+      "implementation_parent": "fc3df95202b23dccfd9abf5e476485a224d6fc2c",
+      "audit": {
+        "independent_audit_done": false,
+        "audit_conclusion": "NOT_AUDITED_YET",
+        "conclusion": "NOT_AUDITED_YET",
+        "initial_conclusion": null,
+        "final_reaudit_conclusion": null,
+        "audited_at": null,
+        "auditor_note": "实现提交已由用户在外部PowerShell创建（29ab73e006408e1e1582a300801e7aa6e04bd9c4），等待开展独立只读审计。",
+        "implementation_commit": "29ab73e006408e1e1582a300801e7aa6e04bd9c4",
+        "checkpoint_commit": null,
+        "audit_gap_fix_commit": null,
+        "final_audit_conclusion": null,
+        "milestone_tag": null,
+        "final_status": "committed_pending_audit"
+      }
     }
   ],
   "final_verification": {
     "pytest": {
       "command": ".\\venv\\Scripts\\python.exe -m pytest -q --basetemp \".\\.pytest-temp\\run\" -p no:cacheprovider",
-      "passed": 1733,
+      "passed": 1799,
       "failed": 0,
       "skipped": 0,
-      "note": "1733=1724+9：CP-04L 第二次最终复审修复（2026-08-06）新增 9 项（B1-a state_hash 递归脱敏攻击、B1-b 行动者手牌攻击、B1-c tiesuo_recast 隐藏获得攻击、判定窗口行动者投影、公开/隐藏获得成对回归、judgment_entry_indices 清理与陈旧失败关闭、zone-choice 窗口投影，以及 N5 拆分后新增的语义层重执行篡改测试）；1707 与 1724 保留为历史结果；完整 pytest 1733 passed（失败0、跳过0）；compileall 通过；git diff --check 通过；源码完整性审计 scanned_file_count=118、defect_count=0、audit_item_count=55；SHA-256 清单 34/34 一致。最终修复提交 eeeaf558cdaeeea0eb90456f907f83dce52286f3（fix: harden player-visible replay privacy）已由用户在外部PowerShell提交；Grok 网页端独立静态审计 STATIC_AUDIT_PASSED（经 GitHub 连接器读取精确目标提交 eeeaf558，完整读取18个强制生产、测试和状态文件，PARTIAL_READ=无、NOT_READ=无；未亲自运行 pytest、Git 或本地虚拟环境，1733 passed 等运行结果来自本地修复会话，两类证据不得混写）；最终审计结论 AUDIT_PASSED（2026-08-06），status=audited、independent_audit_done=true、audit_conclusion=AUDIT_PASSED、milestone_tag=已建立标签 milestone-b2-delayed-trick-judgment-infrastructure-audited（文档收口提交 ba64b750fabd99f2bfc93697cea83e1272216d02，本地与 GitHub 远程标签均已验证存在）、worktree_commit_pending=false。"
+      "note": "1799=1733+66：CP-04M 新增42项防具专项测试（tests/test_sgs_production_armor_damage_prevention.py）与24项防具事件契约测试（tests/test_sgs_engine_events.py：armor_judgment_started／armor_judgment_result／armor_recovered／damage_prevented 的合法与非法构造参数化）；完整 pytest 1799 passed（失败0、跳过0）；compileall 通过；源码完整性审计 scanned_file_count=119、defect_count=0、audit_item_count=55；本轮实现提交 29ab73e006408e1e1582a300801e7aa6e04bd9c4 已由用户在外部PowerShell提交，独立审计尚未进行。"
     },
     "compileall": {
       "command": ".\\\\.venv\\\\Scripts\\\\python.exe -m compileall -q scripts tests",
@@ -325,7 +358,7 @@
     },
     "source_integrity": {
       "command": ".\\venv\\Scripts\\python.exe -m scripts.sgs_source_integrity_audit . --fail-on-defect",
-      "scanned_python_files": 118,
+      "scanned_python_files": 119,
       "defect_count": 0,
       "audit_item_count": 55
     },
@@ -378,7 +411,7 @@
       "AuthoritativeCoreSession.run_game仍明确抛出UnsupportedRuleError",
       "观看、亮牌及判定彻底耗尽仍是分析约定，不能用于approximation_count=0的正式入口",
       "尚无正式160张单挑100-seed验收运行器",
-      "38种正式卡牌定义中六种基本牌、【无中生有】／【无懈可击】／【过河拆桥】／【顺手牵羊】／【决斗】／【火攻】／【南蛮入侵】／【万箭齐发】／【桃园结义】／【五谷丰登】已建立生产规则适配器，【铁索连环】已接入完整语义（6张实体，含属性伤害传导），【借刀杀人】、11种武器牌本体与3种延时锦囊（【乐不思蜀】3张／【兵粮寸断】2张／【闪电】2张，含判定与阶段基础设施）已接入；其余6种（4种防具、2种坐骑）仍未建立",
+      "38种正式卡牌定义中六种基本牌、十二种普通锦囊、【借刀杀人】、11种武器牌本体、3种延时锦囊与四种防具（【八卦阵】／【仁王盾】／【藤甲】／【白银狮子】，含统一伤害修正／防止与无视防具接口）已建立生产规则适配器；其余2种（攻击坐骑、防御坐骑）仍未建立",
       "正式卡牌处理区与完整生命周期规则仅六种基本牌、十二种普通锦囊与三种延时锦囊接入，其余卡牌与整局重洗调度未接入"
     ],
     "not_configured": [
@@ -699,40 +732,41 @@
     }
   },
   "sha256": {
-    "docs/ENGINE_STATUS.md": "5b61b39bd100ab2af79872aa723810d49bfe409ff014aa238b6552b3bd6a9b07",
-    "docs/IMPLEMENTATION_MATRIX.md": "31ef5b86062948ad7537984a770ae8d9085550e0239e22613278b3e8fb9302e0",
+    "docs/ENGINE_STATUS.md": "3c7d8b12c45f54825146406aac3f0db0381ca7f058295d8d794c7a8a85e08993",
+    "docs/IMPLEMENTATION_MATRIX.md": "f5565eace0bb5c3eae0fa50ac3a8ea7c8e44452b0e1acf7e7fc562b9b1155daa",
     "docs/LEGACY_RESULTS_INVALID.md": "267d51329b65b4435ed770b9fe90a0d53148d17cc9b0dae3e6d3406b06c0c0cc",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "561c3e594777a21bb732daef10fbd1d288503a6ff528a2940f646eb39e21fd0b",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "0e09d0149020bbc395693deb10787cca4d32115984a08bc7f3ce80754e18643f",
     "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "23b56a0edf0c85657b332100538013de16be4d71ea6a8214ac862a6708105af6",
     "knowledge/三国杀牌堆数据.csv": "8cb8da4177f11962776ae0f7e0154ed4ce56e293e96ac457874d48650517de18",
     "scripts/sgs_dev_runner.py": "6f88baa78fc9c22106188defda7190cd2a4412325db46f3964d217fd0e61c755",
-    "scripts/sgs_engine/__init__.py": "ca89b89799c8f55fda6bab951edbea30a341d3eca6db204e554486dbdc62cd23",
+    "scripts/sgs_engine/__init__.py": "bfba9e25896f1399915373d2ed6bcf0fca1ddb3c9bebd2bae47db44c2f094190",
     "scripts/sgs_engine/actions.py": "92c76be32afa52a79f76e8439ec95a1dff04e1df2592966b461681ae7b346fff",
     "scripts/sgs_engine/duel.py": "4e2b716e68346948b8b50fc09bac2c0160f30f43410b09aa7e6f7caaebf01218",
     "scripts/sgs_engine/duel_replay.py": "99661777d171928d6c8c0a12ff45da7bf4b051a2f26a21ae78424068a1fc1231",
     "scripts/sgs_engine/engine.py": "1a983ef03cc607644d27ac1902c961e687f1eab254679c81a6ab2e5235d824c7",
-    "scripts/sgs_engine/events.py": "ca4c2e1d90ed2a950eb145327de322ef13d98cb17cf744709c022127dc2bc059",
+    "scripts/sgs_engine/events.py": "be11edff8512fd23c72160b31c78c5e31c18120aec39f088af27e6a800c62439",
     "scripts/sgs_engine/model.py": "54e9ddaacbd57bed216e5a98cbfded9ce1b89fe5a94b8141e6d77c46d3d9f014",
-    "scripts/sgs_engine/production_batch.py": "0d17524f7452b3732ccfada1178f9efb0e16c6d9eb81410fe114305b67069bdd",
-    "scripts/sgs_engine/production_cards.py": "fc4ab8682da5588dcf6f28dddcfa14612af9f4b00ad9cafcd9068f09ba4ba9ed",
+    "scripts/sgs_engine/production_batch.py": "eb6224fdc38b5056e0a9650375888d178aae1b327ddb565fdec47702c074ca28",
+    "scripts/sgs_engine/production_cards.py": "ca52b934678e43a3cb55ee0c5e1850cc0c091aa258c87111468a3eaf4e37bc96",
     "scripts/sgs_engine/production_replay.py": "5b1e2e3efe7d4e4a34a99695349d63f7b21838730ad3e7d64b1533e8b347def6",
     "scripts/sgs_engine/replay.py": "27cd09a98e9ea09d03a6de3542d13abc94341fde4d33a5fdc5e8bdc5497580b1",
     "scripts/sgs_engine/rng.py": "3cb67017556535802c2b323e8002217961955ffee7ff161de85d804d86d5ead6",
     "scripts/sgs_engine_gate.py": "acdfa735982f234462080de4b4137e1b1f3cfcadb709b7258ffb73c4aeb2e925",
     "scripts/sgs_formal_runner.py": "840aa483354a80bcb8867c197352d34f32f985a92cb2287dc2593812c0260be2",
     "scripts/sgs_source_integrity_audit.py": "046aa2a68ed3c3da6df0e8ee9389fe27f8ff4120bc4475f8317fec5a899d8909",
-    "tests/test_sgs_production_basic_cards.py": "2f7439d4dfb836c1efa1ec66ef6ac78dc48362a50e84c0630aded9ea0dddc22c",
-    "tests/test_sgs_production_duel_fire_attack.py": "6d5ac4a398b574ccc32101a731fdb84b33428525525e9971933d959855c7960d",
-    "tests/test_sgs_production_group_target_tricks.py": "cd5ad2cc6e42d725475f59e8315734c0c3cf589258c4db0e3a511b68448b47df",
+    "tests/test_sgs_production_basic_cards.py": "69ed1b0c0e151f4b195f9a6154a7a899e0cb57fdd0c36e043c942f31376e0933",
+    "tests/test_sgs_production_duel_fire_attack.py": "78a4a82cd0244438938caf9ef7a3f7e61b74f586129e3195583a93d7ace08e3a",
+    "tests/test_sgs_production_group_target_tricks.py": "2df9ef87f46370cff3c1304d36e64b24bbaf38f973f1be692fb73113f025370f",
     "tests/test_sgs_production_hidden_handle_security.py": "2a100715553dc34531fa4b768367dfac42b793929d26fa644f0e2c15e17fe5e3",
-    "tests/test_sgs_production_single_target_tricks.py": "b540c681a306961c5ce8a67436d153c6ff815b3a06b37ed911d284bf50aa253c",
-    "tests/test_sgs_production_zone_target_tricks.py": "1e3d43a37bd032b19386cf533a7bfe3f53d8a04c17d2e8f3aa4a2c3eba99fe25",
+    "tests/test_sgs_production_single_target_tricks.py": "9359693e3ccd6dd933d9d8d00241126a77eb43f0732dc64ec1b84dd4da6fcd1e",
+    "tests/test_sgs_production_zone_target_tricks.py": "51b3cd016bb32a2ec28cb51e4144a23620704b57293bbab9525b393b128a09f8",
     "hash_note": "本表为当前工作树文件按Git规范化blob字节（core.autocrlf=true，CRLF统一为LF，UTF-8无BOM）计算的SHA-256；仅作状态记录，不参与门禁校验；docs/CHECKPOINT_MANIFEST.json自身不进入本表",
     "tests/test_sgs_production_chain_damage.py": "779a55170dc7fbcff88265cf49f780eb95fd2566a4b1a1ff0718e6930ad908fc",
     "tests/test_sgs_production_remaining_ordinary_tricks.py": "3e4d0eeb76f30364cb6b9cc06067fa043c14f7a0c58b3ea8bdff648c8e5fc830",
-    "knowledge/三国杀卡牌效果.md": "e08e79330d60ebcb3c0e7e8f3cb543d8464f50abd3d0c6b396d6c019ff0f13f9",
-    "tests/test_sgs_engine_events.py": "bbfe87c398e2fb5f9fa7eea7b7bb481bd56060ccea3898a0836559e3a1ac7d81",
-    "tests/test_sgs_production_borrowed_sword_weapon_system.py": "872e189a765d626a1a4473c58e3b1eaf8fb3515b360c849ee621b5d5b5a2bcf4",
-    "tests/test_sgs_production_delayed_tricks.py": "da79f8b59dcd463afe70b78c7717e27c87301300ccec2be29b0c4df6ceea4a51"
+    "knowledge/三国杀卡牌效果.md": "5f88e8c111cc4386e7a5a6019753982ebe81a7c8e7e7084f93c2d67c5f0ca44a",
+    "tests/test_sgs_engine_events.py": "87088fad12c086c5b3bd6dbc7f27363a27d558471d71ccf5b7d38c4ef74ef94e",
+    "tests/test_sgs_production_borrowed_sword_weapon_system.py": "d63bddb11b391688e8a1882aff8cf6c42d41cf4187ccf0fb741902ea40c94804",
+    "tests/test_sgs_production_delayed_tricks.py": "da79f8b59dcd463afe70b78c7717e27c87301300ccec2be29b0c4df6ceea4a51",
+    "tests\\test_sgs_production_armor_damage_prevention.py": "6fb605fe96b5cb2099e3a2aa377056542aa3053f3943698c2bb6ae79d144c573"
   }
 }
