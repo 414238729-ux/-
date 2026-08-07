@@ -56,7 +56,7 @@
     "cp04m_worktree_branch": "deepseek-armor-damage-prevention",
     "cp04m_worktree_branch_note": "本批（四种防具＋伤害修正／防止基础设施，CP-04M）实现所在分支；基线提交 fc3df95202b23dccfd9abf5e476485a224d6fc2c（docs: mark delayed trick milestone repository state finalized，里程碑标签 milestone-b2-delayed-trick-judgment-infrastructure-audited 指向该基线）；实现提交 29ab73e006408e1e1582a300801e7aa6e04bd9c4（feat: implement armor and damage prevention infrastructure）已由用户在外部PowerShell提交；检查点文档提交 f0db82afcea9944143e224aed147d108c6eae061；2026-08-06 Grok 网页端独立静态审计最终结论 STATIC_AUDIT_PASSED；最终审计文档提交 2db702fde037b501190950687059d660c32b56da（docs: finalize armor and damage prevention audit milestone）已由用户在外部PowerShell提交；里程碑标签 milestone-b2-armor-damage-prevention-infrastructure-audited 已实际建立并推送，本地与 GitHub 远程标签均已由用户在外部PowerShell验证存在；标签在最终状态回填开始时指向 2db702fde037b501190950687059d660c32b56da，随后用户已将标签移动到承载最终仓库状态记录的提交；当前标签指向以Git标签解析结果为准。",
     "cp04n_worktree_branch": "deepseek-mount-distance-infrastructure",
-    "cp04n_worktree_branch_note": "本批（正式坐骑＋距离／攻击范围基础设施，CP-04N）实现所在分支；基线提交 733940b4a5e278ae3eba11e5c6522b0f1832d6b4（docs: correct armor milestone tag target wording，里程碑标签 milestone-b2-armor-damage-prevention-infrastructure-audited 指向该基线）；实现提交 fd7d69f53e9827877b6a29d67c067012ead6a7af（feat: implement mounts and distance infrastructure）已由用户在外部PowerShell提交；距离下限结论为 DISTANCE_FLOOR_FIXED（提交前纠正，无audit fix commit）；独立审计尚未进行（NOT_AUDITED_YET）。"
+    "cp04n_worktree_branch_note": "本批（正式坐骑＋距离／攻击范围基础设施，CP-04N）实现所在分支；基线提交 733940b4a5e278ae3eba11e5c6522b0f1832d6b4（docs: correct armor milestone tag target wording，里程碑标签 milestone-b2-armor-damage-prevention-infrastructure-audited 指向该基线）；实现提交 fd7d69f53e9827877b6a29d67c067012ead6a7af（feat: implement mounts and distance infrastructure）与检查点文档提交 3231adef9aa97cc152c7476195e9f169c3b14a15 已由用户在外部PowerShell提交；2026-08-07 Grok 网页端独立静态审计最终结论 STATIC_AUDIT_PASSED；距离下限结论为 DISTANCE_FLOOR_FIXED（提交前纠正，无audit fix commit）；计划里程碑标签 milestone-b2-mount-distance-infrastructure-audited 将在最终文档提交后由用户建立（本轮未执行 git tag）。"
   },
   "feature_status": {
     "authoritative_core_foundation": true,
@@ -352,12 +352,12 @@
     },
     {
       "id": "CP-04N-PRODUCTION-MOUNT-DISTANCE-INFRASTRUCTURE",
-      "status": "committed_pending_audit",
+      "status": "audited",
       "commit": "fd7d69f53e9827877b6a29d67c067012ead6a7af",
-      "commit_note": "本批（正式坐骑＋距离／攻击范围基础设施，CP-04N）已由用户在外部PowerShell提交真实实现提交：完整提交哈希 fd7d69f53e9827877b6a29d67c067012ead6a7af（feat: implement mounts and distance infrastructure）；实现父提交 733940b4a5e278ae3eba11e5c6522b0f1832d6b4（milestone-b2-armor-damage-prevention-infrastructure-audited）；距离下限结论为 DISTANCE_FLOOR_FIXED（上一轮 DISTANCE_FLOOR_CORRECT 是提交前发现的错误推论，已在任何Git提交产生之前修正，因此不存在 audit fix commit，也不得虚构）；独立审计尚未进行（NOT_AUDITED_YET），不得提前写成audited；检查点文档提交待用户外部提交后回填。",
-      "independent_audit_done": false,
-      "audit_conclusion": "NOT_AUDITED_YET",
-      "milestone_tag": null,
+      "commit_note": "本批（正式坐骑＋距离／攻击范围基础设施，CP-04N）真实提交链：基线提交 733940b4a5e278ae3eba11e5c6522b0f1832d6b4（milestone-b2-armor-damage-prevention-infrastructure-audited）；实现提交 fd7d69f53e9827877b6a29d67c067012ead6a7af（feat: implement mounts and distance infrastructure）；检查点文档提交 3231adef9aa97cc152c7476195e9f169c3b14a15（docs: record mount and distance checkpoint）。2026-08-07 完成独立静态审计：Grok 网页端经 GitHub 连接器对精确目标 3231adef9aa97cc152c7476195e9f169c3b14a15 进行只读静态审计，最终结论 STATIC_AUDIT_PASSED（24个强制文件全部完成要求范围阅读，PARTIAL_READ=空、NOT_READ=空，14个强制审计章节全部PASSED，Blocking issues 无）；Grok 未亲自执行 pytest、compileall 或本地虚拟环境；本地运行证据（pytest 1840 passed 等）来自本地实现会话，两类证据不得混写；距离下限结论为 DISTANCE_FLOOR_FIXED（开发过程中曾出现 DISTANCE_FLOOR_CORRECT 的错误推论，但该错误在 implementation commit 产生前已修复，从未进入Git历史中的错误实现提交，因此不存在audit fix commit，也不得虚构）；本批没有审计修复提交；计划里程碑标签 milestone-b2-mount-distance-infrastructure-audited 将在最终文档提交后由用户建立（本轮未执行 git tag、未验证标签已存在）。",
+      "independent_audit_done": true,
+      "audit_conclusion": "AUDIT_PASSED",
+      "milestone_tag": "milestone-b2-mount-distance-infrastructure-audited",
       "worktree_commit_pending": true,
       "evidence": "scripts/sgs_engine/production_cards.py、scripts/sgs_engine/production_batch.py、scripts/sgs_engine/__init__.py、tests/test_sgs_production_mount_distance.py；正式160张牌堆两种坐骑7张实体批次",
       "scope": "formal；两种坐骑7张实体接入生产注册表与权威核心；统一有效距离模型（基础座次距离＋进攻／防御坐骑方向性修正）、武器攻击范围与有效距离分离、杀／借刀／顺手／兵粮距离接入、坐骑装备与同栏位替换、动作安全与严格回放；不构成完整武器技能完成、多人生产语义完成、正式单挑完成或里程碑B完成",
@@ -365,19 +365,20 @@
       "implementation_commit_message": "feat: implement mounts and distance infrastructure",
       "implementation_parent": "733940b4a5e278ae3eba11e5c6522b0f1832d6b4",
       "audit": {
-        "independent_audit_done": false,
-        "audit_conclusion": "NOT_AUDITED_YET",
-        "conclusion": "NOT_AUDITED_YET",
+        "independent_audit_done": true,
+        "audit_conclusion": "AUDIT_PASSED",
+        "conclusion": "AUDIT_PASSED",
         "initial_conclusion": null,
-        "final_reaudit_conclusion": null,
-        "audited_at": null,
-        "auditor_note": "实现提交已由用户在外部PowerShell创建（fd7d69f53e9827877b6a29d67c067012ead6a7af），等待开展独立只读审计。",
+        "final_reaudit_conclusion": "STATIC_AUDIT_PASSED",
+        "audited_at": "2026-08-07",
+        "auditor_note": "最终独立静态审计：审计者为 Grok 网页端，通过 GitHub 连接器对仓库 414238729-ux/- 的审计分支 deepseek-audit-mount-distance-infrastructure 上精确目标 3231adef9aa97cc152c7476195e9f169c3b14a15 进行只读静态审计（implementation fd7d69f53e9827877b6a29d67c067012ead6a7af，baseline 733940b4a5e278ae3eba11e5c6522b0f1832d6b4）；实际阅读账本为24个强制文件全部完成要求范围阅读（规则3个、生产6个、测试11个、状态文档4个，正确生产文件路径为 scripts/sgs_engine/__init__.py），PARTIAL_READ=空、NOT_READ=空，14个强制审计章节全部PASSED，Blocking issues 无，最终结论 STATIC_AUDIT_PASSED。这是Grok的只读静态审计；Grok未亲自执行 pytest、compileall 或本地虚拟环境；本地运行证据来自实现会话（pytest 1840 passed、0 failed、0 skipped；compileall通过；git diff --check通过；源码完整性审计 scanned_file_count=120、defect_count=0、audit_item_count=55；SHA-256 36个文件条目全部一致＋1个hash_note），两类证据不得混写。本批没有审计问题修复提交（audit_gap_fix_commit=null），不得虚构fix commit；距离下限结论为 DISTANCE_FLOOR_FIXED（上一轮 DISTANCE_FLOOR_CORRECT 错误推论已在实现提交前修复，从未进入Git历史错误实现提交）。",
         "implementation_commit": "fd7d69f53e9827877b6a29d67c067012ead6a7af",
-        "checkpoint_commit": null,
+        "checkpoint_commit": "3231adef9aa97cc152c7476195e9f169c3b14a15",
         "audit_gap_fix_commit": null,
-        "final_audit_conclusion": null,
-        "milestone_tag": null,
-        "final_status": "committed_pending_audit"
+        "final_audit_conclusion": "STATIC_AUDIT_PASSED",
+        "milestone_tag": "milestone-b2-mount-distance-infrastructure-audited",
+        "final_status": "audited",
+        "milestone_tag_note": "计划里程碑标签；将在最终审计文档提交后由用户建立（本轮未执行 git tag、未验证标签已存在，不得声称标签已创建、已推送或已验证远程）。"
       }
     }
   ],
@@ -810,10 +811,10 @@
     }
   },
   "sha256": {
-    "docs/ENGINE_STATUS.md": "d44b4563dc5659df9d72e4c057a387165ef33f2825e098e555b7fee2d56fb652",
-    "docs/IMPLEMENTATION_MATRIX.md": "efd787005fdf443e723175ea7ac5119398ffff58837594f50703cfab5cf0bce9",
+    "docs/ENGINE_STATUS.md": "78d8fb46b61cefadc5626b2b86660229e963f36c7ab0cdaafbfd4823edf4e851",
+    "docs/IMPLEMENTATION_MATRIX.md": "7154339a1c829ded6e79cc2690b7d3e80941bbdf1359dece3e7124a063af5015",
     "docs/LEGACY_RESULTS_INVALID.md": "267d51329b65b4435ed770b9fe90a0d53148d17cc9b0dae3e6d3406b06c0c0cc",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "3f9ec65783d3142442d077fe32f169801e70e3b8f2831e0b068d7645d9237b52",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "b71a58dc45b7fafd95f102c58136ae0f883e706af886321430f8627a3f526631",
     "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "23b56a0edf0c85657b332100538013de16be4d71ea6a8214ac862a6708105af6",
     "knowledge/三国杀牌堆数据.csv": "8cb8da4177f11962776ae0f7e0154ed4ce56e293e96ac457874d48650517de18",
     "scripts/sgs_dev_runner.py": "6f88baa78fc9c22106188defda7190cd2a4412325db46f3964d217fd0e61c755",
