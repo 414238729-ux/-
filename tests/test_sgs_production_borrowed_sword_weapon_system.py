@@ -44,6 +44,7 @@ from scripts.sgs_engine.production_cards import (
     PRODUCTION_ARMOR_KEYS,
     PRODUCTION_BASIC_CARD_KEYS,
     PRODUCTION_DELAYED_TRICK_KEYS,
+    PRODUCTION_MOUNT_KEYS,
     PRODUCTION_TRICK_KEYS,
     PRODUCTION_WEAPON_KEYS,
     SLASH_CARD_KEYS,
@@ -278,23 +279,21 @@ def test_implemented_and_remaining_card_counts_updated() -> None:
     game = _fresh(seed=3)
     registry = game.formal_registry
     assert JIEDAO in registry.implemented_card_keys
-    assert len(registry.implemented_card_keys) == 36
-    assert len(registry.unimplemented_card_keys) == 2
-    # 完整实现口径：25种／141张（武器实体不计入完整实现）
+    assert len(registry.implemented_card_keys) == 38
+    assert len(registry.unimplemented_card_keys) == 0
+    # 完整实现口径：27种／148张（武器实体不计入完整实现）
     complete_keys = (
         set(PRODUCTION_BASIC_CARD_KEYS)
         | set(PRODUCTION_TRICK_KEYS)
         | set(PRODUCTION_DELAYED_TRICK_KEYS)
         | set(PRODUCTION_ARMOR_KEYS)
+        | set(PRODUCTION_MOUNT_KEYS)
     )
-    assert len(complete_keys) == 25
-    assert sum(len(registry.instances_of(key)) for key in complete_keys) == 141
-    # 注册表口径：36种适配器／153张实体
-    assert sum(len(registry.instances_of(key)) for key in registry.implemented_card_keys) == 153
-    assert set(registry.unimplemented_card_keys) == {
-        "sgs_mount_defensive",
-        "sgs_mount_offensive",
-    }
+    assert len(complete_keys) == 27
+    assert sum(len(registry.instances_of(key)) for key in complete_keys) == 148
+    # 注册表口径：38种适配器／160张实体
+    assert sum(len(registry.instances_of(key)) for key in registry.implemented_card_keys) == 160
+    assert set(registry.unimplemented_card_keys) == set()
     assert not any(key.startswith("sgs_trick_") for key in registry.unimplemented_card_keys)
     assert not any(key.startswith("sgs_delayed_") for key in registry.unimplemented_card_keys)
     assert not any(key.startswith("sgs_armor_") for key in registry.unimplemented_card_keys)
@@ -319,14 +318,8 @@ def test_formal_deck_remains_160_with_unique_ids() -> None:
 def test_other_unimplemented_cards_stay_fail_closed() -> None:
     game = _fresh(seed=3)
     registry = game.formal_registry
-    for key in ("sgs_mount_defensive", "sgs_mount_offensive"):
-        assert key in registry.unimplemented_card_keys
-        with pytest.raises(UnsupportedRuleError):
-            registry.adapter_for(key)
-        with pytest.raises(UnsupportedRuleError):
-            registry.rule_spec_for(key)
-    with pytest.raises(UnsupportedRuleError):
-        registry.assert_no_unimplemented_fallback()
+    assert not registry.unimplemented_card_keys
+    registry.assert_no_unimplemented_fallback()
 
 
 

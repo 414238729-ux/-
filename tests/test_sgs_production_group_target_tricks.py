@@ -359,8 +359,8 @@ def test_implemented_and_remaining_card_counts_updated() -> None:
     game = _fresh(3)
     registry = game.formal_registry
     assert {NANMAN, WANJIAN, TAOYUAN} <= set(registry.implemented_card_keys)
-    assert len(registry.implemented_card_keys) == 36
-    assert len(registry.unimplemented_card_keys) == 2
+    assert len(registry.implemented_card_keys) == 38
+    assert len(registry.unimplemented_card_keys) == 0
     assert {NANMAN, WANJIAN, TAOYUAN} <= set(PRODUCTION_TRICK_KEYS)
     assert set(GROUP_TRICK_KEYS) == {NANMAN, WANJIAN, TAOYUAN}
     assert (
@@ -368,21 +368,15 @@ def test_implemented_and_remaining_card_counts_updated() -> None:
             len(registry.instances_of(key))
             for key in registry.implemented_card_keys
         )
-        == 153
+        == 160
     )
 
 
 def test_other_unimplemented_cards_stay_fail_closed() -> None:
     game = _fresh(3)
     registry = game.formal_registry
-    for key in ("sgs_mount_defensive", "sgs_mount_offensive"):
-        assert key in registry.unimplemented_card_keys
-        with pytest.raises(UnsupportedRuleError):
-            registry.adapter_for(key)
-        with pytest.raises(UnsupportedRuleError):
-            registry.rule_spec_for(key)
-    with pytest.raises(UnsupportedRuleError):
-        registry.assert_no_unimplemented_fallback()
+    assert not registry.unimplemented_card_keys
+    registry.assert_no_unimplemented_fallback()
     # 群体锦囊不再属于未实现卡牌
     assert NANMAN not in registry.unimplemented_card_keys
     assert WANJIAN not in registry.unimplemented_card_keys

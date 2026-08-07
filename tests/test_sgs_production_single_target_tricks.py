@@ -39,8 +39,12 @@ from scripts.sgs_engine.production_batch import (
     ScriptedBatchController,
 )
 from scripts.sgs_engine.production_cards import (
+    PRODUCTION_ARMOR_KEYS,
     PRODUCTION_BASIC_CARD_KEYS,
+    PRODUCTION_DELAYED_TRICK_KEYS,
+    PRODUCTION_MOUNT_KEYS,
     PRODUCTION_TRICK_KEYS,
+    PRODUCTION_WEAPON_KEYS,
     FormalCardRegistry,
     WuxiekejiAdapter,
     WuzhongshengyouAdapter,
@@ -850,20 +854,21 @@ def test_wuzhong_draw_reshuffles_when_draw_pile_exhausted() -> None:
 def test_other_normal_tricks_stay_fail_closed() -> None:
     game = _fresh(seed=3)
     registry = game.formal_registry
-    for key in ("sgs_mount_defensive",):
-        assert key in registry.unimplemented_card_keys
-        with pytest.raises(UnsupportedRuleError):
-            registry.adapter_for(key)
+    assert not registry.unimplemented_card_keys
     # 【过河拆桥】【顺手牵羊】【南蛮入侵】【万箭齐发】【桃园结义】【借刀杀人】
     # 已经接入生产适配器，不再属于未实现卡牌；其余未实现卡牌继续失败关闭。
     assert "sgs_trick_guohechaiqiao" not in registry.unimplemented_card_keys
     assert "sgs_trick_shunshouqianyang" not in registry.unimplemented_card_keys
     assert "sgs_trick_nanmanruqin" not in registry.unimplemented_card_keys
-    with pytest.raises(UnsupportedRuleError):
-        registry.rule_spec_for("sgs_mount_defensive")
-    with pytest.raises(UnsupportedRuleError):
-        registry.assert_no_unimplemented_fallback()
-    implemented = set(PRODUCTION_BASIC_CARD_KEYS) | set(PRODUCTION_TRICK_KEYS)
+    registry.assert_no_unimplemented_fallback()
+    implemented = (
+        set(PRODUCTION_BASIC_CARD_KEYS)
+        | set(PRODUCTION_TRICK_KEYS)
+        | set(PRODUCTION_WEAPON_KEYS)
+        | set(PRODUCTION_DELAYED_TRICK_KEYS)
+        | set(PRODUCTION_ARMOR_KEYS)
+        | set(PRODUCTION_MOUNT_KEYS)
+    )
     for action in game.legal_actions():
         if action.card_instance_id is None:
             continue

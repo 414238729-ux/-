@@ -82,6 +82,8 @@ CARD_NAMES_BY_KEY: Mapping[str, str] = {
     "sgs_armor_renwangdun": "仁王盾",
     "sgs_armor_tengjia": "藤甲",
     "sgs_armor_baiyinshizi": "白银狮子",
+    "sgs_mount_offensive": "攻击坐骑（-1坐骑）",
+    "sgs_mount_defensive": "防御坐骑（+1坐骑）",
 }
 
 SLASH_CARD_KEYS: tuple[str, ...] = (
@@ -138,6 +140,11 @@ PRODUCTION_ARMOR_KEYS: tuple[str, ...] = (
     "sgs_armor_renwangdun",
     "sgs_armor_tengjia",
     "sgs_armor_baiyinshizi",
+)
+
+PRODUCTION_MOUNT_KEYS: tuple[str, ...] = (
+    "sgs_mount_offensive",
+    "sgs_mount_defensive",
 )
 
 DEFAULT_STRUCTURED_CARD_CSV_PATH = Path("knowledge") / "三国杀卡牌结构化数据.csv"
@@ -214,12 +221,12 @@ def attack_range_of(state: GameState, player_id: str) -> int:
         ) from exc
 
 
-def actual_distance(state: GameState, source_id: str, target_id: str) -> int:
-    """按当前座次的环形座次计算实际距离。
+def base_seat_distance(state: GameState, source_id: str, target_id: str) -> int:
+    """按当前座次的环形座次计算基础距离。
 
-    距离 = 顺时针与逆时针座位步数中的较小值。本批次未实现坐骑，距离
-    修正不适用；若将来接入坐骑，必须在本函数同步补充。
-    """
+    距离 = 顺时针与逆时针座位步数中的较小值；自己到自己的基础距离为0；
+    死亡角色按基础术语第16节由存活角色环跳过（当前双人生产切片中由
+    调用方先行排除死亡目标）。"""
 
     players = state.players_by_id
     if source_id not in players or target_id not in players:
@@ -232,6 +239,74 @@ def actual_distance(state: GameState, source_id: str, target_id: str) -> int:
     span = abs(source_seat - target_seat)
     ring_size = len(seats)
     return min(span, ring_size - span)
+
+
+def effective_distance(state: GameState, source_id: str, target_id: str) -> int:
+    """统一权威有效距离（CP-04N）。
+
+    有效距离 = 基础座次距离 + 目标防御坐骑修正（+1） - 源进攻坐骑修正
+    （-1），最终 clamp 到下限。正式不变量：自己到自己的距离永远为0；
+    两名不同角色之间的最终距离最低为1（-1坐骑不得把相邻角色的距离
+    1 修正为0）。进攻坐骑只影响装备者到别人的距离，防御坐骑只影响别人
+    到装备者的距离；武器攻击范围不参与本计算。坐骑栏每栏至多一张，
+    状态非法时失败关闭。"""
+
+    base = base_seat_distance(state, source_id, target_id)
+    if source_id == target_id:
+        # 自己到自己的距离固定为0，坐骑修正不改变自身距离
+        return 0
+    attack_ids = state.card_ids_in(
+        ZoneRef.equipment(source_id, "attack_horse")
+    )
+    if len(attack_ids) > 1:
+        raise UnsupportedRuleError(
+            f"角色{source_id}的攻击坐骑槽必须至多包含一张坐骑牌；"
+            f"当前为{len(attack_ids)}张"
+        )
+    defense_ids = state.card_ids_in(
+        ZoneRef.equipment(target_id, "defense_horse")
+    )
+    if len(defense_ids) > 1:
+        raise UnsupportedRuleError(
+            f"角色{target_id}的防御坐骑槽必须至多包含一张坐骑牌；"
+            f"当前为{len(defense_ids)}张"
+        )
+    distance = base
+    if attack_ids:
+        card = state.cards_by_id[attack_ids[0]]
+        if card.distance_modifier != -1:
+            raise UnsupportedRuleError(
+                f"攻击坐骑{card.card_key}的distance_modifier必须为-1；失败关闭"
+            )
+        distance -= 1
+    if defense_ids:
+        card = state.cards_by_id[defense_ids[0]]
+        if card.distance_modifier != 1:
+            raise UnsupportedRuleError(
+                f"防御坐骑{card.card_key}的distance_modifier必须为+1；失败关闭"
+            )
+        distance += 1
+    if distance < 1:
+        # 不同角色之间的最终距离最低为1：-1坐骑不得把相邻角色距离修正为0
+        distance = 1
+    return distance
+
+
+def actual_distance(state: GameState, source_id: str, target_id: str) -> int:
+    """实际距离 = 统一有效距离（基础座次距离＋坐骑修正，CP-04N）。"""
+    return effective_distance(state, source_id, target_id)
+
+
+def is_target_within_distance(
+    state: GameState, source_id: str, target_id: str, distance: int
+) -> bool:
+    """统一距离上限判断：源到目标的有效距离不超过给定上限。"""
+
+    if isinstance(distance, bool) or not isinstance(distance, int):
+        raise TypeError("距离上限必须是整数")
+    if distance < 0:
+        raise ValueError("距离上限不能为负数")
+    return effective_distance(state, source_id, target_id) <= distance
 
 
 def is_valid_slash_target(state: GameState, attacker_id: str, target_id: str) -> bool:
@@ -469,23 +544,14 @@ def has_target_zone_cards(state: GameState, player_id: str) -> bool:
 def is_valid_shunshou_target(
     state: GameState, source_id: str, target_id: str
 ) -> bool:
-    """【顺手牵羊】的真实目标合法性：其他角色且实际距离为 1。
+    """【顺手牵羊】的真实目标合法性：其他角色且有效距离为 1。
 
-    距离条件调用正式 ``actual_distance`` 接口，不使用座位编号差或
-    攻击范围代替。坐骑距离修正尚未实现：当参与该距离的坐骑栏被占用时
-    失败关闭，绝不返回近似距离。
-    """
+    距离条件调用正式 ``effective_distance`` 接口（含进攻／防御坐骑修正），
+    不使用座位编号差或武器攻击范围代替。"""
 
     if source_id == target_id:
         return False
-    if state.card_ids_in(ZoneRef.equipment(source_id, "attack_horse")) or (
-        state.card_ids_in(ZoneRef.equipment(target_id, "defense_horse"))
-    ):
-        raise UnsupportedRuleError(
-            "坐骑距离修正尚未实现，不能判定【顺手牵羊】的实际距离条件；"
-            "本批次失败关闭"
-        )
-    return actual_distance(state, source_id, target_id) == 1
+    return effective_distance(state, source_id, target_id) == 1
 
 
 class BasicCardAdapter(RuleAdapter):
@@ -2170,14 +2236,6 @@ class BingliangAdapter(DelayedTrickAdapter):
                 for instance_id in state.card_ids_in(ZoneRef.judgment(player_id))
             ):
                 continue
-            # 坐骑修正未实现：坐骑栏被夹具占用时失败关闭（apply 层再验证）
-            mounts = state.card_ids_in(
-                ZoneRef.equipment(player_id, "attack_horse")
-            ) + state.card_ids_in(ZoneRef.equipment(player_id, "defense_horse"))
-            if mounts:
-                raise UnsupportedRuleError(
-                    "兵粮寸断的实际距离=1依赖坐骑修正；坐骑语义未实现，坐骑栏被占用时失败关闭"
-                )
             if actual_distance(state, user_id, player_id) != 1:
                 continue
             targets.append(player_id)
@@ -2523,6 +2581,95 @@ class BaiyinShiziAdapter(ArmorCardAdapter):
         )
 
 
+class MountCardAdapter(BasicCardAdapter):
+    """两种坐骑牌本体的通用生产适配器（CP-04N）。
+
+    只实现牌本体与统一距离接入：出牌阶段主动使用、坐骑进入对应坐骑栏
+    （attack_horse／defense_horse）、同栏位替换原子化；装备后由统一
+    ``effective_distance`` 计算有效距离（进攻坐骑只影响装备者到别人的
+    距离，防御坐骑只影响别人到装备者的距离），武器攻击范围不参与。
+    坐骑离区不触发防具（白银狮子）恢复。"""
+
+    def __init__(
+        self,
+        card_key: str,
+        session: "ProductionBasicCardBatch | None" = None,
+    ) -> None:
+        super().__init__(session)
+        if card_key not in PRODUCTION_MOUNT_KEYS:
+            raise ValueError(f"{card_key}不是本批次的坐骑卡牌键")
+        self.card_key = card_key
+        self.card_name = CARD_NAMES_BY_KEY[card_key]
+        self.mount_slot = (
+            "attack_horse"
+            if card_key == "sgs_mount_offensive"
+            else "defense_horse"
+        )
+
+    def rule_spec(self) -> dict[str, object]:
+        return {
+            "card_key": self.card_key,
+            "card_name": self.card_name,
+            "use_timing": "own_play_phase",
+            "use_limit": "unlimited_base;requires_entity_card",
+            "target_count": 0,
+            "target_filter": "self_equip_mount_slot",
+            "equipment_slot": self.mount_slot,
+            "distance_modifier": -1 if self.mount_slot == "attack_horse" else 1,
+            "distance_rule": (
+                "attack_horse:only_owner_to_others_minus_one;"
+                "defense_horse:only_others_to_owner_plus_one;"
+                "weapon_range_not_involved"
+            ),
+            "skill_status": "implemented",
+            "skill_effect": "distance_modifier_via_effective_distance",
+            "movement_lifecycle": "hand->processing->mount_slot",
+            "replacement": "old_mount_atomic_to_discard",
+            "adapter_version": self.adapter_version,
+            "implemented": self.implemented,
+            "tested": self.tested,
+            "production_adapter": self.production_adapter,
+        }
+
+    def enumerate_legal_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        session = self._require_session()
+        if session.phase.value != "play":
+            return ()
+        if context.actor_id != session.runtime.current_player_id:
+            return ()
+        actions: list[LegalAction] = []
+        for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
+            card = state.cards_by_id[instance_id]
+            if card.card_key != self.card_key:
+                continue
+            actions.append(
+                LegalAction(
+                    action_type=ActionType.USE_CARD,
+                    actor_id=context.actor_id,
+                    card_instance_id=instance_id,
+                    target_ids=(context.actor_id,),
+                    payload={
+                        "operation": "use_mount",
+                        "card_key": self.card_key,
+                        "card_name": self.card_name,
+                    },
+                )
+            )
+        return tuple(actions)
+
+    def apply_action(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        session = self._require_session()
+        if session.phase.value == "play":
+            return session.apply_mount_use(state, context, action, self)
+        raise InvalidActionError(
+            f"{self.card_name}生产适配器不能处理当前阶段的动作"
+        )
+
+
 class JiedaoSharenAdapter(TrickCardAdapter):
     """【借刀杀人】的生产适配器（CP-04K）。
 
@@ -2680,6 +2827,8 @@ def _default_adapters() -> dict[str, RuleAdapter]:
         "sgs_armor_renwangdun": RenwangDunAdapter(),
         "sgs_armor_tengjia": TengjiaAdapter(),
         "sgs_armor_baiyinshizi": BaiyinShiziAdapter(),
+        "sgs_mount_offensive": MountCardAdapter("sgs_mount_offensive"),
+        "sgs_mount_defensive": MountCardAdapter("sgs_mount_defensive"),
     }
 
 
@@ -2828,6 +2977,7 @@ __all__ = [
     "NanmanRuqinAdapter",
     "PRODUCTION_DELAYED_TRICK_KEYS",
     "PRODUCTION_WEAPON_KEYS",
+    "PRODUCTION_MOUNT_KEYS",
     "ShandianAdapter",
     "ShunshouQianyangAdapter",
     "TaoyuanJieyiAdapter",
@@ -2838,6 +2988,7 @@ __all__ = [
     "WuxiekejiAdapter",
     "WuzhongshengyouAdapter",
     "WeaponCardAdapter",
+    "MountCardAdapter",
     "BasicCardAdapter",
     "DodgeAdapter",
     "FormalCardRegistry",
@@ -2846,6 +2997,9 @@ __all__ = [
     "WineAdapter",
     "actual_distance",
     "attack_range_of",
+    "base_seat_distance",
+    "effective_distance",
+    "is_target_within_distance",
     "check_weapon_skill_gate",
     "weapon_attack_ranges",
     "has_target_zone_cards",

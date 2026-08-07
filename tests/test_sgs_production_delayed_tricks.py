@@ -449,21 +449,29 @@ def test_different_delayed_tricks_can_coexist_and_entry_increases() -> None:
     _assert_conservation(game)
 
 
-def test_bingliang_uses_actual_distance_and_mount_gate() -> None:
+def test_bingliang_uses_actual_distance_and_mounts() -> None:
     game = _fresh(seed=3)
     _swap(game, BINGLIANG_151, ZoneRef.hand("p1"))
     action = _action(game, "use_bingliang", card_key=BINGLIANG)
     assert action is not None
     assert action.target_ids == ("p2",)
-    # 坐骑栏被夹具占用时（坐骑语义未实现）必须失败关闭
+    # 目标防御坐骑使 p1->p2 有效距离为2：兵粮距离1不合法
     mount = next(
+        r
+        for r in game.formal_registry.records
+        if r.card_key == "sgs_mount_defensive"
+    )
+    _swap(game, mount.instance_id, ZoneRef.equipment("p2", "defense_horse"))
+    assert _action(game, "use_bingliang", card_key=BINGLIANG) is None
+    # 进攻坐骑恢复距离1后合法
+    atk = next(
         r
         for r in game.formal_registry.records
         if r.card_key == "sgs_mount_offensive"
     )
-    _swap(game, mount.instance_id, ZoneRef.equipment("p2", "attack_horse"))
-    with pytest.raises(UnsupportedRuleError):
-        _action(game, "use_bingliang", card_key=BINGLIANG)
+    _swap(game, atk.instance_id, ZoneRef.equipment("p1", "attack_horse"))
+    action2 = _action(game, "use_bingliang", card_key=BINGLIANG)
+    assert action2 is not None and action2.target_ids == ("p2",)
 
 
 def test_lebusi_cannot_target_self() -> None:

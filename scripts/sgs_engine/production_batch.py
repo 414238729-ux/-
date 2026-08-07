@@ -2367,6 +2367,10 @@ class ProductionBasicCardBatch:
                 return self._formal_registry.adapter_for(
                     action.payload.get("card_key", "")
                 ).apply_action(state, context, action)
+            if operation == "use_mount":
+                return self._formal_registry.adapter_for(
+                    action.payload.get("card_key", "")
+                ).apply_action(state, context, action)
             if operation in (
                 "use_lebusi",
                 "use_bingliang",
@@ -5070,6 +5074,31 @@ class ProductionBasicCardBatch:
             slot="armor",
             operation="use_armor",
             reason_prefix="armor_equip",
+        )
+
+    def apply_mount_use(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        adapter: object,
+    ) -> GameState:
+        """从手牌主动装备坐骑：处理区→坐骑栏，同栏位替换原子化（CP-04N）。
+
+        坐骑栏由实体牌 equipment_slot 决定（attack_horse／defense_horse）；
+        进攻与防御坐骑可同时存在、互不覆盖；坐骑离区不触发防具恢复。"""
+        card = state.cards_by_id[action.card_instance_id]
+        slot = card.equipment_slot
+        if slot not in ("attack_horse", "defense_horse"):
+            raise InvalidActionError("该实体牌不是坐骑栏装备牌")
+        return self._apply_equipment_use(
+            state,
+            context,
+            action,
+            adapter,
+            slot=slot,
+            operation="use_mount",
+            reason_prefix="mount_equip",
         )
 
     def _apply_equipment_use(
@@ -8206,13 +8235,6 @@ class ProductionBasicCardBatch:
             if not state.players_by_id[target].alive:
                 raise InvalidActionError("延时锦囊目标必须存活")
             if adapter.card_key == "sgs_delayed_bingliang":
-                mounts = state.card_ids_in(
-                    ZoneRef.equipment(target, "attack_horse")
-                ) + state.card_ids_in(ZoneRef.equipment(target, "defense_horse"))
-                if mounts:
-                    raise UnsupportedRuleError(
-                        "兵粮寸断的实际距离=1依赖坐骑修正；坐骑语义未实现，坐骑栏被占用时失败关闭"
-                    )
                 if actual_distance(state, context.actor_id, target) != 1:
                     raise InvalidActionError(
                         "【兵粮寸断】目标必须与使用者实际距离为1"

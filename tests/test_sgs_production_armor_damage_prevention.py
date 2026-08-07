@@ -341,20 +341,13 @@ def test_armor_adapters_registered_with_specs() -> None:
 def test_registry_counts_updated_after_armor_batch() -> None:
     game = _fresh(seed=3)
     registry = game.formal_registry
-    assert len(registry.implemented_card_keys) == 36
-    assert len(registry.unimplemented_card_keys) == 2
-    assert set(registry.unimplemented_card_keys) == {
-        "sgs_mount_defensive",
-        "sgs_mount_offensive",
-    }
+    assert len(registry.implemented_card_keys) == 38
+    assert len(registry.unimplemented_card_keys) == 0
+    assert set(registry.unimplemented_card_keys) == set()
     assert sum(
         len(registry.instances_of(key)) for key in registry.implemented_card_keys
-    ) == 153
-    for key in ("sgs_mount_defensive", "sgs_mount_offensive"):
-        with pytest.raises(UnsupportedRuleError):
-            registry.adapter_for(key)
-    with pytest.raises(UnsupportedRuleError):
-        registry.assert_no_unimplemented_fallback()
+    ) == 160
+    registry.assert_no_unimplemented_fallback()
     _assert_conservation(game)
 
 

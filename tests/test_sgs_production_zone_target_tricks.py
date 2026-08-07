@@ -223,24 +223,18 @@ def test_implemented_and_remaining_card_counts_updated() -> None:
     registry = game.formal_registry
     assert GUOHE in registry.implemented_card_keys
     assert SHUNSHOU in registry.implemented_card_keys
-    assert len(registry.unimplemented_card_keys) == 2
+    assert len(registry.unimplemented_card_keys) == 0
     assert GUOHE not in registry.unimplemented_card_keys
     assert SHUNSHOU not in registry.unimplemented_card_keys
-    assert sum(len(registry.instances_of(key)) for key in registry.implemented_card_keys) == 153
+    assert sum(len(registry.instances_of(key)) for key in registry.implemented_card_keys) == 160
     assert {GUOHE, SHUNSHOU} <= set(PRODUCTION_TRICK_KEYS)
 
 
 def test_other_unimplemented_tricks_stay_fail_closed() -> None:
     game = _fresh(seed=3)
     registry = game.formal_registry
-    for key in ("sgs_mount_defensive", "sgs_mount_offensive"):
-        assert key in registry.unimplemented_card_keys
-        with pytest.raises(UnsupportedRuleError):
-            registry.adapter_for(key)
-        with pytest.raises(UnsupportedRuleError):
-            registry.rule_spec_for(key)
-    with pytest.raises(UnsupportedRuleError):
-        registry.assert_no_unimplemented_fallback()
+    assert not registry.unimplemented_card_keys
+    registry.assert_no_unimplemented_fallback()
 
 
 # ---------------------------------------------------------------------
@@ -327,7 +321,7 @@ def test_judgment_only_target_legal() -> None:
     assert _action(game, "use_shunshou", card_key=SHUNSHOU) is not None
 
 
-def test_shunshou_distance_fail_closed_with_mount() -> None:
+def test_shunshou_distance_with_defensive_mount() -> None:
     game = _fresh(seed=66)
     assert is_valid_shunshou_target(game.state, "p1", "p1") is False
     _empty_p2_zones(game)
@@ -335,10 +329,15 @@ def test_shunshou_distance_fail_closed_with_mount() -> None:
     _fixture_set_state(
         game, {mount_id: ZoneRef.equipment("p2", "defense_horse")}
     )
-    with pytest.raises(UnsupportedRuleError):
-        is_valid_shunshou_target(game.state, "p1", "p2")
-    # 坐骑修正未实现：枚举层面失败关闭，不提供任何目标的使用动作
+    # 防御坐骑使 p1->p2 有效距离为2：顺手距离1不合法（不抛异常）
+    assert is_valid_shunshou_target(game.state, "p1", "p2") is False
     assert _action(game, "use_shunshou", card_key=SHUNSHOU) is None
+    # 进攻坐骑恢复距离1后合法
+    attack_mount = _any_instance_of(game, "sgs_mount_offensive")
+    _fixture_set_state(
+        game, {attack_mount: ZoneRef.equipment("p1", "attack_horse")}
+    )
+    assert is_valid_shunshou_target(game.state, "p1", "p2") is True
 
 
 def test_guohe_does_not_inherit_shunshou_distance_rule() -> None:
