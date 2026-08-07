@@ -1807,15 +1807,37 @@ def test_player_visible_replay_leaks_no_unplayed_hand_cards(
     # 同种子重建牌局得到相同初始手牌；从未公开化的目标手牌实体不得因群体
     # 响应机制泄露：事件中只允许公共发牌记录，决策材料中不得出现（与既有
     # 火攻批次玩家可见导出约定一致）。
-    game = _fresh(seed=15)
-    p2_hand = set(game.state.card_ids_in(ZoneRef.hand("p2")))
     publicized_ids = {
         event["card_instance_id"]
         for event in record.events
         if event.get("event_type")
         in ("card_played", "card_used", "card_revealed", "card_recast")
     }
-    never_publicized = p2_hand - publicized_ids
+    # CP-04O：弃牌阶段公开置入弃牌堆的实体属于合法公开信息
+    publicized_ids.update(
+        event["card_instance_id"]
+        for event in record.events
+        if event.get("event_type")
+        in ("card_moved", "card_lost", "card_discarded")
+        and event.get("payload", {}).get("reason") == "discard_phase"
+    )
+    # CP-04O：弃牌阶段使p2初始手牌全部合法公开（本记录p2使用3张并弃置
+    # 1张）；改用记录决策重执行后的最终手牌（从未使用/弃置/展示的实体）
+    # 验证隐私边界，避免断言退化为空集自证。
+    private = record.authoritative_private
+    replay_game = ProductionBasicCardBatch(
+        seed=15,
+        session_id=private["session_id"],
+        session_secret=bytes.fromhex(private["session_secret_hex"]),
+    )
+    for decision in record.decisions:
+        replay_game.step(
+            BatchActionIdController(decision["chosen_action_id"])
+        )
+    final_p2_hand = set(
+        replay_game.state.card_ids_in(ZoneRef.hand("p2"))
+    )
+    never_publicized = final_p2_hand - publicized_ids
     assert never_publicized, "p2必须存在从未公开化的手牌"
     for instance_id in never_publicized:
         occurrences = [
@@ -1863,9 +1885,8 @@ def test_player_visible_replay_leaks_no_unplayed_hand_cards(
         assert any(
             event.get("event_type") == "card_gained"
             and event.get("card_instance_id") == instance_id
-            and event.get("payload", {}).get("reason") == "initial_hand"
             for event in owner_view["events"]
-        ), f"实体{instance_id}在所有者视图缺少初始发牌记录"
+        ), f"实体{instance_id}在所有者视图缺少获得记录"
     # 对手p1视图不得包含p2未公开化的手牌
     opponent_view = record.player_visible_payload(viewer_id="p1")
     for instance_id in never_publicized:

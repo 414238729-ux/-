@@ -85,6 +85,42 @@ def _step(game: ProductionBasicCardBatch, action: object) -> object:
     return game.step(BatchActionIdController(action.action_id))
 
 
+def _discard_to_end(game: ProductionBasicCardBatch) -> None:
+    """弃牌阶段：选择恰好超限数量的手牌并一次性提交（CP-04O 批量弃置）。"""
+    if game.phase is not ProductionPhase.DISCARD:
+        # 手牌不超过上限时弃牌阶段已自动完成并进入结束阶段
+        return
+    while True:
+        submit = next(
+            (
+                action
+                for action in game.legal_actions()
+                if action.payload.get("operation")
+                == "discard_phase_submit"
+            ),
+            None,
+        )
+        if submit is not None:
+            _step(game, submit)
+            return
+        select_actions = [
+            action
+            for action in game.legal_actions()
+            if action.payload.get("operation") == "select_discard_card"
+        ]
+        if not select_actions:
+            raise AssertionError(
+                "弃牌阶段必须能提交恰好超限数量的弃牌选择"
+            )
+        _step(
+            game,
+            min(
+                select_actions,
+                key=lambda action: action.card_instance_id or "",
+            ),
+        )
+
+
 def _fresh(*args: object, **kwargs: object) -> ProductionBasicCardBatch:
     """创建生产批处理会话并推进到出牌阶段（CP-04L 正式阶段流）。"""
     game = ProductionBasicCardBatch(*args, **kwargs)  # type: ignore[arg-type]
@@ -324,6 +360,7 @@ def test_plain_slash_respects_one_per_play_phase() -> None:
     )
 
     _step(game, _action(game, "end_play_phase"))
+    _discard_to_end(game)
     _step(game, _action(game, "end_turn"))
     # CP-04K：出杀次数按角色记录；回合结束时只重置新回合角色的计数，
     # p1 在本回合的出杀计数保留到其自身下一个出牌阶段开始时才清零。
@@ -635,6 +672,7 @@ def test_wine_buff_cleared_at_turn_end_not_earlier() -> None:
     assert game.runtime.wine_buff_owner_id == "p1"
 
     _step(game, _action(game, "end_play_phase"))
+    _discard_to_end(game)
     assert game.phase is ProductionPhase.END
     assert game.runtime.wine_buff_owner_id == "p1", "强化状态应持续到回合结束清除时点"
 
@@ -975,6 +1013,13 @@ def test_run_safety_limit_fails_closed_without_forced_win() -> None:
 
 
 def test_deck_exhaustion_fails_closed_through_public_turn_flow() -> None:
+    """牌堆彻底不足时原子失败关闭（CP-04O 正式弃牌阶段下重构）。
+
+    弃牌阶段会把超限手牌逐张置入弃牌堆，因此双人正式流程中摸牌阶段
+    的“牌堆＋可重洗弃牌堆均不足”状态在自然推进下不可达；本测试按
+    判定耗竭测试的既有方式，在公开流程推进到 p2 摸牌阶段前通过权威
+    牌区移动接口构造耗竭状态，再验证 proceed_draw 原子失败关闭。"""
+
     game = _fresh(seed=1, initial_hand_count=79)
     script = ScriptedBatchController(
         [
@@ -985,17 +1030,36 @@ def test_deck_exhaustion_fails_closed_through_public_turn_flow() -> None:
             {"operation": "proceed_draw"},
         ]
     )
-    for _ in range(4):
+    # CP-04O：p1弃牌阶段由参考控制器逐张弃置，直到p2进入摸牌阶段
+    for _ in range(200):
         game.step(script)
-    # CP-04L：p2进入摸牌阶段时牌堆与可重洗弃牌堆均不足2张，原子失败关闭
+        if (
+            game.phase is ProductionPhase.DRAW
+            and game.current_player_id == "p2"
+        ):
+            break
+    else:
+        raise AssertionError("未能在预期步数内推进到p2摸牌阶段")
+    # 把牌堆与可重洗弃牌堆全部移入p2手牌，构造正式规则下可达的耗竭状态
+    draw_ids = list(game.state.card_ids_in(DRAW_PILE))
+    discard_ids = list(game.state.card_ids_in(DISCARD_PILE))
+    moves = {
+        instance_id: ZoneRef.hand("p2")
+        for instance_id in draw_ids + discard_ids
+    }
+    game._state = game.state.move_cards(moves)
+    events_before = len(game.events)
+    rng_before = len(game.rng_calls)
+    snapshot_before = game.execution_snapshot
     with pytest.raises(ProductionBatchDeckExhaustedError):
         game.step(script)
-    assert game.step_count == 7
+    assert len(game.events) == events_before
+    assert len(game.rng_calls) == rng_before
+    assert game.execution_snapshot == snapshot_before
     assert not game.is_finished
     assert game.winner_id is None
-    assert len(game.state.card_ids_in(DRAW_PILE)) + len(
-        game.state.card_ids_in(DISCARD_PILE)
-    ) < 2
+    assert not game.state.card_ids_in(DRAW_PILE)
+    assert not game.state.card_ids_in(DISCARD_PILE)
     zone_total = sum(
         len(game.state.card_ids_in(zone)) for zone in game.state.zone_order
     )
@@ -1014,20 +1078,24 @@ def test_draw_reshuffle_continues_current_draw_with_auditable_events() -> None:
             {"operation": "end_turn"},
         ]
     )
-    for _ in range(8):
+    # CP-04O：p1弃牌阶段由参考控制器逐张弃置（75张），直到p2摸牌阶段
+    # 触发重洗并完成摸牌
+    for _ in range(200):
         game.step(script)
-
-    assert game.runtime.turn_number == 2
-    assert game.current_player_id == "p2"
-    # CP-04L：p2经过PREPARE→JUDGMENT→DRAW→PLAY完整阶段流
-    assert game.phase is ProductionPhase.PLAY
+        if any(
+            event.payload.get("reason") == "reshuffle"
+            for event in game.events
+        ):
+            break
+    else:
+        raise AssertionError("未能在预期步数内触发弃牌堆重洗")
 
     reshuffles = [
         event
         for event in game.events
         if event.payload.get("reason") == "reshuffle"
     ]
-    assert len(reshuffles) == 2
+    assert len(reshuffles) == 77
     assert all(event.event_type is EventType.CARD_MOVED for event in reshuffles)
     assert all(
         event.payload["source"]["kind"] == "discard_pile"
@@ -1035,7 +1103,7 @@ def test_draw_reshuffle_continues_current_draw_with_auditable_events() -> None:
         for event in reshuffles
     )
     reshuffled_ids = {event.card_instance_id for event in reshuffles}
-    assert len(reshuffled_ids) == 2
+    assert len(reshuffled_ids) == 77
     reshuffle_sequence = max(
         event.sequence or 0 for event in reshuffles
     )
@@ -1054,17 +1122,19 @@ def test_draw_reshuffle_continues_current_draw_with_auditable_events() -> None:
         and event.payload["destination"]["owner_id"] == "p2"
         for event in draws_after_reshuffle
     )
-    for reshuffle in reshuffles:
-        draw = next(
+    for draw in draws_after_reshuffle:
+        reshuffle = next(
             event
-            for event in draws_after_reshuffle
-            if event.card_instance_id == reshuffle.card_instance_id
+            for event in reshuffles
+            if event.card_instance_id == draw.card_instance_id
         )
         assert reshuffle.sequence < draw.sequence
 
     p2_hand = set(game.state.card_ids_in(ZoneRef.hand("p2")))
-    assert reshuffled_ids <= p2_hand
-    assert len(game.state.card_ids_in(DRAW_PILE)) == 0
+    drawn_ids = {event.card_instance_id for event in draws_after_reshuffle}
+    assert drawn_ids.issubset(reshuffled_ids)
+    assert drawn_ids.issubset(p2_hand)
+    assert len(game.state.card_ids_in(DRAW_PILE)) == 75
     assert len(game.state.card_ids_in(DISCARD_PILE)) == 0
     assert any(call.method == "shuffle" for call in game.rng_calls)
     zone_total = sum(

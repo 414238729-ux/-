@@ -927,11 +927,13 @@ def test_baiyin_damage_cap_to_one() -> None:
     _step(game2, action)
     _put_draw_third(game2, "sgs-mobile-20260725-140")  # ♠7 命中
     _proceed(game2, "end_play_phase")
+    _discard_to_end(game2)
     _proceed(game2, "end_turn")
     _proceed(game2, "proceed_prepare")
     _proceed(game2, "proceed_judgment")
     _step(game2, _action(game2, "proceed_draw"))
     _proceed(game2, "end_play_phase")
+    _discard_to_end(game2)
     _proceed(game2, "end_turn")
     _proceed(game2, "proceed_prepare")
     _proceed(game2, "proceed_judgment")
@@ -1356,3 +1358,39 @@ def _proceed(game: ProductionBasicCardBatch, operation: str) -> None:
         if a.payload.get("operation") == operation
     )
     _step(game, action)
+
+
+def _discard_to_end(game: ProductionBasicCardBatch) -> None:
+    """弃牌阶段：选择恰好超限数量的手牌并一次性提交（CP-04O 批量弃置）。"""
+    if game.phase is not ProductionPhase.DISCARD:
+        # 手牌不超过上限时弃牌阶段已自动完成并进入结束阶段
+        return
+    while True:
+        submit = next(
+            (
+                action
+                for action in game.legal_actions()
+                if action.payload.get("operation")
+                == "discard_phase_submit"
+            ),
+            None,
+        )
+        if submit is not None:
+            _step(game, submit)
+            return
+        select_actions = [
+            action
+            for action in game.legal_actions()
+            if action.payload.get("operation") == "select_discard_card"
+        ]
+        if not select_actions:
+            raise AssertionError(
+                "弃牌阶段必须能提交恰好超限数量的弃牌选择"
+            )
+        _step(
+            game,
+            min(
+                select_actions,
+                key=lambda action: action.card_instance_id or "",
+            ),
+        )

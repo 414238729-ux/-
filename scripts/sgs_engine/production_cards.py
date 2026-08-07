@@ -309,6 +309,18 @@ def is_target_within_distance(
     return effective_distance(state, source_id, target_id) <= distance
 
 
+def hand_limit_of(state: GameState, player_id: str) -> int:
+    """手牌上限（CP-04O）：默认等于当前体力值，可被规则或效果修改。
+
+    依据 Knowledge《三国杀基础术语与通用机制》3.5 弃牌阶段：默认手牌上限
+    等于当前体力值；装备区与判定区内的牌不计入手牌数。当前无额外修正
+    效果，后续效果接入时在本函数统一扩展。"""
+
+    if player_id not in state.players_by_id:
+        raise UnsupportedRuleError(f"计算手牌上限时找不到角色{player_id!r}")
+    return state.players_by_id[player_id].hp
+
+
 def is_valid_slash_target(state: GameState, attacker_id: str, target_id: str) -> bool:
     """真实执行【杀】系列的目标与距离合法性检查。"""
 

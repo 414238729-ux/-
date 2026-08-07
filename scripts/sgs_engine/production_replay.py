@@ -374,6 +374,39 @@ def _redact_private_hand_event(
     return dict(event)
 
 
+_DISCARD_PHASE_OPERATIONS: frozenset[str] = frozenset(
+    {
+        "select_discard_card",
+        "unselect_discard_card",
+        "discard_phase_submit",
+    }
+)
+
+
+def _redact_discard_selection_handle(
+    action: Mapping[str, object],
+) -> dict[str, object]:
+    """行动者本人视图：把弃牌阶段动作的会话绑定选择句柄确定性置空。
+
+    句柄是绑定会话秘密的一次性隐藏手牌选择材料，对公开投影无意义且会
+    破坏跨记录不可区分性（重洗顺序脱敏测试要求两份记录的行动者本人视图
+    一致）；弃牌选择动作的实体身份（card_instance_id）仍保留，因为那是
+    弃牌者本人的自信息。群体响应等其他窗口的句柄保留策略不受影响。"""
+
+    redacted = dict(action)
+    payload = redacted.get("payload")
+    if not isinstance(payload, Mapping):
+        return redacted
+    operation = payload.get("operation")
+    if operation not in _DISCARD_PHASE_OPERATIONS:
+        return redacted
+    new_payload = dict(payload)
+    if "handle" in new_payload:
+        new_payload["handle"] = None
+    redacted["payload"] = new_payload
+    return redacted
+
+
 def _project_public_events(
     events: Sequence[Mapping[str, object]],
     viewer_id: str | None,
@@ -838,13 +871,17 @@ class ProductionReexecutionReplay:
                 # 句柄机制处理，此处不做额外推断。
                 chosen_action = decision.get("chosen_action")
                 if isinstance(chosen_action, Mapping):
-                    redacted_decision["chosen_action"] = _redact_hidden_digests(
-                        chosen_action
+                    redacted_decision["chosen_action"] = (
+                        _redact_discard_selection_handle(
+                            _redact_hidden_digests(chosen_action)
+                        )
                     )
                 legal_actions = decision.get("legal_actions")
                 if isinstance(legal_actions, (list, tuple)):
                     public_actions = [
-                        _redact_hidden_digests(action)
+                        _redact_discard_selection_handle(
+                            _redact_hidden_digests(action)
+                        )
                         for action in legal_actions
                     ]
                     redacted_decision["legal_actions"] = sorted(

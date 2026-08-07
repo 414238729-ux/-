@@ -84,6 +84,7 @@ from .production_cards import (
     SLASH_CARD_KEYS,
     actual_distance,
     check_weapon_skill_gate,
+    hand_limit_of,
     has_target_zone_cards,
     is_valid_shunshou_target,
     is_valid_slash_target,
@@ -114,6 +115,7 @@ class ProductionPhase(str, Enum):
     WANJIAN_RESPONSE = "wanjian_response"
     WUGU_PICK = "wugu_pick"
     DYING_RESCUE = "dying_rescue"
+    DISCARD = "discard"
     END = "end"
     FINISHED = "finished"
 
@@ -135,6 +137,7 @@ BATCH_PHASES: tuple[ProductionPhase, ...] = (
     ProductionPhase.WANJIAN_RESPONSE,
     ProductionPhase.WUGU_PICK,
     ProductionPhase.DYING_RESCUE,
+    ProductionPhase.DISCARD,
     ProductionPhase.END,
 )
 
@@ -396,6 +399,11 @@ class _BatchRuntime:
     pending_chain: _PendingChainDamage | None = None
     winner_id: str | None = None
     bagua_attempted: bool = False
+    # CP-04O 批量弃牌：选择窗口只累积待选集合，最终确认前不移动任何牌
+    discard_phase_window_id: str | None = None
+    discard_phase_selected_ids: tuple[str, ...] = ()
+    discard_phase_handles: Mapping[str, str] = MappingProxyType({})
+    discard_phase_snapshot_digest: str | None = None
 
     def audit_value(self) -> dict[str, object]:
         pending = None
@@ -510,6 +518,14 @@ class _BatchRuntime:
             ),
             "winner_id": self.winner_id,
             "bagua_attempted": self.bagua_attempted,
+            "discard_phase_window_id": self.discard_phase_window_id,
+            "discard_phase_selected_ids": list(
+                self.discard_phase_selected_ids
+            ),
+            "discard_phase_handles": dict(self.discard_phase_handles),
+            "discard_phase_snapshot_digest": (
+                self.discard_phase_snapshot_digest
+            ),
         }
 
     def _pending_borrowed_sword_value(
@@ -1471,6 +1487,16 @@ class BatchReferenceController:
                     rank = 2
                 else:
                     rank = 9
+            elif context.phase == ProductionPhase.DISCARD.value:
+                # 提交动作只在已选数量==excess时枚举，因此先选牌后提交
+                if operation == "discard_phase_submit":
+                    rank = 0
+                elif operation == "select_discard_card":
+                    rank = 1
+                elif operation == "unselect_discard_card":
+                    rank = 2
+                else:
+                    rank = 9
             else:
                 rank = 0 if action.action_type is not ActionType.PASS else 1
             return rank, action.card_instance_id or "", action.action_id or ""
@@ -1840,6 +1866,7 @@ class ProductionBasicCardBatch:
             ProductionPhase.JUDGMENT,
             ProductionPhase.DRAW,
             ProductionPhase.PLAY,
+            ProductionPhase.DISCARD,
             ProductionPhase.END,
         ):
             return runtime.current_player_id
@@ -1975,6 +2002,9 @@ class ProductionBasicCardBatch:
                         "window_id": runtime.pending_zone_choice.window_id,
                         "zones": list(runtime.pending_zone_choice.zones),
                     }
+                ),
+                "discard_phase_selected_ids": list(
+                    runtime.discard_phase_selected_ids
                 ),
                 "pending_judgment": (
                     None
@@ -2167,6 +2197,96 @@ class ProductionBasicCardBatch:
                     payload={"operation": "end_turn"},
                 )
             )
+        elif self.phase is ProductionPhase.DISCARD:
+            runtime = self._runtime
+            hand_ids = state.card_ids_in(ZoneRef.hand(actor))
+            hand_limit = hand_limit_of(state, actor)
+            excess = len(hand_ids) - hand_limit
+            if excess > 0:
+                if (
+                    runtime.discard_phase_window_id is None
+                    or runtime.discard_phase_snapshot_digest is None
+                ):
+                    raise ProductionBatchError(
+                        "弃牌阶段缺少批量选择窗口状态"
+                    )
+                if sha256_value(
+                    tuple(hand_ids)
+                ) != runtime.discard_phase_snapshot_digest:
+                    # 选择窗口打开后手牌已变化：不再铸造任何选择句柄，
+                    # 旧句柄与旧提交无法继续枚举或应用，失败关闭。
+                    return ()
+                state_hash = state_sha256(
+                    canonical_state_snapshot(state)
+                )
+                selected_set = set(runtime.discard_phase_selected_ids)
+                base = {
+                    "window_id": runtime.discard_phase_window_id,
+                    "state_hash": state_hash,
+                    "excess_count": excess,
+                }
+                for instance_id in hand_ids:
+                    if instance_id in selected_set:
+                        continue
+                    actions.append(
+                        LegalAction(
+                            action_type=ActionType.CHOOSE_OPTION,
+                            actor_id=actor,
+                            card_instance_id=instance_id,
+                            target_ids=(actor,),
+                            payload={
+                                **base,
+                                "operation": "select_discard_card",
+                                "handle": _hand_choice_handle(
+                                    self._session_id,
+                                    self._session_secret,
+                                    runtime.discard_phase_window_id,
+                                    actor,
+                                    "hand",
+                                    runtime.discard_phase_snapshot_digest,
+                                    instance_id,
+                                ),
+                            },
+                        )
+                    )
+                for instance_id in runtime.discard_phase_selected_ids:
+                    if instance_id not in hand_ids:
+                        # 已选实体已离开手牌：不再提供取消动作
+                        continue
+                    actions.append(
+                        LegalAction(
+                            action_type=ActionType.CHOOSE_OPTION,
+                            actor_id=actor,
+                            card_instance_id=instance_id,
+                            target_ids=(actor,),
+                            payload={
+                                **base,
+                                "operation": "unselect_discard_card",
+                                "handle": _hand_choice_handle(
+                                    self._session_id,
+                                    self._session_secret,
+                                    runtime.discard_phase_window_id,
+                                    actor,
+                                    "hand",
+                                    runtime.discard_phase_snapshot_digest,
+                                    instance_id,
+                                ),
+                            },
+                        )
+                    )
+                if len(selected_set) == excess:
+                    actions.append(
+                        LegalAction(
+                            action_type=ActionType.CHOOSE_OPTION,
+                            actor_id=actor,
+                            target_ids=(actor,),
+                            payload={
+                                **base,
+                                "operation": "discard_phase_submit",
+                                "selected_count": len(selected_set),
+                            },
+                        )
+                    )
         elif self.phase is ProductionPhase.SLASH_RESPONSE:
             for adapter in self._formal_registry.adapters.values():
                 actions.extend(adapter.enumerate_legal_actions(state, context))
@@ -2391,6 +2511,15 @@ class ProductionBasicCardBatch:
             if action.action_type is ActionType.PASS and operation == "end_turn":
                 return self._apply_end_turn(state, context, action)
             raise InvalidActionError("结束阶段只能结束回合")
+
+        if self.phase is ProductionPhase.DISCARD:
+            if operation == "select_discard_card":
+                return self.apply_select_discard_card(state, context, action)
+            if operation == "unselect_discard_card":
+                return self.apply_unselect_discard_card(state, context, action)
+            if operation == "discard_phase_submit":
+                return self.apply_discard_phase_submit(state, context, action)
+            raise InvalidActionError("弃牌阶段只支持选择与提交批量弃牌动作")
 
         if self.phase is ProductionPhase.SLASH_RESPONSE:
             if operation == "play_dodge":
@@ -2618,6 +2747,10 @@ class ProductionBasicCardBatch:
             pending_damage_rescue_reason=None,
             pending_damage_death_reason=None,
             pending_chain=None,
+            discard_phase_window_id=None,
+            discard_phase_selected_ids=(),
+            discard_phase_handles=MappingProxyType({}),
+            discard_phase_snapshot_digest=None,
         )
 
     # ------------------------------------------------------------------
@@ -8192,6 +8325,10 @@ class ProductionBasicCardBatch:
             skipped_phases=MappingProxyType({}),
             phase_skip_reasons=MappingProxyType({}),
             defer_damage_card_finish=False,
+            discard_phase_window_id=None,
+            discard_phase_selected_ids=(),
+            discard_phase_handles=MappingProxyType({}),
+            discard_phase_snapshot_digest=None,
         )
         self._commit_runtime(runtime, next_runtime)
         return next_state
@@ -8358,9 +8495,13 @@ class ProductionBasicCardBatch:
                     },
                 )
             )
-            next_phase = ProductionPhase.END
+            next_phase = ProductionPhase.DISCARD
         self._events.extend(tuple(events))
         next_runtime = replace(runtime, phase=next_phase)
+        if next_runtime.phase is ProductionPhase.DISCARD:
+            next_state, next_runtime = self._enter_discard_or_end(
+                next_state, next_runtime
+            )
         self._commit_runtime(runtime, next_runtime)
         return next_state
 
@@ -8555,7 +8696,10 @@ class ProductionBasicCardBatch:
                     },
                 )
             )
-            next_runtime = replace(next_runtime, phase=ProductionPhase.END)
+            next_runtime = replace(next_runtime, phase=ProductionPhase.DISCARD)
+            next_state, next_runtime = self._enter_discard_or_end(
+                next_state, next_runtime
+            )
         self._events.extend(tuple(events))
         return next_state, next_runtime
 
@@ -9070,9 +9214,278 @@ class ProductionBasicCardBatch:
             raise InvalidActionError("只有出牌阶段可以结束出牌阶段")
         if context.actor_id != runtime.current_player_id:
             raise InvalidActionError("只有当前回合角色可以结束出牌阶段")
-        next_runtime = replace(runtime, phase=ProductionPhase.END)
+        next_state, next_runtime = self._enter_discard_or_end(state, runtime)
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def _enter_discard_or_end(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """进入弃牌阶段：手牌数超过手牌上限时停留，否则自动进入结束阶段。
+
+        手牌上限默认等于当前体力值（Knowledge 3.5）；装备区与判定区不计入
+        手牌数。excess<=0 时自动完成弃牌阶段并进入 END，不开放伪弃牌动作。
+        需要弃牌时打开一次性批量选择窗口：服务端记录手牌快照摘要与隐藏
+        句柄，客户端选择过程只累积待选集合，最终确认前不移动任何牌。"""
+
+        player_id = runtime.current_player_id
+        hand_count = len(state.card_ids_in(ZoneRef.hand(player_id)))
+        hand_limit = hand_limit_of(state, player_id)
+        if hand_count <= hand_limit:
+            return state, replace(runtime, phase=ProductionPhase.END)
+        window_id = f"discard-phase:{runtime.turn_number}:{player_id}"
+        hand_ids = tuple(state.card_ids_in(ZoneRef.hand(player_id)))
+        snapshot_digest = sha256_value(hand_ids)
+        next_runtime = replace(
+            runtime,
+            phase=ProductionPhase.DISCARD,
+            discard_phase_window_id=window_id,
+            discard_phase_selected_ids=(),
+            discard_phase_handles=_zone_choice_handle_snapshot(
+                self._session_id,
+                self._session_secret,
+                state,
+                player_id,
+                window_id,
+                snapshot_digest,
+            ),
+            discard_phase_snapshot_digest=snapshot_digest,
+        )
+        return state, next_runtime
+
+    def _resolve_discard_handle(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        actor_id: str,
+        handle: object,
+    ) -> str | None:
+        """解析弃牌选择句柄为窗口快照中的真实手牌实体。
+
+        复用隐藏手牌句柄安全体系：句柄必须存在于窗口打开时的服务端快照
+        映射、HMAC重算一致、实体仍在该角色手牌且手牌摘要未变；任何绑定
+        不符都返回None，由调用方失败关闭。"""
+
+        if (
+            runtime.discard_phase_window_id is None
+            or runtime.discard_phase_snapshot_digest is None
+        ):
+            return None
+        return _resolve_hand_choice_handle(
+            self._session_id,
+            self._session_secret,
+            state,
+            runtime.discard_phase_window_id,
+            actor_id,
+            "hand",
+            runtime.discard_phase_snapshot_digest,
+            runtime.discard_phase_handles,
+            handle,
+        )
+
+    def apply_select_discard_card(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+    ) -> GameState:
+        """弃牌阶段选择动作：把一张待弃手牌加入本次批量选择的待选集合。
+
+        选择过程不移动牌、不产生任何正式弃牌／失牌事件；只有提交动作
+        （discard_phase_submit）确认后，全部选中牌才作为同一次弃牌阶段
+        操作统一离开手牌。选择动作只接受绑定当前选择窗口的隐藏句柄，
+        句柄解析失败、重复选择、非当前角色、过期窗口均失败关闭。"""
+
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.DISCARD:
+            raise InvalidActionError("只有弃牌阶段可以选择待弃手牌")
+        if context.actor_id != runtime.current_player_id:
+            raise InvalidActionError("只有当前回合角色可以选择待弃手牌")
+        player = state.players_by_id[context.actor_id]
+        if not player.alive:
+            raise InvalidActionError("已死亡角色不能继续选择待弃手牌")
+        if action.payload.get("operation") != "select_discard_card":
+            raise InvalidActionError("选择动作负载无效")
+        if action.payload.get("window_id") != runtime.discard_phase_window_id:
+            raise InvalidActionError("选择动作不属于当前弃牌选择窗口")
+        instance_id = self._resolve_discard_handle(
+            state, runtime, context.actor_id, action.payload.get("handle")
+        )
+        if instance_id is None:
+            raise InvalidActionError(
+                "待弃手牌句柄无效：伪造、跨窗口、跨会话或手牌已变化"
+            )
+        if instance_id in runtime.discard_phase_selected_ids:
+            raise InvalidActionError("同一张手牌不能重复加入待弃集合")
+        next_runtime = replace(
+            runtime,
+            discard_phase_selected_ids=(
+                *runtime.discard_phase_selected_ids,
+                instance_id,
+            ),
+        )
         self._commit_runtime(runtime, next_runtime)
         return state
+
+    def apply_unselect_discard_card(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+    ) -> GameState:
+        """弃牌阶段取消选择动作：把一张已选待弃手牌移出待选集合。"""
+
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.DISCARD:
+            raise InvalidActionError("只有弃牌阶段可以取消选择待弃手牌")
+        if context.actor_id != runtime.current_player_id:
+            raise InvalidActionError("只有当前回合角色可以取消选择待弃手牌")
+        if action.payload.get("operation") != "unselect_discard_card":
+            raise InvalidActionError("取消选择动作负载无效")
+        if action.payload.get("window_id") != runtime.discard_phase_window_id:
+            raise InvalidActionError("取消选择动作不属于当前弃牌选择窗口")
+        instance_id = self._resolve_discard_handle(
+            state, runtime, context.actor_id, action.payload.get("handle")
+        )
+        if instance_id is None:
+            raise InvalidActionError(
+                "待弃手牌句柄无效：伪造、跨窗口、跨会话或手牌已变化"
+            )
+        if instance_id not in runtime.discard_phase_selected_ids:
+            raise InvalidActionError("只能取消选择已在待弃集合中的手牌")
+        next_runtime = replace(
+            runtime,
+            discard_phase_selected_ids=tuple(
+                instance
+                for instance in runtime.discard_phase_selected_ids
+                if instance != instance_id
+            ),
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return state
+
+    def apply_discard_phase_submit(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+    ) -> GameState:
+        """弃牌阶段提交动作：把本次批量选择的全部手牌一次性弃置。
+
+        提交是唯一产生正式弃牌状态转换的动作：权威状态实时重算手牌数、
+        手牌上限与excess，验证待选集合数量恰好等于excess、无重复、全部
+        是该角色当前真实手牌（装备区／判定区／其他角色牌不可能进入待选
+        集合），随后以一次原子move_cards把全部选中牌移入弃牌堆并统一
+        登记事件。选择窗口打开后HP、手牌或上限发生变化的旧提交失败关闭；
+        任意一张非法则一张都不能移动。"""
+
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.DISCARD:
+            raise InvalidActionError("只有弃牌阶段可以提交批量弃置")
+        if context.actor_id != runtime.current_player_id:
+            raise InvalidActionError("只有当前回合角色可以提交批量弃置")
+        player = state.players_by_id[context.actor_id]
+        if not player.alive:
+            raise InvalidActionError("已死亡角色不能提交批量弃置")
+        if action.payload.get("operation") != "discard_phase_submit":
+            raise InvalidActionError("提交动作负载无效")
+        if action.payload.get("window_id") != runtime.discard_phase_window_id:
+            raise InvalidActionError("提交动作不属于当前弃牌选择窗口")
+        if (
+            runtime.discard_phase_snapshot_digest is None
+            or sha256_value(
+                tuple(state.card_ids_in(ZoneRef.hand(context.actor_id)))
+            ) != runtime.discard_phase_snapshot_digest
+        ):
+            raise InvalidActionError(
+                "弃牌选择窗口打开后手牌已变化，旧提交失败关闭"
+            )
+        hand_ids = state.card_ids_in(ZoneRef.hand(context.actor_id))
+        hand_limit = hand_limit_of(state, context.actor_id)
+        excess = len(hand_ids) - hand_limit
+        if excess <= 0:
+            raise InvalidActionError("手牌数未超过手牌上限，不需要弃牌")
+        selected_ids = tuple(runtime.discard_phase_selected_ids)
+        if len(selected_ids) != excess:
+            raise InvalidActionError(
+                f"批量弃置必须恰好提交{excess}张当前手牌，"
+                f"实际选择{len(selected_ids)}张"
+            )
+        if len(set(selected_ids)) != len(selected_ids):
+            raise InvalidActionError("批量弃置不允许重复选择同一实体")
+        hand_set = set(hand_ids)
+        for instance_id in selected_ids:
+            if instance_id not in hand_set:
+                raise InvalidActionError(
+                    "批量弃置只能包含该角色当前真实手牌，"
+                    "不允许装备区、判定区或其他角色牌"
+                )
+        # 批次身份使用公开稳定的选择窗口ID（turn＋player限定，同一回合唯一）；
+        # 不用会话绑定的action_id作事件身份，避免跨记录公共视图依赖会话密钥
+        # 而不可区分（见重洗顺序脱敏测试）。提交动作本身在回放decisions中
+        # 权威记录，作为该批次的root action。
+        batch_window_id = runtime.discard_phase_window_id
+        next_state = state.move_cards(
+            {instance_id: DISCARD_PILE for instance_id in selected_ids}
+        )
+        events: list[GameEvent] = []
+        for instance_id in selected_ids:
+            card_key = _card_key(next_state, instance_id)
+            move_event = GameEvent(
+                event_type=EventType.CARD_MOVED,
+                card_instance_id=instance_id,
+                card_key=card_key,
+                card_user=context.actor_id,
+                payload={
+                    "source": _zone_payload(
+                        ZoneRef.hand(context.actor_id)
+                    ),
+                    "destination": _zone_payload(DISCARD_PILE),
+                    "reason": "discard_phase",
+                    "window_id": batch_window_id,
+                },
+            )
+            lost_event = GameEvent(
+                event_type=EventType.CARD_LOST,
+                card_instance_id=instance_id,
+                card_key=card_key,
+                target_ids=(context.actor_id,),
+                payload={
+                    "reason": "discard_phase",
+                    "source_zone": _zone_id(
+                        ZoneRef.hand(context.actor_id)
+                    ),
+                    "window_id": batch_window_id,
+                },
+            )
+            discarded_event = GameEvent(
+                event_type=EventType.CARD_DISCARDED,
+                card_instance_id=instance_id,
+                card_key=card_key,
+                card_user=context.actor_id,
+                target_ids=(context.actor_id,),
+                payload={
+                    "reason": "discard_phase",
+                    "source_zone": _zone_id(
+                        ZoneRef.hand(context.actor_id)
+                    ),
+                    "window_id": batch_window_id,
+                },
+            )
+            events.extend((move_event, lost_event, discarded_event))
+        self._events.extend(tuple(events))
+        next_runtime = replace(
+            runtime,
+            phase=ProductionPhase.END,
+            discard_phase_window_id=None,
+            discard_phase_selected_ids=(),
+            discard_phase_handles=MappingProxyType({}),
+            discard_phase_snapshot_digest=None,
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
 
     def _apply_end_turn(
         self,
@@ -9125,6 +9538,10 @@ class ProductionBasicCardBatch:
             phase_skip_reasons=MappingProxyType({}),
             defer_damage_card_finish=False,
             bagua_attempted=False,
+            discard_phase_window_id=None,
+            discard_phase_selected_ids=(),
+            discard_phase_handles=MappingProxyType({}),
+            discard_phase_snapshot_digest=None,
         )
         self._commit_runtime(runtime, next_runtime)
         return next_state

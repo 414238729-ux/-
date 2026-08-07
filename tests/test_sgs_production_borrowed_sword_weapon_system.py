@@ -2179,12 +2179,33 @@ def test_player_visible_replay_leaks_no_other_hands_or_handle_maps() -> None:
             and event.get("payload", {}).get("reason") == "initial_hand"
         ):
             continue
+        if (
+            event.get("event_type")
+            in ("card_moved", "card_lost", "card_discarded")
+            and event.get("payload", {}).get("reason") == "discard_phase"
+        ):
+            # CP-04O：弃牌阶段公开置入弃牌堆的实体属于合法公开信息
+            continue
+        if (
+            event.get("event_type") == "card_moved"
+            and event.get("payload", {}).get("reason") == "death_cleanup"
+        ):
+            # 死亡清场公开置入弃牌堆的实体属于合法公开信息
+            continue
         if event.get("card_instance_id"):
             exposed_ids.add(str(event["card_instance_id"]))
         for material in event.get("material_card_instance_ids", []) or []:
             exposed_ids.add(str(material))
     for decision in record.decisions:
         chosen = decision["chosen_action"]
+        if chosen.get("payload", {}).get("operation") in (
+            "select_discard_card",
+            "unselect_discard_card",
+            "discard_phase_submit",
+        ):
+            # CP-04O：弃牌阶段公开置入弃牌堆的实体属于合法公开信息；
+            # 选择/取消/提交动作是弃牌者本人的弃牌选择，属自信息
+            continue
         if chosen.get("card_instance_id"):
             exposed_ids.add(str(chosen["card_instance_id"]))
     used_slash_ids = {

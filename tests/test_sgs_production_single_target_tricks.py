@@ -358,7 +358,9 @@ def test_three_consecutive_wuxie_chain_targets_and_nullification() -> None:
             {"operation": "use_wuxie"},
         ]
     )
-    for _ in range(14):
+    # CP-04O：p1结束出牌后需先完成弃牌阶段（手牌5>上限4弃1张：
+    # 选择1张＋提交1次），因此总步数从14调整为16
+    for _ in range(16):
         game.step(controller)
     trick_id = next(
         event.card_instance_id
@@ -780,70 +782,63 @@ def test_card_conservation_holds_through_trick_paths() -> None:
 
 
 def test_wuzhong_draw_reshuffles_when_draw_pile_exhausted() -> None:
+    """【无中生有】摸两张在牌堆耗尽时真实触发重洗并完成摸牌。
+
+    CP-04O：正式弃牌阶段使双人自然推进下“出牌阶段牌堆恰好为0且手中
+    正好有无中”的时机不可稳定复现；本测试沿用判定耗竭测试的既有构造
+    方式，在p1出牌阶段把一张【无中生有】移入手中、把牌堆全部移入
+    弃牌堆，再通过合法动作使用无中，验证重洗与摸牌事件可审计。"""
+
     game = _fresh(seed=102)
-    reached = False
-    while not game.is_finished and game.step_count < 1200:
-        context = game._context()
-        legal = game.legal_actions()
-        if context.phase == ProductionPhase.PLAY.value:
-            wuzhong_actions = [
-                action
-                for action in legal
-                if action.payload.get("operation") == "use_wuzhong"
-            ]
-            if wuzhong_actions and len(game.state.card_ids_in(DRAW_PILE)) <= 2:
-                chosen = min(
-                    wuzhong_actions, key=lambda action: action.action_id or ""
-                )
-            else:
-                chosen = BatchReferenceController().choose(legal, context)
-        elif context.phase == ProductionPhase.TRICK_RESPONSE.value:
-            chosen = next(
-                action
-                for action in legal
-                if action.payload.get("operation") == "pass_trick_response"
-            )
-        else:
-            chosen = BatchReferenceController().choose(legal, context)
-        pile_before = len(game.state.card_ids_in(DRAW_PILE))
-        before = len(game.events)
-        game.step(BatchActionIdController(chosen.action_id))
-        new_events = game.events[before:]
-        reasons = [event.payload.get("reason") for event in new_events]
-        if "reshuffle" in reasons and "wuzhong_effect_resolved" in reasons:
-            reached = True
-            assert pile_before == 0
-            reshuffle_moves = [
-                event
-                for event in new_events
-                if event.payload.get("reason") == "reshuffle"
-            ]
-            assert reshuffle_moves
-            assert all(
-                event.payload["source"]["kind"] == "discard_pile"
-                for event in reshuffle_moves
-            )
-            assert all(
-                event.payload["destination"]["kind"] == "draw_pile"
-                for event in reshuffle_moves
-            )
-            draws = [
-                event
-                for event in new_events
-                if event.event_type is EventType.CARD_GAINED
-                and event.payload.get("reason") == "draw_phase"
-            ]
-            assert len(draws) == 2
-            assert all(event.target_ids == ("p1",) for event in draws)
-            assert max(
-                event.sequence or 0 for event in reshuffle_moves
-            ) < min(event.sequence or 0 for event in draws)
-            assert any(
-                event.payload.get("reason") == "wuzhong_effect_resolved"
-                for event in new_events
-            )
+    wuzhong_id = next(
+        record.instance_id
+        for record in game.formal_registry.instances_of(WUZHONG)
+        if game.state.location_of(record.instance_id)
+        != ZoneRef.hand("p1")
+    )
+    game._state = game.state.move_card(wuzhong_id, ZoneRef.hand("p1"))
+    deck_ids = list(game.state.card_ids_in(DRAW_PILE))
+    game._state = game.state.move_cards(
+        {instance_id: DISCARD_PILE for instance_id in deck_ids}
+    )
+    assert not game.state.card_ids_in(DRAW_PILE)
+    action = _action(game, "use_wuzhong", card_key=WUZHONG)
+    assert action is not None, "出牌阶段必须能枚举无中生有使用动作"
+    before = len(game.events)
+    _step(game, action)
+    for _ in range(4):
+        if game.phase is not ProductionPhase.TRICK_RESPONSE:
             break
-    assert reached, "【无中生有】摸两张必须真实触发重洗并完成摸牌"
+        _step(game, _action(game, "pass_trick_response"))
+    new_events = game.events[before:]
+    reasons = [event.payload.get("reason") for event in new_events]
+    assert "reshuffle" in reasons, "【无中生有】摸两张必须真实触发重洗"
+    assert "wuzhong_effect_resolved" in reasons
+    reshuffle_moves = [
+        event
+        for event in new_events
+        if event.payload.get("reason") == "reshuffle"
+    ]
+    assert reshuffle_moves
+    assert all(
+        event.payload["source"]["kind"] == "discard_pile"
+        for event in reshuffle_moves
+    )
+    assert all(
+        event.payload["destination"]["kind"] == "draw_pile"
+        for event in reshuffle_moves
+    )
+    draws = [
+        event
+        for event in new_events
+        if event.event_type is EventType.CARD_GAINED
+        and event.payload.get("reason") == "draw_phase"
+    ]
+    assert len(draws) == 2
+    assert all(event.target_ids == ("p1",) for event in draws)
+    assert max(
+        event.sequence or 0 for event in reshuffle_moves
+    ) < min(event.sequence or 0 for event in draws)
     assert len(game.state.cards) == 160
     assert sum(
         len(game.state.card_ids_in(zone)) for zone in game.state.zone_order

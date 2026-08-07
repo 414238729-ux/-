@@ -240,8 +240,59 @@ def _close_judgment_wuxie(game: ProductionBasicCardBatch) -> None:
     )
 
 
-def _end_turn(game: ProductionBasicCardBatch) -> None:
+def _discard_to_end(
+    game: ProductionBasicCardBatch,
+    keep: tuple[str, ...] = (),
+) -> None:
+    """弃牌阶段：选择恰好超限数量的手牌并一次性提交（CP-04O 批量弃置）。
+
+    ``keep`` 指定必须保留在手牌中的实体ID，弃置时跳过这些牌；若跳过
+    keep 后选择数量无法凑够excess（keep 数量本身超过上限），则失败关闭。
+    选择过程不移动牌；只有提交动作确认后全部选中牌才一次性离开手牌。"""
+    if game.phase is not ProductionPhase.DISCARD:
+        # 手牌不超过上限时弃牌阶段已自动完成并进入结束阶段
+        return
+    while True:
+        submit = next(
+            (
+                action
+                for action in game.legal_actions()
+                if action.payload.get("operation")
+                == "discard_phase_submit"
+            ),
+            None,
+        )
+        if submit is not None:
+            _step(game, submit)
+            return
+        select_actions = [
+            action
+            for action in game.legal_actions()
+            if action.payload.get("operation") == "select_discard_card"
+            and (
+                action.card_instance_id is None
+                or action.card_instance_id not in keep
+            )
+        ]
+        if not select_actions:
+            raise AssertionError(
+                "弃牌阶段必须能提交恰好超限数量的弃牌选择"
+            )
+        _step(
+            game,
+            min(
+                select_actions,
+                key=lambda action: action.card_instance_id or "",
+            ),
+        )
+
+
+def _end_turn(
+    game: ProductionBasicCardBatch,
+    keep: tuple[str, ...] = (),
+) -> None:
     _proceed(game, "end_play_phase")
+    _discard_to_end(game, keep=keep)
     assert game.phase is ProductionPhase.END
     _proceed(game, "end_turn")
     assert game.phase is ProductionPhase.PREPARE
@@ -512,6 +563,7 @@ def test_formal_phase_flow_prepare_judgment_draw_play_end() -> None:
     assert game.phase is ProductionPhase.PLAY
     assert len(game.state.card_ids_in(ZoneRef.hand("p1"))) == hand_before + 2
     _proceed(game, "end_play_phase")
+    _discard_to_end(game)
     assert game.phase is ProductionPhase.END
     _proceed(game, "end_turn")
     assert game.phase is ProductionPhase.PREPARE
@@ -539,8 +591,9 @@ def test_lebusi_non_heart_skips_play_phase() -> None:
     assert game.phase is ProductionPhase.DRAW
     hand_before = len(game.state.card_ids_in(ZoneRef.hand("p2")))
     _proceed(game, "proceed_draw")
-    # DRAW正常摸2后，PLAY被跳过 → 直接END
+    # DRAW正常摸2后，PLAY被跳过 → 弃牌阶段（手牌超上限）→ END
     assert len(game.state.card_ids_in(ZoneRef.hand("p2"))) == hand_before + 2
+    _discard_to_end(game)
     assert game.phase is ProductionPhase.END
     skipped = _events_of(game, EventType.PHASE_SKIPPED)
     assert len(skipped) == 1
@@ -835,6 +888,7 @@ def test_lightning_hit_three_thunder_no_source() -> None:
     assert game.phase is ProductionPhase.DRAW
     _proceed(game, "proceed_draw")
     _proceed(game, "end_play_phase")
+    _discard_to_end(game)
     _proceed(game, "end_turn")
     _to_judgment(game)
     assert game.phase is ProductionPhase.JUDGMENT_WUXIE
@@ -872,6 +926,7 @@ def test_lightning_miss_transfers_to_other_player_with_new_entry() -> None:
     _to_judgment(game)
     _proceed(game, "proceed_draw")
     _proceed(game, "end_play_phase")
+    _discard_to_end(game)
     _proceed(game, "end_turn")
     _to_judgment(game)
     _close_judgment_wuxie(game)
@@ -907,6 +962,7 @@ def test_lightning_self_restore_when_other_has_lightning() -> None:
     assert action is not None and action.target_ids == ("p2",)
     _step(game, action)
     _proceed(game, "end_play_phase")
+    _discard_to_end(game)
     _proceed(game, "end_turn")
     _to_judgment(game)
     assert game.phase is ProductionPhase.JUDGMENT_WUXIE
@@ -959,6 +1015,7 @@ def test_lightning_chained_thunder_damage_propagates() -> None:
     _to_judgment(game)
     _proceed(game, "proceed_draw")
     _proceed(game, "end_play_phase")
+    _discard_to_end(game)
     _proceed(game, "end_turn")
     _to_judgment(game)
     _close_judgment_wuxie(game)
@@ -990,6 +1047,7 @@ def test_lightning_dying_rescue_restores_root_and_continues() -> None:
     _to_judgment(game)
     _proceed(game, "proceed_draw")
     _proceed(game, "end_play_phase")
+    _discard_to_end(game)
     _proceed(game, "end_turn")
     _to_judgment(game)
     _close_judgment_wuxie(game)
@@ -997,12 +1055,17 @@ def test_lightning_dying_rescue_restores_root_and_continues() -> None:
     assert game.runtime.pending_dying_id == "p1"
     assert _events_of(game, EventType.DYING)
     # p1用三张【桃】救援：-2 → -1 → 0 → 1 脱离濒死
-    peach_ids: list[str] = []
-    for _ in range(3):
-        peach_ids.append(
-            _give_hand(game, "p1", TAO, exclude=tuple(peach_ids))
-        )
-    for peach_id in peach_ids:
+    # CP-04O：弃牌阶段后p1手牌已压至上限1，直接移入三张桃实体（不交换），
+    # 避免_give_hand的交换语义只保留最后一张桃。
+    peach_ids = [
+        record.instance_id
+        for record in game.formal_registry.instances_of(TAO)
+        if game.state.location_of(record.instance_id)
+        != ZoneRef.hand("p1")
+    ]
+    for peach_id in peach_ids[:3]:
+        game._state = game.state.move_card(peach_id, ZoneRef.hand("p1"))
+    for peach_id in peach_ids[:3]:
         action = _action(game, "rescue_with_peach", card_key=TAO)
         assert action is not None, "濒死救援窗口必须能枚举桃救援动作"
         _step(game, action)
@@ -1021,13 +1084,14 @@ def test_lightning_death_cleanup_and_victory() -> None:
     _set_hp(game, "p1", 1)
     _swap(game, SHANDIAN_117, ZoneRef.hand("p1"))
     _use_delayed(game, "use_shandian", SHANDIAN, "p1")
-    # p1手牌其余实体（死亡清理用）
+    # p1手牌其余实体（死亡清理用）；弃牌阶段保留八卦阵实体
     _swap(game, SPADE_2_BAGUA, ZoneRef.hand("p1"))
     _put_third(game, SPADE_7_SHA)
-    _end_turn(game)
+    _end_turn(game, keep=(SPADE_2_BAGUA,))
     _to_judgment(game)
     _proceed(game, "proceed_draw")
     _proceed(game, "end_play_phase")
+    _discard_to_end(game, keep=(SPADE_2_BAGUA,))
     _proceed(game, "end_turn")
     _to_judgment(game)
     _close_judgment_wuxie(game)
@@ -1077,6 +1141,7 @@ def test_judgment_deck_exhausted_fails_atomically() -> None:
     _to_judgment(game)
     _proceed(game, "proceed_draw")
     _proceed(game, "end_play_phase")
+    _discard_to_end(game)
     _proceed(game, "end_turn")
     _to_judgment(game)
     assert game.phase is ProductionPhase.JUDGMENT_WUXIE
@@ -1276,12 +1341,18 @@ def test_player_visible_two_viewer_hand_privacy_and_public_gain() -> None:
         instance_id = event.get("card_instance_id")
         if instance_id in p1_private | p2_private:
             # 公开获得路径（card_used/card_revealed/card_played）可公开；
-            # 未公开化的初始手牌实体不得出现
+            # 未公开化的初始手牌实体不得出现。CP-04O：弃牌阶段的
+            # card_lost/card_discarded 将实体公开置入弃牌堆，与
+            # 同批 card_moved(reason=discard_phase) 一致，允许公开。
             assert event.get("event_type") in (
                 "card_used",
                 "card_played",
                 "card_revealed",
                 "card_moved",
+            ) or (
+                event.get("event_type") in ("card_lost", "card_discarded")
+                and event.get("payload", {}).get("reason")
+                == "discard_phase"
             )
     # W：公开获得事件保留实体信息（闪电使用card_used公开实体）
     assert any(
@@ -1388,6 +1459,7 @@ def test_card_conservation_after_major_branches() -> None:
     _to_judgment(game)
     _proceed(game, "proceed_draw")
     _proceed(game, "end_play_phase")
+    _discard_to_end(game)
     _proceed(game, "end_turn")
     _to_judgment(game)
     _close_judgment_wuxie(game)
@@ -1436,38 +1508,54 @@ def _reshuffle_order_fixture(game: ProductionBasicCardBatch) -> None:
 
     首玩家先摸两张固定牌；判定牌♠7置于牌堆顶；被乐跳过PLAY的角色在
     DRAW 阶段触发重洗（弃牌堆＝X、Y、判定牌与乐本体），秘密摸走两张
-    隐藏牌；随后首玩家杀1血角色结束。seed 4 与 6 的重洗结果分别为
+    隐藏牌；随后首玩家杀1血角色结束。seed 20 与 21 的重洗结果分别为
     (Y,X) 与 (X,Y)（首玩家均为p1），公开事实完全相同。
+
+    CP-04O 弃牌阶段兼容：首玩家出牌阶段使用【乐不思蜀】与一张武器牌
+    （武器进入装备区，不污染弃牌堆），回合结束手牌不超过上限；其余
+    实体全部进入对手手牌，使对手摸牌阶段牌堆恰好为0触发重洗，对手
+    弃牌阶段由参考控制器逐张弃置（每个动作消耗一步，记录随之增长）。
     """
 
     user = _me(game)
     other = _other(game)
     game._state = _replace_player(game.state, other, hp=1)
-    all_ids = [card.instance_id for card in game.state.cards]
+    weapon_id = "sgs-mobile-20260725-014"  # 贯石斧（装备区，不进入弃牌堆）
+    filler_id = "sgs-mobile-20260725-001"
+    draw_top = ("sgs-mobile-20260725-004", "sgs-mobile-20260725-005")
+    user_hand = (LEBUSI_098, weapon_id, _SLASH_136, filler_id)
     keep = {
+        *user_hand,
         LEBUSI_098,
-        LEBUSI_137,
-        BINGLIANG_151,
         SPADE_7_SHA,
         SHANDIAN_117,
         SHANDIAN_122,
     }
-    for instance_id in all_ids:
-        if game.state.location_of(instance_id) != DRAW_PILE:
-            game._state = game.state.move_card(instance_id, DRAW_PILE)
-    game._state = game.state.move_cards(
-        {SHANDIAN_117: DISCARD_PILE, SHANDIAN_122: DISCARD_PILE}
-    )
+    all_ids = [card.instance_id for card in game.state.cards]
     for instance_id in all_ids:
         if instance_id in keep:
             continue
-        if game.state.location_of(instance_id) == DRAW_PILE:
+        if game.state.location_of(instance_id) != DRAW_PILE:
+            game._state = game.state.move_card(instance_id, DRAW_PILE)
+    for instance_id in user_hand:
+        game._state = game.state.move_card(instance_id, ZoneRef.hand(user))
+    # 其余全部进入对手手牌（使对手摸牌阶段牌堆恰好为0触发重洗）
+    deck_top = set(draw_top + (SPADE_7_SHA,))
+    for instance_id in list(game.state.card_ids_in(DRAW_PILE)):
+        if instance_id not in deck_top:
             game._state = game.state.move_card(
-                instance_id, ZoneRef.hand(user)
+                instance_id, ZoneRef.hand(other)
             )
-    game._state = game.state.move_card(LEBUSI_098, ZoneRef.hand(user))
+    for instance_id in (SHANDIAN_117, SHANDIAN_122):
+        game._state = game.state.move_card(instance_id, DISCARD_PILE)
     game._state = game.state.reorder_zone(
-        DRAW_PILE, (LEBUSI_137, BINGLIANG_151, SPADE_7_SHA)
+        DRAW_PILE,
+        (*draw_top, SPADE_7_SHA)
+        + tuple(
+            instance_id
+            for instance_id in game.state.card_ids_in(DRAW_PILE)
+            if instance_id not in draw_top and instance_id != SPADE_7_SHA
+        ),
     )
 
 
@@ -1476,6 +1564,8 @@ _RESHUFFLE_ORDER_SPECS = [
     {"operation": "proceed_judgment"},
     {"operation": "proceed_draw"},
     {"operation": "use_lebusi"},
+    # CP-04O：武器牌进入装备区，不污染重洗弃牌堆
+    {"operation": "use_weapon"},
     {"operation": "end_play_phase"},
     {"operation": "end_turn"},
     {"operation": "proceed_prepare"},
@@ -1502,7 +1592,7 @@ def _reshuffle_order_record(seed: int) -> ProductionReexecutionReplay:
         shuffle=False,
         controller=ScriptedBatchController(list(_RESHUFFLE_ORDER_SPECS)),
         fixture=_reshuffle_order_fixture,
-        max_steps=40,
+        max_steps=200,
     )
 
 
@@ -1637,12 +1727,20 @@ def test_lightning_nullified_before_judgment_transfers_directly() -> None:
     )
     _swap(game, wuxie_id, ZoneRef.hand(user))
     _use_delayed(game, "use_shandian", SHANDIAN, user)
-    _end_turn(game)
+    # CP-04O：p1弃牌阶段保留无懈（供闪电判定前抵消）
+    _end_turn(game, keep=(wuxie_id,))
     # other 回合（判定区无牌）正常推进
     _proceed(game, "proceed_prepare")
     _proceed(game, "proceed_judgment")
     _proceed(game, "proceed_draw")
     _proceed(game, "end_play_phase")
+    # CP-04O：弃牌阶段保留无懈（供闪电判定前抵消）与其他手牌中的桃
+    other_tao_keep = tuple(
+        instance_id
+        for instance_id in game.state.card_ids_in(ZoneRef.hand(other))
+        if game.state.cards_by_id[instance_id].card_key == TAO
+    )
+    _discard_to_end(game, keep=other_tao_keep + (wuxie_id,))
     _proceed(game, "end_turn")
     _to_judgment(game)
     assert game.phase is ProductionPhase.JUDGMENT_WUXIE
@@ -1918,6 +2016,7 @@ def test_skipped_turn_recovers_next_turn_and_replays() -> None:
     _close_judgment_wuxie(game)
     _proceed(game, "proceed_judgment")
     _proceed(game, "proceed_draw")
+    _discard_to_end(game)
     assert game.phase is ProductionPhase.END
     _proceed(game, "end_turn")
     # user 回合恢复正常：DRAW 摸2、PLAY 有出牌动作
@@ -2013,7 +2112,8 @@ _LIGHTNING_MISS_SPECS = [
     {"operation": "proceed_prepare"},
     {"operation": "proceed_judgment"},
     {"operation": "proceed_draw"},
-    {"operation": "use_shandian"},
+    # 目标必须为使用者自己：双人局闪电自用目标确定，避免动作排序歧义
+    {"operation": "use_shandian", "target": "p1"},
     {"operation": "end_play_phase"},
     {"operation": "end_turn"},
     {"operation": "proceed_prepare"},
@@ -2251,14 +2351,16 @@ def _lightning_chain_double_dying_fixture(game: ProductionBasicCardBatch) -> Non
 
     user = _me(game)
     other = _other(game)
-    game._state = _replace_player(game.state, user, hp=1, chained=True)
+    game._state = _replace_player(game.state, user, hp=2, chained=True)
     game._state = _replace_player(game.state, other, hp=2, chained=True)
     tao_ids = [
         record.instance_id
         for record in game.formal_registry.instances_of(TAO)
     ]
-    user_hand = [SHANDIAN_117, "sgs-mobile-20260725-136"] + tao_ids[:3]
-    other_hand = tao_ids[3:5]
+    # CP-04O：双方各持两张桃（体力上限=手牌上限=2），摸牌阶段摸到的
+    # 最小ID实体在弃牌阶段被弃置，桃保留到濒死救援。
+    user_hand = [SHANDIAN_117, tao_ids[0], tao_ids[1]]
+    other_hand = [tao_ids[2], tao_ids[3]]
     keep = set(user_hand + other_hand + [SPADE_7_SHA])
     all_ids = [card.instance_id for card in game.state.cards]
     for instance_id in all_ids:
@@ -2274,10 +2376,28 @@ def _lightning_chain_double_dying_fixture(game: ProductionBasicCardBatch) -> Non
         game._state = game.state.move_card(
             instance_id, ZoneRef.hand(other)
         )
+    # 摸牌阶段顶牌：p1首摸-001/-002（弃牌丢弃），p2摸-003/-004（弃牌丢弃）；
+    # 判定牌♠7位于两次摸牌共4张之后的牌堆顶；p1第二次摸牌摸-136与一张桃。
+    # 手动测试夹具在_fresh摸牌后应用（PLAY阶段），首摸已完成，牌堆顶从
+    # -003开始；回放夹具在PREPARE阶段应用，首摸尚未发生，需从-001开始。
+    top = [
+        "sgs-mobile-20260725-003",
+        "sgs-mobile-20260725-004",
+        SPADE_7_SHA,
+        "sgs-mobile-20260725-136",
+        tao_ids[4],
+    ]
+    if game.phase is ProductionPhase.PREPARE:
+        top = [
+            "sgs-mobile-20260725-001",
+            "sgs-mobile-20260725-002",
+            *top,
+        ]
     pile = list(game.state.card_ids_in(DRAW_PILE))
-    pile.remove(SPADE_7_SHA)
+    for instance_id in top:
+        pile.remove(instance_id)
     game._state = game.state.reorder_zone(
-        DRAW_PILE, (*pile[:4], SPADE_7_SHA, *pile[4:])
+        DRAW_PILE, (*top, *pile)
     )
 
 
@@ -2285,7 +2405,8 @@ _LIGHTNING_CHAIN_DYING_SPECS = [
     {"operation": "proceed_prepare"},
     {"operation": "proceed_judgment"},
     {"operation": "proceed_draw"},
-    {"operation": "use_shandian"},
+    # 目标必须为使用者自己：双人局闪电自用目标确定，避免动作排序歧义
+    {"operation": "use_shandian", "target": "p1"},
     {"operation": "end_play_phase"},
     {"operation": "end_turn"},
     {"operation": "proceed_prepare"},
@@ -2297,7 +2418,6 @@ _LIGHTNING_CHAIN_DYING_SPECS = [
     {"operation": "proceed_judgment"},
     {"operation": "pass_judgment_wuxie"},
     {"operation": "pass_judgment_wuxie"},
-    {"operation": "rescue_with_peach"},
     {"operation": "rescue_with_peach"},
     {"operation": "rescue_with_peach"},
     {"operation": "pass_rescue"},
@@ -2320,12 +2440,25 @@ def test_lightning_chain_damage_double_dying_rescue_combo() -> None:
     user = _me(game)
     other = _other(game)
     _use_delayed(game, "use_shandian", SHANDIAN, user)
-    _end_turn(game)
+    # CP-04O：弃牌阶段保留user手牌中的两张桃（摸到的-001/-002被弃置）
+    user_tao_keep = tuple(
+        instance_id
+        for instance_id in game.state.card_ids_in(ZoneRef.hand(user))
+        if game.state.cards_by_id[instance_id].card_key == TAO
+    )
+    _end_turn(game, keep=user_tao_keep)
     # other 回合（判定区无牌）正常推进
     _proceed(game, "proceed_prepare")
     _proceed(game, "proceed_judgment")
     _proceed(game, "proceed_draw")
     _proceed(game, "end_play_phase")
+    # CP-04O：弃牌阶段保留other手牌中的两张桃（摸到的-003/-004被弃置）
+    other_tao_keep = tuple(
+        instance_id
+        for instance_id in game.state.card_ids_in(ZoneRef.hand(other))
+        if game.state.cards_by_id[instance_id].card_key == TAO
+    )
+    _discard_to_end(game, keep=other_tao_keep)
     _proceed(game, "end_turn")
     # user 回合判定：闪电命中
     _proceed(game, "proceed_prepare")
@@ -2335,14 +2468,14 @@ def test_lightning_chain_damage_double_dying_rescue_combo() -> None:
     assert game.phase is ProductionPhase.DYING_RESCUE
     assert game.runtime.pending_dying_id == user
     assert game.runtime.pending_judgment is not None
-    # 原始目标三张桃救援
-    for _ in range(3):
+    # 原始目标两张桃救援：-1 → 0 → 1
+    for _ in range(2):
         _step(game, _action(game, "rescue_with_peach", card_key=TAO))
     assert game.state.players_by_id[user].hp == 1
     # 传导到第二目标并进入其濒死
     assert game.runtime.pending_dying_id == other
     assert game.state.players_by_id[other].hp == -1
-    # 第一响应者放弃，第二目标连用两张桃救援
+    # 第一响应者放弃，第二目标连用两张桃救援：-1 → 0 → 1
     _step(game, _action(game, "pass_rescue"))
     for _ in range(2):
         _step(game, _action(game, "rescue_with_peach", card_key=TAO))
@@ -2824,6 +2957,7 @@ def test_judgment_entry_indices_cleaned_when_leaving_judgment_zone() -> None:
     _to_judgment(game)
     _proceed(game, "proceed_draw")
     _proceed(game, "end_play_phase")
+    _discard_to_end(game)
     _proceed(game, "end_turn")
     _to_judgment(game)
     _close_judgment_wuxie(game)
@@ -2841,6 +2975,7 @@ def test_judgment_entry_indices_cleaned_when_leaving_judgment_zone() -> None:
     _to_judgment(game)
     _proceed(game, "proceed_draw")
     _proceed(game, "end_play_phase")
+    _discard_to_end(game)
     _proceed(game, "end_turn")
     _to_judgment(game)
     _close_judgment_wuxie(game)
@@ -2858,6 +2993,7 @@ def test_judgment_entry_indices_cleaned_when_leaving_judgment_zone() -> None:
     _to_judgment(game)
     _proceed(game, "proceed_draw")
     _proceed(game, "end_play_phase")
+    _discard_to_end(game)
     _proceed(game, "end_turn")
     assert SHANDIAN_117 in game.runtime.judgment_entry_indices
     _assert_conservation(game)
