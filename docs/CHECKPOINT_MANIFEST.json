@@ -54,7 +54,9 @@
     "delayed_trick_judgment_infrastructure_implement_commit": "35c06bd50a431a62e7c3ad01d10384bf6884c403",
     "delayed_trick_judgment_infrastructure_implement_commit_note": "三种延时锦囊＋判定与阶段基础设施批次（CP-04L：【乐不思蜀】【兵粮寸断】【闪电】）已由用户在外部PowerShell提交，提交信息为 feat: implement delayed tricks and judgment infrastructure，完整提交哈希为 35c06bd50a431a62e7c3ad01d10384bf6884c403；基线提交 185cc555324b077d0e81bef10a4518ba2dae3748（里程碑标签 milestone-b2-borrowed-sword-weapon-system-audited 指向该基线）；检查点文档提交 4f2c9b61fccb4337a8e84ae560835d705be65bda（docs: record delayed trick and judgment checkpoint）；2026-08-05 第一次独立审计 AUDIT_FAILED_BLOCKING_ISSUES（唯一阻塞项 B1：player_visible 未脱敏 reshuffle 事件），第一次审计修复提交 96f536e1f392fd97faf61518a849a0d515b6a82e（fix: close delayed trick audit gaps，完整 pytest 1724 passed）；2026-08-06 第二次最终复审 AUDIT_FAILED_BLOCKING_ISSUES（B1-a state_hash 等权威状态摘要旁路、B1-b legal_actions/chosen_action 泄露行动者完整手牌、B1-c tiesuo_recast 等隐藏摸牌泄漏，以及 N5 篡改测试结构、judgment_entry_indices 陈旧残留两个复审观察项）；最终修复提交 eeeaf558cdaeeea0eb90456f907f83dce52286f3（fix: harden player-visible replay privacy，本地修复会话完整 pytest 1733 passed）；Grok 网页端独立静态审计 STATIC_AUDIT_PASSED（经 GitHub 连接器读取精确目标提交 eeeaf558，完整读取18个强制生产、测试和状态文件，PARTIAL_READ=无、NOT_READ=无，未亲自运行 pytest／Git／本地虚拟环境）；最终审计结论 AUDIT_PASSED（2026-08-06，status=audited、independent_audit_done=true、audit_conclusion=AUDIT_PASSED、milestone_tag=已建立标签 milestone-b2-delayed-trick-judgment-infrastructure-audited（文档收口提交 ba64b750fabd99f2bfc93697cea83e1272216d02，本地与 GitHub 远程标签均已验证存在）、worktree_commit_pending=false）",
     "cp04m_worktree_branch": "deepseek-armor-damage-prevention",
-    "cp04m_worktree_branch_note": "本批（四种防具＋伤害修正／防止基础设施，CP-04M）实现所在分支；基线提交 fc3df95202b23dccfd9abf5e476485a224d6fc2c（docs: mark delayed trick milestone repository state finalized，里程碑标签 milestone-b2-delayed-trick-judgment-infrastructure-audited 指向该基线）；实现提交 29ab73e006408e1e1582a300801e7aa6e04bd9c4（feat: implement armor and damage prevention infrastructure）已由用户在外部PowerShell提交；检查点文档提交 f0db82afcea9944143e224aed147d108c6eae061；2026-08-06 Grok 网页端独立静态审计最终结论 STATIC_AUDIT_PASSED；最终审计文档提交 2db702fde037b501190950687059d660c32b56da（docs: finalize armor and damage prevention audit milestone）已由用户在外部PowerShell提交；里程碑标签 milestone-b2-armor-damage-prevention-infrastructure-audited 已实际建立并推送，本地与 GitHub 远程标签均已由用户在外部PowerShell验证存在；标签在最终状态回填开始时指向 2db702fde037b501190950687059d660c32b56da，随后用户已将标签移动到承载最终仓库状态记录的提交；当前标签指向以Git标签解析结果为准。"
+    "cp04m_worktree_branch_note": "本批（四种防具＋伤害修正／防止基础设施，CP-04M）实现所在分支；基线提交 fc3df95202b23dccfd9abf5e476485a224d6fc2c（docs: mark delayed trick milestone repository state finalized，里程碑标签 milestone-b2-delayed-trick-judgment-infrastructure-audited 指向该基线）；实现提交 29ab73e006408e1e1582a300801e7aa6e04bd9c4（feat: implement armor and damage prevention infrastructure）已由用户在外部PowerShell提交；检查点文档提交 f0db82afcea9944143e224aed147d108c6eae061；2026-08-06 Grok 网页端独立静态审计最终结论 STATIC_AUDIT_PASSED；最终审计文档提交 2db702fde037b501190950687059d660c32b56da（docs: finalize armor and damage prevention audit milestone）已由用户在外部PowerShell提交；里程碑标签 milestone-b2-armor-damage-prevention-infrastructure-audited 已实际建立并推送，本地与 GitHub 远程标签均已由用户在外部PowerShell验证存在；标签在最终状态回填开始时指向 2db702fde037b501190950687059d660c32b56da，随后用户已将标签移动到承载最终仓库状态记录的提交；当前标签指向以Git标签解析结果为准。",
+    "cp04n_worktree_branch": "deepseek-mount-distance-infrastructure",
+    "cp04n_worktree_branch_note": "本批（正式坐骑＋距离／攻击范围基础设施，CP-04N）实现所在分支；基线提交 733940b4a5e278ae3eba11e5c6522b0f1832d6b4（docs: correct armor milestone tag target wording，里程碑标签 milestone-b2-armor-damage-prevention-infrastructure-audited 指向该基线）；实现提交 fd7d69f53e9827877b6a29d67c067012ead6a7af（feat: implement mounts and distance infrastructure）已由用户在外部PowerShell提交；距离下限结论为 DISTANCE_FLOOR_FIXED（提交前纠正，无audit fix commit）；独立审计尚未进行（NOT_AUDITED_YET）。"
   },
   "feature_status": {
     "authoritative_core_foundation": true,
@@ -73,7 +75,8 @@
     "production_chain_damage_infrastructure": true,
     "production_borrowed_sword_weapon_system": true,
     "production_delayed_trick_judgment_infrastructure": true,
-    "production_armor_damage_prevention_infrastructure": true
+    "production_armor_damage_prevention_infrastructure": true,
+    "production_mount_distance_infrastructure": true
   },
   "stage_status": {
     "1_source_and_callchain_audit": "passed",
@@ -346,15 +349,45 @@
         "final_doc_commit_message": "docs: finalize armor and damage prevention audit milestone",
         "milestone_tag_verified": true
       }
+    },
+    {
+      "id": "CP-04N-PRODUCTION-MOUNT-DISTANCE-INFRASTRUCTURE",
+      "status": "committed_pending_audit",
+      "commit": "fd7d69f53e9827877b6a29d67c067012ead6a7af",
+      "commit_note": "本批（正式坐骑＋距离／攻击范围基础设施，CP-04N）已由用户在外部PowerShell提交真实实现提交：完整提交哈希 fd7d69f53e9827877b6a29d67c067012ead6a7af（feat: implement mounts and distance infrastructure）；实现父提交 733940b4a5e278ae3eba11e5c6522b0f1832d6b4（milestone-b2-armor-damage-prevention-infrastructure-audited）；距离下限结论为 DISTANCE_FLOOR_FIXED（上一轮 DISTANCE_FLOOR_CORRECT 是提交前发现的错误推论，已在任何Git提交产生之前修正，因此不存在 audit fix commit，也不得虚构）；独立审计尚未进行（NOT_AUDITED_YET），不得提前写成audited；检查点文档提交待用户外部提交后回填。",
+      "independent_audit_done": false,
+      "audit_conclusion": "NOT_AUDITED_YET",
+      "milestone_tag": null,
+      "worktree_commit_pending": true,
+      "evidence": "scripts/sgs_engine/production_cards.py、scripts/sgs_engine/production_batch.py、scripts/sgs_engine/__init__.py、tests/test_sgs_production_mount_distance.py；正式160张牌堆两种坐骑7张实体批次",
+      "scope": "formal；两种坐骑7张实体接入生产注册表与权威核心；统一有效距离模型（基础座次距离＋进攻／防御坐骑方向性修正）、武器攻击范围与有效距离分离、杀／借刀／顺手／兵粮距离接入、坐骑装备与同栏位替换、动作安全与严格回放；不构成完整武器技能完成、多人生产语义完成、正式单挑完成或里程碑B完成",
+      "implementation_commit": "fd7d69f53e9827877b6a29d67c067012ead6a7af",
+      "implementation_commit_message": "feat: implement mounts and distance infrastructure",
+      "implementation_parent": "733940b4a5e278ae3eba11e5c6522b0f1832d6b4",
+      "audit": {
+        "independent_audit_done": false,
+        "audit_conclusion": "NOT_AUDITED_YET",
+        "conclusion": "NOT_AUDITED_YET",
+        "initial_conclusion": null,
+        "final_reaudit_conclusion": null,
+        "audited_at": null,
+        "auditor_note": "实现提交已由用户在外部PowerShell创建（fd7d69f53e9827877b6a29d67c067012ead6a7af），等待开展独立只读审计。",
+        "implementation_commit": "fd7d69f53e9827877b6a29d67c067012ead6a7af",
+        "checkpoint_commit": null,
+        "audit_gap_fix_commit": null,
+        "final_audit_conclusion": null,
+        "milestone_tag": null,
+        "final_status": "committed_pending_audit"
+      }
     }
   ],
   "final_verification": {
     "pytest": {
       "command": ".\\venv\\Scripts\\python.exe -m pytest -q --basetemp \".\\.pytest-temp\\run\" -p no:cacheprovider",
-      "passed": 1799,
+      "passed": 1840,
       "failed": 0,
       "skipped": 0,
-      "note": "1799=1733+66：CP-04M 新增42项防具专项测试（tests/test_sgs_production_armor_damage_prevention.py）与24项防具事件契约测试（tests/test_sgs_engine_events.py：armor_judgment_started／armor_judgment_result／armor_recovered／damage_prevented 的合法与非法构造参数化）；完整 pytest 1799 passed（失败0、跳过0）；compileall 通过；源码完整性审计 scanned_file_count=119、defect_count=0、audit_item_count=55；本轮实现提交 29ab73e006408e1e1582a300801e7aa6e04bd9c4 已由用户在外部PowerShell提交，独立审计尚未进行。"
+      "note": "1840=1838+2：CP-04N 距离下限纠正新增2项测试（结构级基础距离2进入杀/顺手/兵粮合法范围、相邻角色＋源-1坐骑的顺手全路径防回归，tests/test_sgs_production_mount_distance.py 共41项）。DISTANCE_FLOOR_FIXED：上一轮距离下限核验结论错误（曾误判不同角色距离可为0），已在提交前发现并纠正——正式不变量为自己到自己的距离永远为0、两名不同角色之间的最终距离最低为1，-1坐骑不得把相邻角色距离1修正为0（基础距离2经-1坐骑修正后变为1），顺手/兵粮“距离为1”在相邻角色＋源-1坐骑时仍为1、目标保持合法；已修正生产代码（effective_distance clamp 到1）、测试（8项边界测试改/增）、Knowledge 9.3 与状态文档；错误从未提交，不需要audit fix commit。完整 pytest 1840 passed（失败0、跳过0）；compileall 通过；源码完整性审计 scanned_file_count=120、defect_count=0、audit_item_count=55；本轮代码与测试已在当前工作树完成，尚未由用户执行真实Git提交，独立审计尚未进行。"
     },
     "compileall": {
       "command": ".\\\\.venv\\\\Scripts\\\\python.exe -m compileall -q scripts tests",
@@ -362,7 +395,7 @@
     },
     "source_integrity": {
       "command": ".\\venv\\Scripts\\python.exe -m scripts.sgs_source_integrity_audit . --fail-on-defect",
-      "scanned_python_files": 119,
+      "scanned_python_files": 120,
       "defect_count": 0,
       "audit_item_count": 55
     },
@@ -415,8 +448,8 @@
       "AuthoritativeCoreSession.run_game仍明确抛出UnsupportedRuleError",
       "观看、亮牌及判定彻底耗尽仍是分析约定，不能用于approximation_count=0的正式入口",
       "尚无正式160张单挑100-seed验收运行器",
-      "38种正式卡牌定义中六种基本牌、十二种普通锦囊、【借刀杀人】、11种武器牌本体、3种延时锦囊与四种防具（【八卦阵】／【仁王盾】／【藤甲】／【白银狮子】，含统一伤害修正／防止与无视防具接口）已建立生产规则适配器；其余2种（攻击坐骑、防御坐骑）仍未建立",
-      "正式卡牌处理区与完整生命周期规则仅六种基本牌、十二种普通锦囊与三种延时锦囊接入，其余卡牌与整局重洗调度未接入"
+      "38种正式卡牌已全部建立生产规则适配器（formal_deck_registration_complete=true），包括六种基本牌、十二种普通锦囊、【借刀杀人】、11种武器牌本体、3种延时锦囊、四种防具与两种坐骑；剩余未注册种类为0；“全部注册”不等于全部卡牌语义完成、正式单挑完成或里程碑B完成",
+      "正式卡牌处理区与完整生命周期规则仅已接入适配器的卡牌覆盖，弃牌阶段、完整正式回合循环与整局重洗调度仍未接入"
     ],
     "not_configured": [
       "mypy",
@@ -777,41 +810,42 @@
     }
   },
   "sha256": {
-    "docs/ENGINE_STATUS.md": "4a1877f9957b0b114204eda4b5ccee28f6a54635ffb0b3ea8a8540672c3c0359",
-    "docs/IMPLEMENTATION_MATRIX.md": "d7f2ca8846e50204974884ec98054d1038695e3fccdd6708d8656c631307d3ed",
+    "docs/ENGINE_STATUS.md": "d44b4563dc5659df9d72e4c057a387165ef33f2825e098e555b7fee2d56fb652",
+    "docs/IMPLEMENTATION_MATRIX.md": "efd787005fdf443e723175ea7ac5119398ffff58837594f50703cfab5cf0bce9",
     "docs/LEGACY_RESULTS_INVALID.md": "267d51329b65b4435ed770b9fe90a0d53148d17cc9b0dae3e6d3406b06c0c0cc",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "abeb28df38238d370093356d4ba68ea9e363b4f0405a3e9201c40ca8fa6dc584",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "3f9ec65783d3142442d077fe32f169801e70e3b8f2831e0b068d7645d9237b52",
     "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "23b56a0edf0c85657b332100538013de16be4d71ea6a8214ac862a6708105af6",
     "knowledge/三国杀牌堆数据.csv": "8cb8da4177f11962776ae0f7e0154ed4ce56e293e96ac457874d48650517de18",
     "scripts/sgs_dev_runner.py": "6f88baa78fc9c22106188defda7190cd2a4412325db46f3964d217fd0e61c755",
-    "scripts/sgs_engine/__init__.py": "bfba9e25896f1399915373d2ed6bcf0fca1ddb3c9bebd2bae47db44c2f094190",
+    "scripts/sgs_engine/__init__.py": "b0a84da105c7387ccf31c39f5fca74da956bdd555e06afd049ac52998b79a448",
     "scripts/sgs_engine/actions.py": "92c76be32afa52a79f76e8439ec95a1dff04e1df2592966b461681ae7b346fff",
     "scripts/sgs_engine/duel.py": "4e2b716e68346948b8b50fc09bac2c0160f30f43410b09aa7e6f7caaebf01218",
     "scripts/sgs_engine/duel_replay.py": "99661777d171928d6c8c0a12ff45da7bf4b051a2f26a21ae78424068a1fc1231",
     "scripts/sgs_engine/engine.py": "1a983ef03cc607644d27ac1902c961e687f1eab254679c81a6ab2e5235d824c7",
     "scripts/sgs_engine/events.py": "be11edff8512fd23c72160b31c78c5e31c18120aec39f088af27e6a800c62439",
     "scripts/sgs_engine/model.py": "54e9ddaacbd57bed216e5a98cbfded9ce1b89fe5a94b8141e6d77c46d3d9f014",
-    "scripts/sgs_engine/production_batch.py": "eb6224fdc38b5056e0a9650375888d178aae1b327ddb565fdec47702c074ca28",
-    "scripts/sgs_engine/production_cards.py": "ca52b934678e43a3cb55ee0c5e1850cc0c091aa258c87111468a3eaf4e37bc96",
+    "scripts/sgs_engine/production_batch.py": "32dd643abd84d16e2dd7b4269db403f0c697b205a242652c30f67f965cf3b64c",
+    "scripts/sgs_engine/production_cards.py": "aaac1ddaf48f65333729568933797014cce72f3185798b9c072306f0fff2fdeb",
     "scripts/sgs_engine/production_replay.py": "5b1e2e3efe7d4e4a34a99695349d63f7b21838730ad3e7d64b1533e8b347def6",
     "scripts/sgs_engine/replay.py": "27cd09a98e9ea09d03a6de3542d13abc94341fde4d33a5fdc5e8bdc5497580b1",
     "scripts/sgs_engine/rng.py": "3cb67017556535802c2b323e8002217961955ffee7ff161de85d804d86d5ead6",
     "scripts/sgs_engine_gate.py": "acdfa735982f234462080de4b4137e1b1f3cfcadb709b7258ffb73c4aeb2e925",
     "scripts/sgs_formal_runner.py": "840aa483354a80bcb8867c197352d34f32f985a92cb2287dc2593812c0260be2",
     "scripts/sgs_source_integrity_audit.py": "046aa2a68ed3c3da6df0e8ee9389fe27f8ff4120bc4475f8317fec5a899d8909",
-    "tests/test_sgs_production_basic_cards.py": "69ed1b0c0e151f4b195f9a6154a7a899e0cb57fdd0c36e043c942f31376e0933",
-    "tests/test_sgs_production_duel_fire_attack.py": "78a4a82cd0244438938caf9ef7a3f7e61b74f586129e3195583a93d7ace08e3a",
-    "tests/test_sgs_production_group_target_tricks.py": "2df9ef87f46370cff3c1304d36e64b24bbaf38f973f1be692fb73113f025370f",
+    "tests/test_sgs_production_basic_cards.py": "4ad3cc0b9a24a6f0854157bfa9b3b41164871eebc07e6661e9d35bb96233e20d",
+    "tests/test_sgs_production_duel_fire_attack.py": "3a92a757b6c18fd366bd3b2fe7c5ea7b978231f3aca45731aa0ebe0e603f0500",
+    "tests/test_sgs_production_group_target_tricks.py": "bead1705e21fd339f53cd0d808a2df9f559e918df28598fc60560823c6d835ec",
     "tests/test_sgs_production_hidden_handle_security.py": "2a100715553dc34531fa4b768367dfac42b793929d26fa644f0e2c15e17fe5e3",
-    "tests/test_sgs_production_single_target_tricks.py": "9359693e3ccd6dd933d9d8d00241126a77eb43f0732dc64ec1b84dd4da6fcd1e",
-    "tests/test_sgs_production_zone_target_tricks.py": "51b3cd016bb32a2ec28cb51e4144a23620704b57293bbab9525b393b128a09f8",
+    "tests/test_sgs_production_single_target_tricks.py": "d7acb499302b405f4befe21436008179e440a18b95b457e9333759ca0902e4fd",
+    "tests/test_sgs_production_zone_target_tricks.py": "5fedcef33f9e4cc474587fc3ccd81d85a0a5c9c08abdf0f4683f5c987a4324c3",
     "hash_note": "本表为当前工作树文件按Git规范化blob字节（core.autocrlf=true，CRLF统一为LF，UTF-8无BOM）计算的SHA-256；仅作状态记录，不参与门禁校验；docs/CHECKPOINT_MANIFEST.json自身不进入本表",
     "tests/test_sgs_production_chain_damage.py": "779a55170dc7fbcff88265cf49f780eb95fd2566a4b1a1ff0718e6930ad908fc",
     "tests/test_sgs_production_remaining_ordinary_tricks.py": "3e4d0eeb76f30364cb6b9cc06067fa043c14f7a0c58b3ea8bdff648c8e5fc830",
-    "knowledge/三国杀卡牌效果.md": "5f88e8c111cc4386e7a5a6019753982ebe81a7c8e7e7084f93c2d67c5f0ca44a",
+    "knowledge/三国杀卡牌效果.md": "48fb32211f483793d58004a67d7f313221198c1013b4a02af28df9a530fb9c34",
     "tests/test_sgs_engine_events.py": "87088fad12c086c5b3bd6dbc7f27363a27d558471d71ccf5b7d38c4ef74ef94e",
-    "tests/test_sgs_production_borrowed_sword_weapon_system.py": "d63bddb11b391688e8a1882aff8cf6c42d41cf4187ccf0fb741902ea40c94804",
-    "tests/test_sgs_production_delayed_tricks.py": "da79f8b59dcd463afe70b78c7717e27c87301300ccec2be29b0c4df6ceea4a51",
-    "tests\\test_sgs_production_armor_damage_prevention.py": "6fb605fe96b5cb2099e3a2aa377056542aa3053f3943698c2bb6ae79d144c573"
+    "tests/test_sgs_production_borrowed_sword_weapon_system.py": "c6c17d9529544567b7205a39948b9ebbcae7ecc5104e8bab6de29bf3f14b42e2",
+    "tests/test_sgs_production_delayed_tricks.py": "ddff0c620b15ae84f423ea10b12a5d056ff398365583fdb8b37f62721a8c1224",
+    "tests\\test_sgs_production_armor_damage_prevention.py": "d96be50748632dc8fbfb9f4048b297fcaf778e4607909c667dd1e436f6e5c0c6",
+    "tests\\test_sgs_production_mount_distance.py": "8ea0420759f7c5940a536af5edcb6ad4b2fe9f0d10f7c27ecfe8c1efdb66f8c4"
   }
 }
