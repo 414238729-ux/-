@@ -58,7 +58,7 @@
     "cp04n_worktree_branch": "deepseek-mount-distance-infrastructure",
     "cp04n_worktree_branch_note": "本批（正式坐骑＋距离／攻击范围基础设施，CP-04N）实现所在分支；基线提交 733940b4a5e278ae3eba11e5c6522b0f1832d6b4；实现提交 fd7d69f53e9827877b6a29d67c067012ead6a7af（feat: implement mounts and distance infrastructure）、检查点文档提交 3231adef9aa97cc152c7476195e9f169c3b14a15 与最终审计文档提交 fbeec9c5ad14e8f4b5da85672dab4a70f961bd4e（docs: finalize mount and distance audit milestone）均已由用户在外部PowerShell提交；2026-08-07 Grok 网页端独立静态审计最终结论 STATIC_AUDIT_PASSED；里程碑标签 milestone-b2-mount-distance-infrastructure-audited 已实际建立并推送（本地标签已由本轮亲自验证存在、GitHub 远程标签已由用户在外部PowerShell验证存在）。",
     "cp04o_worktree_branch": "deepseek-turn-cycle-discard-infrastructure",
-    "cp04o_worktree_branch_note": "本批（正式弃牌阶段＋权威回合循环基础设施，CP-04O）实现所在分支；基线提交 f2eb98a03a56f57ddfd4d5d0a24c0ddb26176989（milestone-b2-mount-distance-infrastructure-audited）；实现提交 b1afb1a613a45c630ae1e42975d276d62915e76d（feat: implement turn cycle and discard infrastructure）与检查点文档提交 7aacd06cdfcf1725307061a3f5c03c233a2199f7（docs: record turn cycle and discard checkpoint）均已由用户在外部PowerShell提交；提交前阻塞性修正：弃牌阶段由逐张弃置改为“选择＋一次性批量提交”正式语义（DISCARD_BATCH_SEMANTICS_FIXED），修正发生在任何implementation commit之前，不存在audit fix commit；2026-08-07 Grok 网页端独立只读静态审计最终结论 STATIC_AUDIT_PASSED（审计分支 deepseek-audit-turn-cycle-discard-infrastructure，精确目标 7aacd06cdfcf1725307061a3f5c03c233a2199f7；Grok 未亲自运行 pytest／Git／本地虚拟环境）；计划里程碑标签 milestone-b2-turn-cycle-discard-infrastructure-audited（尚未创建，将在最终审计文档提交后由用户建立）；最终审计文档尚未由用户提交，不得虚构哈希。"
+    "cp04o_worktree_branch_note": "本批（正式弃牌阶段＋权威回合循环基础设施，CP-04O）实现所在分支；基线提交 f2eb98a03a56f57ddfd4d5d0a24c0ddb26176989（milestone-b2-mount-distance-infrastructure-audited）；实现提交 b1afb1a613a45c630ae1e42975d276d62915e76d（feat: implement turn cycle and discard infrastructure）、检查点文档提交 7aacd06cdfcf1725307061a3f5c03c233a2199f7（docs: record turn cycle and discard checkpoint）与最终审计文档提交 17246077776ef8a8c7f957706d60fd91e2c0a440（docs: finalize turn cycle and discard audit milestone）均已由用户在外部PowerShell提交；功能分支已推送至GitHub；提交前阻塞性修正：弃牌阶段由逐张弃置改为“选择＋一次性批量提交”正式语义（DISCARD_BATCH_SEMANTICS_FIXED），修正发生在任何implementation commit之前，不存在audit fix commit；2026-08-07 Grok 网页端独立只读静态审计最终结论 STATIC_AUDIT_PASSED（审计分支 deepseek-audit-turn-cycle-discard-infrastructure，精确目标 7aacd06cdfcf1725307061a3f5c03c233a2199f7；Grok 未亲自运行 pytest／Git／本地虚拟环境）；里程碑标签 milestone-b2-turn-cycle-discard-infrastructure-audited 已实际建立并推送（本地标签已由本轮亲自验证存在并在最终仓库状态回填开始时解析到 17246077776ef8a8c7f957706d60fd91e2c0a440；GitHub远程标签建立／推送事实来自用户外部PowerShell验证；当前标签目标以Git标签解析结果为准）。"
   },
   "feature_status": {
     "authoritative_core_foundation": true,
@@ -392,11 +392,11 @@
       "id": "CP-04O-PRODUCTION-TURN-CYCLE-DISCARD-INFRASTRUCTURE",
       "status": "audited",
       "commit": "b1afb1a613a45c630ae1e42975d276d62915e76d",
-      "commit_note": "本批（正式弃牌阶段＋权威回合循环基础设施，CP-04O）真实提交链：基线提交 f2eb98a03a56f57ddfd4d5d0a24c0ddb26176989（milestone-b2-mount-distance-infrastructure-audited）；实现提交 b1afb1a613a45c630ae1e42975d276d62915e76d（feat: implement turn cycle and discard infrastructure）；检查点文档提交 7aacd06cdfcf1725307061a3f5c03c233a2199f7（docs: record turn cycle and discard checkpoint）。2026-08-07 完成独立只读静态审计：Grok 网页端经 GitHub 连接器对仓库 414238729-ux/- 的审计分支 deepseek-audit-turn-cycle-discard-infrastructure 上精确目标 7aacd06cdfcf1725307061a3f5c03c233a2199f7 进行只读静态审计，最终结论 STATIC_AUDIT_PASSED（READ COVERAGE：FULL_RELEVANT_SCOPE_READ，本批所有关键相关文件完成要求范围阅读；PARTIAL_READ=空、NOT_READ=空；提示中不存在的 knowledge/三国杀完整游戏规则.md 已由 Grok 正确使用实际仓库规则文件 knowledge/三国杀模式规则.md 并结合 knowledge/三国杀基础术语与通用机制.md、knowledge/三国杀卡牌效果.md，这只是提示路径修正不是仓库缺陷；16个强制审计章节全部PASSED；Blocking issues=NONE；Non-blocking issues=NONE）；Grok 未亲自运行 pytest、compileall 或本地虚拟环境；本地运行证据（pytest 1889 passed 等）来自本地实现会话，两类证据不得混写。批量弃置最终语义为 DISCARD_BATCH_SEMANTICS_FIXED：UI逐张选择不是正式弃牌状态转换；select/ unselect 只修改待选集合；确认前被选牌仍在权威手牌区、hand_count不变、不产生CARD_MOVED／CARD_LOST／CARD_DISCARDED；discard_phase_submit 时权威重算 hand_count、hand_limit、excess，必须选择恰好excess张当前合法手牌；整批牌作为同一次弃牌阶段规则操作原子离开手牌；同次提交的逐实体底层事件共享同一权威 window_id，保存“一次弃置若干牌”的批次边界。旧的逐张正式弃置模型在 implementation commit 产生前已经修复，因此本批没有审计修复提交（audit_gap_fix_commit=null），也不得虚构。本批只证明基础回合状态机与正式弃牌基础设施，不得扩大证明范围；阶段状态机结论：PREPARE→JUDGMENT→DRAW→PLAY→DISCARD→END→下一存活角色，响应窗口phase可插入但不破坏主循环，乐不思蜀命中真正跳过PLAY、兵粮寸断命中真正跳过DRAW、闪电既有路径未退化、无需弃牌时DISCARD自动进入END、winner后停止推进、死亡角色不会继续正常后续阶段、下一行动者跳过死亡角色；完整正式游戏门禁保持关闭。检查点状态为 audited、independent_audit_done=true、audit_conclusion=AUDIT_PASSED；milestone_tag=计划标签 milestone-b2-turn-cycle-discard-infrastructure-audited（尚未由本轮创建或推送，将在最终审计文档提交后由用户建立）；worktree_commit_pending=true（最终审计文档尚未由用户提交，final_doc_commit=null，不得虚构）；最终独立复审结论为 STATIC_AUDIT_PASSED。",
+      "commit_note": "本批（正式弃牌阶段＋权威回合循环基础设施，CP-04O）真实提交链：基线提交 f2eb98a03a56f57ddfd4d5d0a24c0ddb26176989（milestone-b2-mount-distance-infrastructure-audited）；实现提交 b1afb1a613a45c630ae1e42975d276d62915e76d（feat: implement turn cycle and discard infrastructure）；检查点文档提交 7aacd06cdfcf1725307061a3f5c03c233a2199f7（docs: record turn cycle and discard checkpoint）；最终审计文档提交 17246077776ef8a8c7f957706d60fd91e2c0a440（docs: finalize turn cycle and discard audit milestone）。2026-08-07 完成独立只读静态审计：Grok 网页端经 GitHub 连接器对仓库 414238729-ux/- 的审计分支 deepseek-audit-turn-cycle-discard-infrastructure 上精确目标 7aacd06cdfcf1725307061a3f5c03c233a2199f7 进行只读静态审计，最终结论 STATIC_AUDIT_PASSED（READ COVERAGE：FULL_RELEVANT_SCOPE_READ，PARTIAL_READ=空、NOT_READ=空；16个强制审计章节全部PASSED；Blocking issues=NONE；Non-blocking issues=NONE）；Grok 未亲自运行 pytest、compileall 或本地虚拟环境；本地运行证据（pytest 1889 passed 等）来自本地实现会话，两类证据不得混写。批量弃置最终语义为 DISCARD_BATCH_SEMANTICS_FIXED：UI逐张选择不是正式弃牌状态转换；select/unselect 只修改待选集合；确认前被选牌仍在权威手牌区、hand_count不变、不产生CARD_MOVED／CARD_LOST／CARD_DISCARDED；discard_phase_submit 时权威重算 hand_count、hand_limit、excess，必须选择恰好excess张当前合法手牌；整批牌作为同一次弃牌阶段规则操作原子离开手牌；同次提交的逐实体底层事件共享同一权威 window_id，保存“一次弃置若干牌”的批次边界。旧的逐张正式弃置模型在 implementation commit 产生前已经修复，因此本批没有审计修复提交（audit_gap_fix_commit=null），也不得虚构。里程碑标签 milestone-b2-turn-cycle-discard-infrastructure-audited 已实际建立并推送：本地标签已由本轮亲自验证存在，并在最终仓库状态回填开始时解析到 17246077776ef8a8c7f957706d60fd91e2c0a440（final_doc_commit 定义为“最终审计文档提交”，不是“永久当前标签目标”）；用户将在最终仓库状态提交产生后把标签移动到最终仓库状态，当前标签目标始终以Git标签解析结果为准；GitHub功能分支已推送、远程标签已建立并推送的事实来自用户外部PowerShell验证。检查点状态为 audited、independent_audit_done=true、audit_conclusion=AUDIT_PASSED、worktree_commit_pending=false、final_audit_conclusion=STATIC_AUDIT_PASSED、final_pytest=1889、discard_batch_semantics=DISCARD_BATCH_SEMANTICS_FIXED。",
       "independent_audit_done": true,
       "audit_conclusion": "AUDIT_PASSED",
       "milestone_tag": "milestone-b2-turn-cycle-discard-infrastructure-audited",
-      "worktree_commit_pending": true,
+      "worktree_commit_pending": false,
       "evidence": "scripts/sgs_engine/production_batch.py、scripts/sgs_engine/production_cards.py、scripts/sgs_engine/__init__.py、tests/test_sgs_production_turn_cycle_discard.py、knowledge/三国杀基础术语与通用机制.md；正式弃牌阶段与权威回合循环基础设施批次",
       "scope": "formal；正式阶段流单一权威循环（PREPARE→JUDGMENT→DRAW→PLAY→DISCARD→END）、弃牌阶段（手牌上限默认等于当前体力值、选择＋一次性批量提交、确认前无正式状态转换、原子验证与失败关闭）、延时锦囊阶段跳过接入、回合级状态重置与下一行动者转交、死亡／胜利停止、严格回放与玩家可见隐私；不构成完整武器技能完成、正式单挑完成、多人生产完成或里程碑B完成",
       "implementation_commit": "b1afb1a613a45c630ae1e42975d276d62915e76d",
@@ -416,11 +416,11 @@
         "final_audit_conclusion": "STATIC_AUDIT_PASSED",
         "milestone_tag": "milestone-b2-turn-cycle-discard-infrastructure-audited",
         "final_status": "audited",
-        "milestone_tag_note": "计划里程碑标签 milestone-b2-turn-cycle-discard-infrastructure-audited：目前只是计划标签，尚未由本轮创建或推送，将在最终审计文档提交后由用户建立；不得声称标签已经存在。",
-        "final_doc_commit": null,
-        "final_doc_commit_message": null,
-        "milestone_tag_verified": false,
-        "milestone_tag_target_resolution": null
+        "milestone_tag_note": "里程碑标签 milestone-b2-turn-cycle-discard-infrastructure-audited 已实际建立并推送：本地标签已由本轮亲自验证存在，并在最终仓库状态回填开始时解析到 17246077776ef8a8c7f957706d60fd91e2c0a440（final_doc_commit 始终定义为“最终审计文档提交”，不是“永久当前标签目标”）；用户将在最终仓库状态提交产生后把标签移动到最终仓库状态，当前标签目标始终以Git标签解析结果为准；GitHub远程标签建立／推送事实来自用户外部PowerShell验证。",
+        "final_doc_commit": "17246077776ef8a8c7f957706d60fd91e2c0a440",
+        "final_doc_commit_message": "docs: finalize turn cycle and discard audit milestone",
+        "milestone_tag_verified": true,
+        "milestone_tag_target_resolution": "git_tag_resolution"
       }
     }
   ],
@@ -430,7 +430,7 @@
       "passed": 1889,
       "failed": 0,
       "skipped": 0,
-      "note": "1889=1840+49：CP-04O 正式弃牌阶段＋权威回合循环基础设施新增49项专项测试（tests/test_sgs_production_turn_cycle_discard.py，覆盖标准回合顺序、批量弃置语义与动作安全、延时锦囊跳阶段接入、每回合状态重置、下一行动者／死亡／胜利、严格回放与玩家可见隐私、回归）；提交前阻塞性修正把“逐张弃置”改为“选择＋一次性批量提交”（DISCARD_BATCH_SEMANTICS_FIXED），专项测试由43项增至49项；旧批次相关测试按正式批量弃牌更新并全部回归通过。完整 pytest 1889 passed（失败0、跳过0）；compileall 通过；源码完整性审计 scanned_file_count=121、defect_count=0、audit_item_count=55；SHA-256 37个文件条目核验一致；git diff --check通过。实现提交 b1afb1a613a45c630ae1e42975d276d62915e76d（feat: implement turn cycle and discard infrastructure）与检查点文档提交 7aacd06cdfcf1725307061a3f5c03c233a2199f7（docs: record turn cycle and discard checkpoint）均已由用户在外部PowerShell提交；2026-08-07 Grok 网页端独立只读静态审计最终结论 STATIC_AUDIT_PASSED（Grok 未亲自运行 pytest、compileall 或本地虚拟环境，1889 passed 等运行结果来自本地实现会话，两类证据不得混写）；最终审计文档尚未由用户提交，独立审计已通过（status=audited、audit_conclusion=AUDIT_PASSED）。"
+      "note": "1889=1840+49：CP-04O 正式弃牌阶段＋权威回合循环基础设施新增49项专项测试（tests/test_sgs_production_turn_cycle_discard.py）；提交前阻塞性修正把“逐张弃置”改为“选择＋一次性批量提交”（DISCARD_BATCH_SEMANTICS_FIXED），专项测试由43项增至49项；旧批次相关测试按正式批量弃牌更新并全部回归通过。完整 pytest 1889 passed（失败0、跳过0）；compileall 通过；源码完整性审计 scanned_file_count=121、defect_count=0、audit_item_count=55；SHA-256 37个文件条目核验一致；git diff --check通过。实现提交 b1afb1a613a45c630ae1e42975d276d62915e76d、检查点文档提交 7aacd06cdfcf1725307061a3f5c03c233a2199f7 与最终审计文档提交 17246077776ef8a8c7f957706d60fd91e2c0a440（docs: finalize turn cycle and discard audit milestone）均已由用户在外部PowerShell提交；2026-08-07 Grok 网页端独立只读静态审计最终结论 STATIC_AUDIT_PASSED（Grok 未亲自运行 pytest、compileall 或本地虚拟环境，1889 passed 等运行结果来自本地实现会话，两类证据不得混写）；里程碑标签 milestone-b2-turn-cycle-discard-infrastructure-audited 已实际建立并推送（本地标签已由本轮亲自验证存在并在最终仓库状态回填开始时解析到 17246077776ef8a8c7f957706d60fd91e2c0a440，GitHub远程标签建立／推送事实来自用户外部PowerShell验证；当前标签目标以Git标签解析结果为准）。"
     },
     "compileall": {
       "command": ".\\\\.venv\\\\Scripts\\\\python.exe -m compileall -q scripts tests",
@@ -922,7 +922,7 @@
       "formal_run_ready": false,
       "formal_duel_no_skill_ready": false,
       "multi_player_production_proven": false,
-      "worktree_commit_pending": true,
+      "worktree_commit_pending": false,
       "independent_audit_done": true,
       "audit_conclusion": "AUDIT_PASSED",
       "milestone_tag": "milestone-b2-turn-cycle-discard-infrastructure-audited",
@@ -930,21 +930,21 @@
       "implementation_commit_message": "feat: implement turn cycle and discard infrastructure",
       "implementation_parent": "f2eb98a03a56f57ddfd4d5d0a24c0ddb26176989",
       "checkpoint_commit": "7aacd06cdfcf1725307061a3f5c03c233a2199f7",
-      "final_doc_commit": null,
-      "final_doc_commit_message": null,
+      "final_doc_commit": "17246077776ef8a8c7f957706d60fd91e2c0a440",
+      "final_doc_commit_message": "docs: finalize turn cycle and discard audit milestone",
       "audit_gap_fix_commit": null,
       "final_audit_conclusion": "STATIC_AUDIT_PASSED",
       "final_pytest": 1889,
       "discard_selection_before_submit_no_state_change": true,
       "discard_batch_semantics": "DISCARD_BATCH_SEMANTICS_FIXED",
-      "milestone_tag_note": "计划里程碑标签 milestone-b2-turn-cycle-discard-infrastructure-audited：尚未由本轮创建或推送，将在最终审计文档提交后由用户建立。"
+      "milestone_tag_note": "里程碑标签 milestone-b2-turn-cycle-discard-infrastructure-audited 已实际建立并推送：本地标签已由本轮亲自验证存在，并在最终仓库状态回填开始时解析到 17246077776ef8a8c7f957706d60fd91e2c0a440（final_doc_commit 定义为“最终审计文档提交”，不是“永久当前标签目标”）；用户将在最终仓库状态提交产生后把标签移动到最终仓库状态，当前标签目标始终以Git标签解析结果为准；GitHub远程标签建立／推送事实来自用户外部PowerShell验证。"
     }
   },
   "sha256": {
-    "docs/ENGINE_STATUS.md": "5ed160270493e0b85bb1b5541326c10fffb425866a623e7c056937113251783f",
-    "docs/IMPLEMENTATION_MATRIX.md": "e0158a08f7eaa12b481b6a6ee41f88b78ece87064364179d1f6286187e4121f1",
+    "docs/ENGINE_STATUS.md": "17da453b60d92b87b3b3373fe45ffdc53a12a2aaf14d7414c70a6fba4b19b216",
+    "docs/IMPLEMENTATION_MATRIX.md": "8f2f30795ac1b71c448d8a82aea2751f24e302e318893423f8465a8dec53a118",
     "docs/LEGACY_RESULTS_INVALID.md": "267d51329b65b4435ed770b9fe90a0d53148d17cc9b0dae3e6d3406b06c0c0cc",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "96f30b6242ba5db69be19d65feddaeba84a7d14d8b1c56c65e511226f1f77df8",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "ef92df5b1d7f4b9355996a30adbc72c5fc3c58515333fd0cd3c06768360a4412",
     "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "23b56a0edf0c85657b332100538013de16be4d71ea6a8214ac862a6708105af6",
     "knowledge/三国杀牌堆数据.csv": "8cb8da4177f11962776ae0f7e0154ed4ce56e293e96ac457874d48650517de18",
     "scripts/sgs_dev_runner.py": "6f88baa78fc9c22106188defda7190cd2a4412325db46f3964d217fd0e61c755",
