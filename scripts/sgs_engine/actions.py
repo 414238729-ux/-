@@ -463,6 +463,11 @@ def enumerate_legal_actions(
             raise InvalidActionError("规则处理器不得自行签发action_id")
         if candidate.actor_id != context.actor_id:
             raise InvalidActionError("规则处理器返回了不属于当前行动角色的动作")
+        # CP-04P 丈八蛇矛的虚拟杀已因 VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP
+        # 保持 PARTIAL/fail-closed：撤回“virtual:”前缀的全局实体牌验证放行，
+        # 避免扩大其他已证明生产路径的安全面。待丈八规则缺口解决并与丈八
+        # 正式实现一起启用后再恢复（届时只放行服务器权威枚举的合法虚拟动作，
+        # 客户端不能仅通过构造任意 virtual:* 字符串绕过实体牌验证）。
         if candidate.card_instance_id is not None and candidate.card_instance_id not in cards:
             raise InvalidActionError(
                 f"规则处理器引用了不存在的实体牌{candidate.card_instance_id!r}"

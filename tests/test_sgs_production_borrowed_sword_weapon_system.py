@@ -35,7 +35,9 @@ from scripts.sgs_engine.model import (
 )
 from scripts.sgs_engine.production_batch import (
     BatchActionIdController,
+    BatchReferenceController,
     ProductionBasicCardBatch,
+    ProductionBatchError,
     ProductionPhase,
     ScriptedBatchController,
     _replace_player,
@@ -48,6 +50,7 @@ from scripts.sgs_engine.production_cards import (
     PRODUCTION_TRICK_KEYS,
     PRODUCTION_WEAPON_KEYS,
     SLASH_CARD_KEYS,
+    WEAPON_SKILL_STATUS,
     WeaponCardAdapter,
     attack_range_of,
     check_weapon_skill_gate,
@@ -272,7 +275,7 @@ def test_weapon_entities_all_registered_and_attack_ranges_from_csv() -> None:
         spec = adapter.rule_spec()
         assert spec["attack_range"] == expected_ranges[key]
         assert spec["equipment_slot"] == "weapon"
-        assert spec["skill_status"] == "partial"
+        assert spec["skill_status"] == WEAPON_SKILL_STATUS[key].lower()
 
 
 def test_implemented_and_remaining_card_counts_updated() -> None:
@@ -281,16 +284,24 @@ def test_implemented_and_remaining_card_counts_updated() -> None:
     assert JIEDAO in registry.implemented_card_keys
     assert len(registry.implemented_card_keys) == 38
     assert len(registry.unimplemented_card_keys) == 0
-    # 完整实现口径：27种／148张（武器实体不计入完整实现）
+    # 完整实现口径：35种／157张（CP-04P：诸葛连弩、青釭剑、寒冰剑、
+    # 古锭刀、青龙偃月刀、贯石斧、朱雀羽扇、麒麟弓共8种／9张武器为
+    # COMPLETE，计入完整实现；雌雄双股剑、丈八蛇矛、方天画戟保持PARTIAL
+    # ——丈八因 VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP 暂不计COMPLETE）
     complete_keys = (
         set(PRODUCTION_BASIC_CARD_KEYS)
         | set(PRODUCTION_TRICK_KEYS)
         | set(PRODUCTION_DELAYED_TRICK_KEYS)
         | set(PRODUCTION_ARMOR_KEYS)
         | set(PRODUCTION_MOUNT_KEYS)
+        | {
+            key
+            for key, status in WEAPON_SKILL_STATUS.items()
+            if status == "COMPLETE"
+        }
     )
-    assert len(complete_keys) == 27
-    assert sum(len(registry.instances_of(key)) for key in complete_keys) == 148
+    assert len(complete_keys) == 35
+    assert sum(len(registry.instances_of(key)) for key in complete_keys) == 157
     # 注册表口径：38种适配器／160张实体
     assert sum(len(registry.instances_of(key)) for key in registry.implemented_card_keys) == 160
     assert set(registry.unimplemented_card_keys) == set()
@@ -1423,9 +1434,9 @@ def test_cixiong_holder_slash_fails_closed() -> None:
 
 
 def test_zhangba_possible_expansion_fails_closed() -> None:
+    # 丈八蛇矛（PARTIAL）：subcard生命周期时点规则缺口，手牌>=2时失败关闭
     game = _fresh(seed=3)
     _equip_weapon(game, "sgs_weapon_zhangbashemao")
-    # 手牌>=2张：合法杀集合可能因转化扩大，失败关闭
     with pytest.raises(UnsupportedRuleError):
         game.legal_actions()
     # 手牌<2张时可证明无转化材料：按实体杀流程继续
@@ -1441,13 +1452,24 @@ def test_zhangba_possible_expansion_fails_closed() -> None:
     assert "use_slash" in ops
 
 
-def test_zhuque_entity_plain_slash_fails_closed() -> None:
+def test_zhuque_entity_plain_slash_convertible_now_implemented() -> None:
+    """CP-04P：朱雀羽扇实现后普通杀不再失败关闭，可枚举转火杀动作。"""
     game = _fresh(seed=3)
     _equip_weapon(game, "sgs_weapon_zhuqueyushan")
     sha = next(r for r in game.formal_registry.records if r.card_key == SHA)
     _swap(game, sha.instance_id, ZoneRef.hand("p1"))
-    with pytest.raises(UnsupportedRuleError):
-        game.legal_actions()
+    ops = [
+        a.payload.get("operation")
+        for a in game.legal_actions()
+        if a.payload.get("operation") == "use_slash"
+    ]
+    assert "use_slash" in ops
+    converted = [
+        a
+        for a in game.legal_actions()
+        if a.payload.get("converted_to_fire") is True
+    ]
+    assert converted, "朱雀羽扇下普通杀必须可枚举转火杀动作"
     # 实体火杀不受朱雀羽扇影响：可继续
     game2 = _fresh(seed=3)
     _equip_weapon(game2, "sgs_weapon_zhuqueyushan")
@@ -1457,15 +1479,18 @@ def test_zhuque_entity_plain_slash_fails_closed() -> None:
     assert "use_slash" in ops
 
 
-def test_zhuge_active_extra_slash_dependency_fails_closed() -> None:
+def test_zhuge_active_extra_slash_available_when_count_exhausted() -> None:
+    """CP-04P：诸葛连弩实现后，出牌阶段次数用尽仍可主动使用【杀】。"""
     game = _fresh(seed=3)
     _equip_weapon(game, "sgs_weapon_zhugeliannu")
     game._runtime = replace(
         game._runtime,
         slash_used_counts=MappingProxyType({"p1": 1}),
     )
-    with pytest.raises(UnsupportedRuleError):
-        game.legal_actions()
+    sha = next(r for r in game.formal_registry.records if r.card_key == SHA)
+    _swap(game, sha.instance_id, ZoneRef.hand("p1"))
+    ops = [a.payload.get("operation") for a in game.legal_actions()]
+    assert "use_slash" in ops
 
 
 def test_zhuge_borrowed_forced_slash_not_dependent_on_skill() -> None:
@@ -1489,7 +1514,7 @@ def test_other_weapons_impact_matrix_provable_no_impact_and_fail_states() -> Non
     _swap(game, sha.instance_id, ZoneRef.hand("p1"))
     ops = [a.payload.get("operation") for a in game.legal_actions()]
     assert "use_slash" in ops
-    # 青釭剑：目标无防具 -> 无影响；目标装备防具 -> 失败关闭
+    # 青釭剑：目标无防具 -> 无影响；目标装备防具 -> 真实无视防具（CP-04P）
     game2 = _fresh(seed=3)
     _equip_weapon(game2, "sgs_weapon_qinggangjian")
     sha2 = next(r for r in game2.formal_registry.records if r.card_key == SHA)
@@ -1504,18 +1529,21 @@ def test_other_weapons_impact_matrix_provable_no_impact_and_fail_states() -> Non
     game3._state = game3.state.move_card(
         armor.instance_id, ZoneRef.equipment("p2", "armor")
     )
-    with pytest.raises(UnsupportedRuleError):
-        game3.legal_actions()
-    # 古锭刀：目标无手牌 -> 失败关闭；目标有手牌 -> 无影响
+    sha3 = next(r for r in game3.formal_registry.records if r.card_key == SHA)
+    _swap(game3, sha3.instance_id, ZoneRef.hand("p1"))
+    ops3 = [a.payload.get("operation") for a in game3.legal_actions()]
+    assert "use_slash" in ops3
+    # 古锭刀：目标无手牌 -> 真实伤害+1（CP-04P）；目标有手牌 -> 无影响
     game4 = _fresh(seed=3)
     _equip_weapon(game4, "sgs_weapon_gudingdao")
     sha4 = next(r for r in game4.formal_registry.records if r.card_key == SHA)
     _swap(game4, sha4.instance_id, ZoneRef.hand("p1"))
     for instance_id in list(game4.state.card_ids_in(ZoneRef.hand("p2"))):
         game4._state = game4.state.move_card(instance_id, DISCARD_PILE)
-    with pytest.raises(UnsupportedRuleError):
-        game4.legal_actions()
-    # 麒麟弓：目标无坐骑 -> 伤害结算可继续；目标有坐骑 -> 失败关闭
+    ops4 = [a.payload.get("operation") for a in game4.legal_actions()]
+    assert "use_slash" in ops4
+    # 麒麟弓：目标无坐骑 -> 不触发窗口；目标有坐骑 -> 伤害后打开弃坐骑
+    # 窗口（CP-04P 已实现，门禁不再失败关闭）
     game5 = _fresh(seed=3)
     _equip_weapon(game5, "sgs_weapon_qilingong", "p1")
     check_weapon_skill_gate(
@@ -1529,22 +1557,22 @@ def test_other_weapons_impact_matrix_provable_no_impact_and_fail_states() -> Non
     game6._state = game6.state.move_card(
         mount.instance_id, ZoneRef.equipment("p2", "attack_horse")
     )
-    with pytest.raises(UnsupportedRuleError):
-        check_weapon_skill_gate(
-            game6.state, actor_id="p1", decision="slash_damage", target_id="p2"
-        )
+    # 门禁放行（技能已实现，窗口在结算路径真实处理）
+    check_weapon_skill_gate(
+        game6.state, actor_id="p1", decision="slash_damage", target_id="p2"
+    )
 
 
 def test_dodge_time_weapon_gates_qinglong_and_guanshifu() -> None:
-    # 青龙偃月刀：被闪后手中有杀 -> 失败关闭；无杀 -> 可证明无影响
+    # 青龙偃月刀（CP-04P COMPLETE）：被闪后门禁放行，继续杀窗口在结算
+    # 路径真实处理；有杀与无杀两种状态均不再失败关闭
     game = _fresh(seed=3)
     _equip_weapon(game, "sgs_weapon_qinglongyanyuedao")
     sha = next(r for r in game.formal_registry.records if r.card_key == SHA)
     _swap(game, sha.instance_id, ZoneRef.hand("p1"))
-    with pytest.raises(UnsupportedRuleError):
-        check_weapon_skill_gate(
-            game.state, actor_id="p1", decision="slash_dodged", target_id="p2"
-        )
+    check_weapon_skill_gate(
+        game.state, actor_id="p1", decision="slash_dodged", target_id="p2"
+    )
     game2 = _fresh(seed=3)
     _equip_weapon(game2, "sgs_weapon_qinglongyanyuedao")
     for instance_id in list(game2.state.card_ids_in(ZoneRef.hand("p1"))):
@@ -1553,13 +1581,13 @@ def test_dodge_time_weapon_gates_qinglong_and_guanshifu() -> None:
     check_weapon_skill_gate(
         game2.state, actor_id="p1", decision="slash_dodged", target_id="p2"
     )
-    # 贯石斧：手牌+装备>=2张 -> 失败关闭；<2张 -> 无影响
+    # 贯石斧（CP-04P COMPLETE）：被闪后门禁放行，弃2张强制命中窗口在
+    # 结算路径真实处理；可弃牌充足与不足两种状态均不再失败关闭
     game3 = _fresh(seed=3)
     _equip_weapon(game3, "sgs_weapon_guanshifu")
-    with pytest.raises(UnsupportedRuleError):
-        check_weapon_skill_gate(
-            game3.state, actor_id="p1", decision="slash_dodged", target_id="p2"
-        )
+    check_weapon_skill_gate(
+        game3.state, actor_id="p1", decision="slash_dodged", target_id="p2"
+    )
     game4 = _fresh(seed=3)
     _equip_weapon(game4, "sgs_weapon_guanshifu")
     for instance_id in list(game4.state.card_ids_in(ZoneRef.hand("p1"))):
@@ -1569,14 +1597,14 @@ def test_dodge_time_weapon_gates_qinglong_and_guanshifu() -> None:
     )
 
 
-def test_hanbingjian_damage_gate_fails_closed() -> None:
+def test_hanbingjian_damage_gate_passes_open() -> None:
+    # 寒冰剑（CP-04P COMPLETE）：伤害前防止窗口在结算路径真实处理，
+    # 门禁放行；被闪路径不受寒冰剑影响，同样放行
     game = _fresh(seed=3)
     _equip_weapon(game, "sgs_weapon_hanbingjian")
-    with pytest.raises(UnsupportedRuleError):
-        check_weapon_skill_gate(
-            game.state, actor_id="p1", decision="slash_damage", target_id="p2"
-        )
-    # 被闪路径不触发寒冰剑技能：可证明无影响
+    check_weapon_skill_gate(
+        game.state, actor_id="p1", decision="slash_damage", target_id="p2"
+    )
     check_weapon_skill_gate(
         game.state, actor_id="p1", decision="slash_dodged", target_id="p2"
     )
@@ -2218,4 +2246,261 @@ def test_player_visible_replay_leaks_no_other_hands_or_handle_maps() -> None:
             continue
         assert instance_id not in exposed_ids, (
             f"未选择的手牌实体{instance_id}不得进入玩家可见回放"
+        )
+
+# ---------------------------------------------------------------------
+# 朱雀羽扇×借刀杀人（2026-08-08 用户移动版实测确认）
+# ---------------------------------------------------------------------
+
+
+ZHUQUE = "sgs_weapon_zhuqueyushan"
+TENGJIA = "sgs_armor_tengjia"
+
+
+def _zhuque_jiedao_choice(
+    game: ProductionBasicCardBatch,
+    sha_id: str,
+    *,
+    converted: bool,
+) -> None:
+    """在借刀选择窗口选择指定普通杀，converted=True 时选择朱雀转火杀动作。"""
+
+    assert game.phase is ProductionPhase.BORROWED_SWORD_CHOICE
+    handle = _choice_handle_for(game, sha_id)
+    candidates = [
+        a
+        for a in game.legal_actions()
+        if a.payload.get("operation") == "choose_borrowed_sword_slash"
+        and a.payload.get("handle") == handle
+        and (a.payload.get("converted_to_fire") is True) == converted
+    ]
+    assert len(candidates) == 1
+    _step(game, candidates[0])
+
+
+def test_borrowed_sword_zhuque_plain_slash_unconverted() -> None:
+    """A. 借刀时朱雀羽扇同时提供普通使用与转火杀；普通使用不转换。"""
+
+    game = _fresh(seed=3)
+    _jiedao_fixture(game, weapon_key=ZHUQUE, slash_keys=(SHA,))
+    _use_jiedao(game)
+    assert game.phase is ProductionPhase.BORROWED_SWORD_CHOICE
+    sha_id = next(
+        i
+        for i in game.state.card_ids_in(ZoneRef.hand("p2"))
+        if game.state.cards_by_id[i].card_key == SHA
+    )
+    plain_actions = [
+        a
+        for a in game.legal_actions()
+        if a.payload.get("operation") == "choose_borrowed_sword_slash"
+        and a.payload.get("converted_to_fire") is None
+    ]
+    fire_actions = [
+        a
+        for a in game.legal_actions()
+        if a.payload.get("converted_to_fire") is True
+    ]
+    assert len(plain_actions) == 1
+    assert len(fire_actions) == 1
+    _zhuque_jiedao_choice(game, sha_id, converted=False)
+    assert game.phase is ProductionPhase.SLASH_RESPONSE
+    _step(game, _action(game, "pass_slash_response"))
+    damages = _events_of(game, EventType.DAMAGE)
+    assert len(damages) == 1
+    assert damages[0].damage_type == "无属性"
+    used = [
+        e
+        for e in game.events
+        if e.event_type is EventType.CARD_USED
+        and e.payload.get("converted_to_fire") is not None
+    ]
+    assert not used, "普通使用不得携带转换标记"
+    game.state.assert_card_conservation()
+
+
+def test_borrowed_sword_zhuque_converted_fire_slash() -> None:
+    """B/C. 借刀时选择朱雀转换：从使用入口按火杀身份结算，产生火属性伤害。"""
+
+    game = _fresh(seed=3)
+    _jiedao_fixture(game, weapon_key=ZHUQUE, slash_keys=(SHA,))
+    _use_jiedao(game)
+    sha_id = next(
+        i
+        for i in game.state.card_ids_in(ZoneRef.hand("p2"))
+        if game.state.cards_by_id[i].card_key == SHA
+    )
+    _zhuque_jiedao_choice(game, sha_id, converted=True)
+    assert game.phase is ProductionPhase.SLASH_RESPONSE
+    used = [
+        e
+        for e in game.events
+        if e.event_type is EventType.CARD_USED
+        and e.payload.get("converted_to_fire") is True
+    ]
+    assert len(used) == 1
+    assert used[0].payload["weapon_convert_context"] == (
+        "zhuqueyushan_borrowed_sword"
+    )
+    assert used[0].payload["damage_nature"] == "火属性"
+    assert used[0].payload["forced_use_context"] == "borrowed_sword"
+    _step(game, _action(game, "pass_slash_response"))
+    damages = _events_of(game, EventType.DAMAGE)
+    assert len(damages) == 1
+    assert damages[0].damage_type == "火属性"
+    game.state.assert_card_conservation()
+
+
+def test_borrowed_sword_zhuque_converted_vs_tengjia() -> None:
+    """D1. 借刀转火杀对藤甲：不被藤甲普通杀免疫，火属性伤害+1生效。"""
+
+    game = _fresh(seed=3)
+    _jiedao_fixture(game, weapon_key=ZHUQUE, slash_keys=(SHA,))
+    tengjia = next(
+        r for r in game.formal_registry.records if r.card_key == TENGJIA
+    )
+    _swap(game, tengjia.instance_id, ZoneRef.equipment("p1", "armor"))
+    _use_jiedao(game)
+    sha_id = next(
+        i
+        for i in game.state.card_ids_in(ZoneRef.hand("p2"))
+        if game.state.cards_by_id[i].card_key == SHA
+    )
+    _zhuque_jiedao_choice(game, sha_id, converted=True)
+    assert game.phase is ProductionPhase.SLASH_RESPONSE, (
+        "转火杀不被藤甲免疫，必须进入响应窗口"
+    )
+    _step(game, _action(game, "pass_slash_response"))
+    damages = _events_of(game, EventType.DAMAGE)
+    assert len(damages) == 1
+    assert damages[0].damage_type == "火属性"
+    assert damages[0].amount == 2  # 1 + 藤甲火属性+1
+    assert "tengjia_fire_plus_one" in damages[0].payload["modifiers"]
+    game.state.assert_card_conservation()
+
+
+def test_borrowed_sword_plain_slash_vs_tengjia_invalidated() -> None:
+    """D2. 借刀普通杀不转换时对藤甲：仍按普通杀身份被藤甲无效化。"""
+
+    game = _fresh(seed=3)
+    _jiedao_fixture(game, weapon_key=ZHUQUE, slash_keys=(SHA,))
+    tengjia = next(
+        r for r in game.formal_registry.records if r.card_key == TENGJIA
+    )
+    _swap(game, tengjia.instance_id, ZoneRef.equipment("p1", "armor"))
+    _use_jiedao(game)
+    sha_id = next(
+        i
+        for i in game.state.card_ids_in(ZoneRef.hand("p2"))
+        if game.state.cards_by_id[i].card_key == SHA
+    )
+    _zhuque_jiedao_choice(game, sha_id, converted=False)
+    assert game.phase is not ProductionPhase.SLASH_RESPONSE, (
+        "未转换的普通杀必须被藤甲无效化"
+    )
+    assert not _events_of(game, EventType.DAMAGE)
+    cancelled = [
+        e
+        for e in game.events
+        if e.event_type is EventType.CARD_EFFECT_CANCELLED
+    ]
+    assert cancelled and cancelled[-1].payload["reason"] == "tengjia_invalidates"
+    assert game.phase is ProductionPhase.PLAY, "借刀根结算应正常完成"
+    game.state.assert_card_conservation()
+
+
+def test_borrowed_sword_no_conversion_without_zhuque() -> None:
+    """E. 未装备朱雀羽扇时不得提供转火杀动作。"""
+
+    game = _fresh(seed=3)
+    _jiedao_fixture(game, weapon_key=WEAPON_QINGGANG, slash_keys=(SHA,))
+    _use_jiedao(game)
+    assert game.phase is ProductionPhase.BORROWED_SWORD_CHOICE
+    fire_actions = [
+        a
+        for a in game.legal_actions()
+        if a.payload.get("converted_to_fire") is True
+    ]
+    assert not fire_actions
+
+
+def test_borrowed_sword_zhuque_conversion_stale_after_weapon_lost() -> None:
+    """F. 朱雀羽扇在选择前失去：旧转火杀动作失败关闭。"""
+
+    game = _fresh(seed=3)
+    _jiedao_fixture(game, weapon_key=ZHUQUE, slash_keys=(SHA,))
+    _use_jiedao(game)
+    fire_action = next(
+        a
+        for a in game.legal_actions()
+        if a.payload.get("converted_to_fire") is True
+    )
+    zhuque_id = game.state.card_ids_in(ZoneRef.equipment("p2", "weapon"))[0]
+    game._state = game.state.move_card(zhuque_id, DISCARD_PILE)
+    with pytest.raises(ProductionBatchError):
+        game.step(BatchActionIdController(fire_action.action_id))
+    # 普通使用动作仍然可用（未装备朱雀不影响普通杀使用）
+    assert game.phase is ProductionPhase.BORROWED_SWORD_CHOICE
+    game.state.assert_card_conservation()
+
+
+class _ZhuqueConvertReferenceController(BatchReferenceController):
+    """验收用控制器：出牌阶段优先使用【借刀杀人】，借刀选择窗口优先
+    选择朱雀转火杀动作，其余回退参考策略。"""
+
+    strategy_version = "production-batch-zhuque-convert-controller.v2"
+
+    def choose(
+        self, legal_actions, context
+    ) -> LegalAction:
+        for action in legal_actions:
+            if action.payload.get("converted_to_fire") is True:
+                return action
+        if context.phase == "play":
+            for action in legal_actions:
+                if action.payload.get("operation") == "use_jiedao":
+                    return action
+        return super().choose(legal_actions, context)
+
+
+def test_borrowed_sword_zhuque_conversion_replay_reexecutes() -> None:
+    """G. 转火杀路径严格回放：记录、重执行与篡改拒绝。"""
+
+    def fixture(game: ProductionBasicCardBatch) -> None:
+        _jiedao_fixture(game, weapon_key=ZHUQUE, slash_keys=(SHA,))
+        # 参考控制器在锦囊响应窗口总是优先打出【无懈可击】；为让借刀
+        # 真正进入强制使用杀窗口，移除 p2 手牌中的无懈。
+        for instance_id in list(game.state.card_ids_in(ZoneRef.hand("p2"))):
+            if game.state.cards_by_id[instance_id].card_key == WUXIE:
+                game._state = game.state.move_card(instance_id, DISCARD_PILE)
+
+    record = record_reference_production_batch(
+        seed=3,
+        fixture=fixture,
+        controller=_ZhuqueConvertReferenceController(),
+    )
+    assert any(
+        decision.get("chosen_action", {}).get("payload", {}).get(
+            "converted_to_fire"
+        )
+        is True
+        for decision in record.decisions
+    ), "回放必须包含借刀转火杀决策"
+    result = reexecute_production_replay(record, fixture=fixture)
+    assert result.verified is True
+    # 篡改 used 事件的转换标记：重执行必须发散失败
+    tampered = copy.deepcopy(record.to_dict())
+    used = next(
+        event
+        for event in tampered["events"]
+        if event.get("event_type") == "card_used"
+        and event.get("payload", {}).get("converted_to_fire") is True
+    )
+    used["payload"]["converted_to_fire"] = False
+    del tampered["record_sha256"]
+    with pytest.raises(
+        (ProductionReplayFormatError, ProductionReplayDivergenceError)
+    ):
+        reexecute_production_replay(
+            ProductionReexecutionReplay.from_dict(tampered)
         )

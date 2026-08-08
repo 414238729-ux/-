@@ -129,6 +129,55 @@ PRODUCTION_WEAPON_KEYS: tuple[str, ...] = (
     "sgs_weapon_qilingong",
 )
 
+# CP-04P 武器技能状态（以 Knowledge 卡牌效果 7.1–7.11 与结构化CSV为规则来源）。
+# COMPLETE：规则来源明确且已在双人生产入口实现完整生产语义；
+# PARTIAL：规则文本存在但生产语义未实现／存在RULE_GAP，按集中式门禁失败关闭。
+WEAPON_SKILL_STATUS: Mapping[str, str] = MappingProxyType(
+    {
+        "sgs_weapon_zhugeliannu": "COMPLETE",
+        # 青釭剑：用户移动版实测确认生命周期（QINGGANG_LIFECYCLE_CONFIRMED）：
+        # 起点=【杀】指定目标后的青釭剑武器技能实际生效时点；终点=目标以【闪】
+        # 完成响应时该【闪】结算完成，或进入伤害时本次伤害结算完成；此后防具
+        # 恢复。target-scoped、slash-resolution-scoped、不移除防具实体。
+        "sgs_weapon_qinggangjian": "COMPLETE",
+        # 寒冰剑：区域通则已由基础术语第12节（当前确认）给出（“牌”=手牌区+
+        # 装备区，不含判定区）；伤害前防止与弃目标2张牌的状态机已在本批实现。
+        "sgs_weapon_hanbingjian": "COMPLETE",
+        "sgs_weapon_cixiongshuanggujian": "PARTIAL",
+        "sgs_weapon_gudingdao": "COMPLETE",
+        # 青龙偃月刀：被【闪】响应后可继续对该目标使用【杀】（7.6），
+        # 生产语义已实现。
+        "sgs_weapon_qinglongyanyuedao": "COMPLETE",
+        # 贯石斧：被【闪】响应后可弃置自己手牌区与装备区合计2张牌强制造成
+        # 伤害（7.7 当前确认），生产语义已实现。
+        "sgs_weapon_guanshifu": "COMPLETE",
+        # 丈八蛇矛：两张手牌当作普通【杀】使用或打出（7.8 当前确认）。
+        # 最小正式虚拟牌表示已在本批建立（虚拟杀不进入实体牌目录；材料
+        # 非弃置代价，随本次使用/打出进入弃牌堆），但材料在“使用/打出”
+        # 时的精确 zone 生命周期时点缺少项目确认通则
+        # （VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP），暂不计 COMPLETE，
+        # 待用户确认后恢复。
+        "sgs_weapon_zhangbashemao": "PARTIAL",
+        # 方天画戟：双人环境下“至多3个目标”不会产生额外目标，但技能核心
+        # 多目标语义未在多人生产入口实现/证明，不得计为COMPLETE。
+        "sgs_weapon_fangtianhuaji": "PARTIAL",
+        # 朱雀羽扇：主动出牌阶段使用普通【杀】时可选转为【火杀】（7.10
+        # 用户整理解释），生产语义已实现；借刀强制使用场景的转换选择
+        # 未提供（强制杀按普通杀结算），如实记录为边界。
+        "sgs_weapon_zhuqueyushan": "COMPLETE",
+        # 麒麟弓：使用【杀】对目标造成伤害时可选弃置目标装备区一张坐骑牌
+        # （7.11 用户整理解释），生产语义已实现。
+        "sgs_weapon_qilingong": "COMPLETE",
+    }
+)
+
+# COMPLETE 武器（双人生产入口范围内）不再触发集中式失败关闭门禁。
+_WEAPON_SKILL_COMPLETE_KEYS: frozenset[str] = frozenset(
+    key
+    for key, status in WEAPON_SKILL_STATUS.items()
+    if status == "COMPLETE"
+)
+
 PRODUCTION_DELAYED_TRICK_KEYS: tuple[str, ...] = (
     "sgs_delayed_lebusi",
     "sgs_delayed_bingliang",
@@ -195,6 +244,19 @@ def weapon_attack_ranges(
         )
     _WEAPON_ATTACK_RANGES_CACHE = MappingProxyType(result)
     return _WEAPON_ATTACK_RANGES_CACHE
+
+
+def equipped_weapon_key(state: GameState, owner_id: str) -> str | None:
+    """读取角色武器槽的唯一实体卡牌键（0或1张；多张即状态损坏失败关闭）。"""
+
+    ids = state.card_ids_in(ZoneRef.equipment(owner_id, "weapon"))
+    if len(ids) > 1:
+        raise UnsupportedRuleError(
+            f"角色{owner_id}的武器槽必须至多包含一张武器牌；当前为{len(ids)}张"
+        )
+    if not ids:
+        return None
+    return state.cards_by_id[ids[0]].card_key
 
 
 def attack_range_of(state: GameState, player_id: str) -> int:
@@ -377,6 +439,14 @@ def check_weapon_skill_gate(
         raise UnsupportedRuleError(
             f"武器{weapon_key}未在武器技能影响矩阵中登记；失败关闭"
         )
+    if weapon_key in _WEAPON_SKILL_COMPLETE_KEYS:
+        # CP-04P：该武器技能已在双人生产入口实现完整生产语义，
+        # 不再因技能未实现而失败关闭；技能效果由生产引擎在对应
+        # 触发点真实结算：诸葛连弩次数豁免、青釭剑 ignore_armor 生命周期
+        # （QINGGANG_LIFECYCLE_CONFIRMED）、寒冰剑防止伤害并弃目标2张、
+        # 古锭刀伤害+1、青龙偃月刀被闪后继续使用杀、贯石斧弃2张强制命中、
+        # 朱雀羽扇转火杀、麒麟弓弃坐骑；方天画戟双人目标集合不变。
+        return
 
     if weapon_key == "sgs_weapon_zhugeliannu":
         # 技能：你使用【杀】无次数限制。主动出杀次数已用尽时，
@@ -389,31 +459,28 @@ def check_weapon_skill_gate(
         return
 
     if weapon_key == "sgs_weapon_qinggangjian":
-        # 技能：使用【杀】指定目标时无视其防具。防具槽为空可证明
-        # 技能不影响本次结算；防具槽被占用时无法证明，失败关闭。
-        if decision in ("use_slash", "forced_slash") and target_id is not None:
-            if state.card_ids_in(ZoneRef.equipment(target_id, "armor")):
-                raise UnsupportedRuleError(
-                    "青釭剑无视防具技能未实现；目标装备防具时失败关闭"
-                )
+        # 青釭剑已计入 _WEAPON_SKILL_COMPLETE_KEYS，本分支不可达；
+        # 生命周期由 QINGGANG_LIFECYCLE_CONFIRMED（2026-08-07 用户移动版
+        # 实测确认）约束：起点为杀指定目标后的武器技能实际生效时点，
+        # 终点A为闪结算完成，终点B为本次伤害结算完成，清除后防具恢复。
         return
 
     if weapon_key == "sgs_weapon_hanbingjian":
-        # 技能：使用【杀】将要造成伤害时可以防止伤害并弃置目标2张牌。
-        # 伤害结算可能被该技能改变，无法从当前状态证明不发动，失败关闭。
-        if decision == "slash_damage":
-            raise UnsupportedRuleError(
-                "寒冰剑防止伤害并弃置目标牌技能未实现；杀伤害结算前失败关闭"
-            )
+        # 寒冰剑已计入 _WEAPON_SKILL_COMPLETE_KEYS，本分支不可达；
+        # 防止伤害＋弃目标手牌/装备至多2张由生产引擎在伤害前窗口真实结算。
         return
 
     if weapon_key == "sgs_weapon_cixiongshuanggujian":
-        # 技能：使用【杀】指定异性角色为目标时可令其选择。PlayerState
-        # 没有性别字段，缺少性别数据不能证明目标非异性，因此对另一
-        # 角色使用【杀】时一律失败关闭，不得当作白板武器。
+        # 技能：使用【杀】指定异性角色为目标时可令其选择。规则本身已知
+        # （异性=性别不同的两名角色），不是规则缺口；当前生产数据模型
+        # 没有权威武将性别来源（DATA_MODEL_GAP:
+        # CHARACTER_GENDER_METADATA_NOT_AVAILABLE）。PlayerState 没有性别
+        # 字段，缺少性别数据不能证明目标非异性，因此对另一角色使用
+        # 【杀】时一律失败关闭，不得当作白板武器。
         if decision in ("use_slash", "forced_slash") and target_id is not None:
             raise UnsupportedRuleError(
-                "雌雄双股剑技能需要性别判定；PlayerState无性别字段，无法证明目标非异性，失败关闭"
+                "雌雄双股剑技能需要性别判定；生产数据模型缺少权威武将性别元数据"
+                "（CHARACTER_GENDER_METADATA_NOT_AVAILABLE），无法证明目标非异性，失败关闭"
             )
         return
 
@@ -428,31 +495,13 @@ def check_weapon_skill_gate(
         return
 
     if weapon_key == "sgs_weapon_qinglongyanyuedao":
-        # 技能：使用的【杀】被【闪】响应后可继续对该目标使用【杀】。
-        # 被闪后若手中仍有【杀】，可选动作集合可能扩大，失败关闭。
-        if decision == "slash_dodged":
-            if any(
-                state.cards_by_id[instance_id].card_key in SLASH_CARD_KEYS
-                for instance_id in state.card_ids_in(ZoneRef.hand(actor_id))
-            ):
-                raise UnsupportedRuleError(
-                    "青龙偃月刀被闪后继续使用杀技能未实现；失败关闭"
-                )
+        # 青龙偃月刀已计入 _WEAPON_SKILL_COMPLETE_KEYS，本分支不可达；
+        # 被闪后继续使用一张杀由生产引擎在武器选择窗口真实结算。
         return
 
     if weapon_key == "sgs_weapon_guanshifu":
-        # 技能：被【闪】响应后可弃置手牌区与装备区合计2张牌强制造成伤害。
-        # 可支付牌不足2张时可证明技能不可发动；否则失败关闭。
-        if decision == "slash_dodged":
-            hand_count = len(state.card_ids_in(ZoneRef.hand(actor_id)))
-            equip_count = sum(
-                len(state.card_ids_in(ZoneRef.equipment(actor_id, slot)))
-                for slot in EQUIPMENT_SLOTS
-            )
-            if hand_count + equip_count >= 2:
-                raise UnsupportedRuleError(
-                    "贯石斧弃两张牌强制命中技能未实现；失败关闭"
-                )
+        # 贯石斧已计入 _WEAPON_SKILL_COMPLETE_KEYS，本分支不可达；
+        # 弃自己手牌＋装备2张强制命中由生产引擎在武器选择窗口真实结算。
         return
 
     if weapon_key == "sgs_weapon_zhangbashemao":
@@ -462,7 +511,9 @@ def check_weapon_skill_gate(
         if decision in ("use_slash", "forced_slash", "play_slash"):
             if len(state.card_ids_in(ZoneRef.hand(actor_id))) >= 2:
                 raise UnsupportedRuleError(
-                    "丈八蛇矛两张手牌转化杀技能未实现；合法杀集合可能扩大，失败关闭"
+                    "丈八蛇矛两张手牌转化杀技能的subcard生命周期时点未由项目"
+                    "规则确认（VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP），"
+                    "合法杀集合可能扩大，失败关闭"
                 )
         return
 
@@ -671,8 +722,8 @@ class SlashAdapter(BasicCardAdapter):
         if session.phase.value != "play":
             return ()
         if session.runtime.slash_used_counts.get(context.actor_id, 0) > 0:
-            # 达到通常上限：仍须先经过武器技能门禁，避免把连弩等技能
-            # 可能扩展的合法动作静默当作不存在（不得错误允许或错误禁止）。
+            # 达到通常上限：先经过武器技能门禁；诸葛连弩（CP-04P 已实现
+            # “你使用【杀】无次数限制”）继续枚举，其余武器不改变次数。
             check_weapon_skill_gate(
                 state,
                 actor_id=context.actor_id,
@@ -682,7 +733,11 @@ class SlashAdapter(BasicCardAdapter):
                     context.actor_id, 0
                 ),
             )
-            return ()
+            if (
+                equipped_weapon_key(state, context.actor_id)
+                != "sgs_weapon_zhugeliannu"
+            ):
+                return ()
         actions: list[LegalAction] = []
         for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
             card = state.cards_by_id[instance_id]
@@ -714,6 +769,28 @@ class SlashAdapter(BasicCardAdapter):
                     },
                 )
             )
+            # CP-04P 朱雀羽扇（7.10 用户整理解释）：使用普通【杀】指定目标
+            # 时可将该【杀】转为【火杀】。提供独立的“转火杀”使用动作；
+            # 未选择转换则按普通【杀】结算。
+            if (
+                self.card_key == "sgs_basic_sha"
+                and equipped_weapon_key(state, context.actor_id)
+                == "sgs_weapon_zhuqueyushan"
+            ):
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.USE_CARD,
+                        actor_id=context.actor_id,
+                        card_instance_id=instance_id,
+                        target_ids=(target,),
+                        payload={
+                            "operation": "use_slash",
+                            "card_key": self.card_key,
+                            "card_name": self.card_name,
+                            "converted_to_fire": True,
+                        },
+                    )
+                )
         return tuple(actions)
 
     def apply_action(
@@ -2316,6 +2393,7 @@ class WeaponCardAdapter(BasicCardAdapter):
         self._attack_range = weapon_attack_ranges()[card_key]
 
     def rule_spec(self) -> dict[str, object]:
+        skill_status = WEAPON_SKILL_STATUS[self.card_key]
         return {
             "card_key": self.card_key,
             "card_name": self.card_name,
@@ -2325,8 +2403,12 @@ class WeaponCardAdapter(BasicCardAdapter):
             "target_filter": "self_equip_weapon_slot",
             "equipment_slot": "weapon",
             "attack_range": self._attack_range,
-            "skill_status": "partial",
-            "skill_effect": "not_implemented_fail_closed",
+            "skill_status": skill_status.lower(),
+            "skill_effect": (
+                "implemented_production_semantics"
+                if skill_status == "COMPLETE"
+                else "not_implemented_fail_closed"
+            ),
             "movement_lifecycle": "hand->processing->weapon_slot",
             "replacement": "old_weapon_atomic_to_discard",
             "adapter_version": self.adapter_version,
@@ -2471,9 +2553,17 @@ class ArmorCardAdapter(BasicCardAdapter):
                 return ()
             if context.actor_id != runtime.pending_slash.target_id:
                 return ()
-            response_to_card_key = state.cards_by_id[
-                runtime.pending_slash.slash_instance_id
-            ].card_key
+            # CP-04P：青釭剑“令其防具无效（armor invalid）”抑制八卦阵的响应判定发动；
+            # 仅本次【杀】结算内有效（pending_slash 快照）。
+            if runtime.pending_slash.ignore_armor:
+                return ()
+            response_to_card_key = (
+                "sgs_basic_sha"
+                if runtime.pending_slash.virtual
+                else state.cards_by_id[
+                    runtime.pending_slash.slash_instance_id
+                ].card_key
+            )
             window_id = runtime.response_window_id
         elif phase.value == "wanjian_response":
             group = runtime.pending_group_trick

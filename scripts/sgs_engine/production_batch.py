@@ -57,6 +57,7 @@ from .events import (
 from .model import (
     DISCARD_PILE,
     DRAW_PILE,
+    EQUIPMENT_SLOTS,
     PROCESSING_ZONE,
     REVEALED_ZONE,
     CardInstance,
@@ -84,6 +85,7 @@ from .production_cards import (
     SLASH_CARD_KEYS,
     actual_distance,
     check_weapon_skill_gate,
+    equipped_weapon_key,
     hand_limit_of,
     has_target_zone_cards,
     is_valid_shunshou_target,
@@ -114,6 +116,10 @@ class ProductionPhase(str, Enum):
     NANMAN_RESPONSE = "nanman_response"
     WANJIAN_RESPONSE = "wanjian_response"
     WUGU_PICK = "wugu_pick"
+    WEAPON_AFTER_DAMAGE = "weapon_after_damage"
+    WEAPON_SLASH_CHOICE = "weapon_slash_choice"
+    WEAPON_DISCARD_TWO = "weapon_discard_two"
+    HANBING_DISCARD = "hanbing_discard"
     DYING_RESCUE = "dying_rescue"
     DISCARD = "discard"
     END = "end"
@@ -136,6 +142,10 @@ BATCH_PHASES: tuple[ProductionPhase, ...] = (
     ProductionPhase.NANMAN_RESPONSE,
     ProductionPhase.WANJIAN_RESPONSE,
     ProductionPhase.WUGU_PICK,
+    ProductionPhase.WEAPON_AFTER_DAMAGE,
+    ProductionPhase.WEAPON_SLASH_CHOICE,
+    ProductionPhase.WEAPON_DISCARD_TWO,
+    ProductionPhase.HANBING_DISCARD,
     ProductionPhase.DYING_RESCUE,
     ProductionPhase.DISCARD,
     ProductionPhase.END,
@@ -171,6 +181,19 @@ class _PendingSlash:
     target_id: str
     slash_instance_id: str
     boosted: bool
+    # CP-04P 武器技能快照：青釭剑本次杀令目标防具无效（armor invalid）、
+    # 古锭刀本次杀伤害+1。快照在“使用【杀】指定一个目标后”建立并持续至该次
+    # 杀结算结束（Knowledge 7.2/7.5：效果绑定该次【杀】结算生命周期）。
+    ignore_armor: bool = False
+    # CP-04P 朱雀羽扇：普通【杀】完成目标指定后可选转为【火杀】（7.10）。
+    fire_converted: bool = False
+    # CP-04P 丈八蛇矛（7.8 当前确认）：两张手牌当作普通【杀】使用或打出。
+    # 虚拟杀不是新的实体卡牌：不进入 state.cards / zones，牌守恒继续针对
+    # 实体牌成立；两张实体材料按正式规则进入弃牌堆。virtual_id 为确定性
+    # 合成标识（回合＋两张材料），可被 replay / strict reexecute / events /
+    # player_visible 正确表示。
+    virtual: bool = False
+    material_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -349,6 +372,83 @@ class _PendingChainDamage:
 
 
 @dataclass(frozen=True, slots=True)
+class _PendingWeaponChoice:
+    """CP-04P 武器触发选择窗口挂起状态（当前用于麒麟弓伤害后弃坐骑）。"""
+
+    weapon_key: str
+    kind: str
+    attacker_id: str
+    target_id: str
+    slash_instance_id: str
+    damage_event_id: str | None
+    window_id: str
+    # 伤害后待恢复的原始结算参数（濒死检查／传导／根牌完成）
+    damage_amount: int
+    damage_type: str
+    card_key: str
+    card_user: str | None
+    source_id: str | None
+    kill_credit: str | None
+    resolved_reason: str
+    death_reason: str
+    rescue_reason: str
+    defer_root_finish: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingSlashChoice:
+    """CP-04P 被闪后/伤害前武器选择窗口（贯石斧强制命中、寒冰剑防止伤害）。"""
+
+    weapon_key: str
+    kind: str  # guanshifu_force_hit | hanbing_prevent
+    attacker_id: str
+    target_id: str
+    window_id: str
+    pending_slash: _PendingSlash
+    # 青龙偃月刀继续使用【杀】的隐藏手牌句柄快照（仅 kind=qinglong_continue）
+    handles: Mapping[str, str] = MappingProxyType({})
+    snapshot_digest: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingDiscardTwo:
+    """CP-04P 弃2张窗口（贯石斧弃自己手牌+装备、寒冰剑弃目标手牌+装备）。"""
+
+    chooser_id: str
+    cards_owner_id: str
+    source_kind: str  # guanshifu_force_hit（寒冰剑改用独立逐张弃置状态机）
+    window_id: str
+    selected_ids: tuple[str, ...] = ()
+    selected_zones: Mapping[str, str] = MappingProxyType({})
+    handles: Mapping[str, str] = MappingProxyType({})
+    snapshot_digest: str | None = None
+    # 贯石斧自身不能作为发动代价（USER_CONFIRMED_MOBILE_RULE，2026-08-08
+    # 用户移动版实测确认）：窗口打开时记录当前提供技能的贯石斧实体，
+    # 枚举、选择与提交三个层面对其一致排除。
+    excluded_instance_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingHanbingDiscard:
+    """CP-04P 寒冰剑逐张弃置状态（2026-08-08 用户移动版实测确认）。
+
+    寒冰剑“弃置目标2张牌”是一张一张顺序弃置：防止伤害后进入第一次
+    弃牌选择，选择并正式弃置第1张牌；第1张离区及其状态变化（含装备
+    离区钩子）完成后，根据此刻最新权威状态重新枚举第2张可弃牌，再
+    选择并正式弃置第2张。两次弃置是两个连续的正式弃置步骤，各自独立
+    enumerate→validate→apply，第二次选择不得使用第一次弃置前的旧
+    zone快照；与贯石斧“一次选择两张→一次批量弃置代价”不是同一种
+    正式结算状态机。"""
+
+    attacker_id: str
+    target_id: str
+    window_id: str
+    step: int  # 1 或 2
+    handles: Mapping[str, str] = MappingProxyType({})
+    snapshot_digest: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class _BatchRuntime:
     current_player_id: str
     turn_number: int = 1
@@ -361,6 +461,9 @@ class _BatchRuntime:
     skipped_phases: Mapping[str, str] = MappingProxyType({})
     phase_skip_reasons: Mapping[str, str] = MappingProxyType({})
     defer_damage_card_finish: bool = False
+    # CP-04P 贯石斧：强制命中时【杀】本体已因【闪】完成结算进入弃牌堆，
+    # 伤害管线不再重复 finish；该标记在结算收尾路径统一跳过。
+    damage_card_already_finished: bool = False
     wine_buff_owner_id: str | None = None
     wine_buff_used_this_play_phase: bool = False
     pending_slash: _PendingSlash | None = None
@@ -404,6 +507,10 @@ class _BatchRuntime:
     discard_phase_selected_ids: tuple[str, ...] = ()
     discard_phase_handles: Mapping[str, str] = MappingProxyType({})
     discard_phase_snapshot_digest: str | None = None
+    pending_weapon_choice: _PendingWeaponChoice | None = None
+    pending_slash_choice: _PendingSlashChoice | None = None
+    pending_discard_two: _PendingDiscardTwo | None = None
+    pending_hanbing_discard: _PendingHanbingDiscard | None = None
 
     def audit_value(self) -> dict[str, object]:
         pending = None
@@ -526,6 +633,23 @@ class _BatchRuntime:
             "discard_phase_snapshot_digest": (
                 self.discard_phase_snapshot_digest
             ),
+            "pending_weapon_choice": (
+                None
+                if self.pending_weapon_choice is None
+                else {
+                    "weapon_key": self.pending_weapon_choice.weapon_key,
+                    "kind": self.pending_weapon_choice.kind,
+                    "attacker_id": self.pending_weapon_choice.attacker_id,
+                    "target_id": self.pending_weapon_choice.target_id,
+                    "slash_instance_id": (
+                        self.pending_weapon_choice.slash_instance_id
+                    ),
+                    "damage_event_id": (
+                        self.pending_weapon_choice.damage_event_id
+                    ),
+                    "window_id": self.pending_weapon_choice.window_id,
+                }
+            ),
         }
 
     def _pending_borrowed_sword_value(
@@ -636,6 +760,199 @@ def _zone_payload(zone: ZoneRef) -> dict[str, object]:
 
 def _card_key(state: GameState, instance_id: str) -> str:
     return state.cards_by_id[instance_id].card_key
+
+
+ZHANGBA_MATERIAL_HANDLE_PREFIX = "zb_"
+ZHANGBA_MATERIAL_HANDLE_HEX_CHARS = 32
+
+
+def _zhangba_material_message(
+    session_id: str,
+    window_id: str,
+    actor_id: str,
+    snapshot_digest: str,
+    material_ids: tuple[str, str],
+) -> str:
+    """构造丈八蛇矛材料对句柄的HMAC消息。
+
+    消息绑定会话标识、选择窗口、材料所属角色、当前手牌快照摘要与两张
+    材料实体；保密性完全来自会话级随机秘密。动作负载只携带句柄，不携带
+    材料实体ID，避免在使用前泄露隐藏手牌。"""
+
+    return canonical_json(
+        {
+            "session_id": session_id,
+            "zhangba_material_window": window_id,
+            "actor_id": actor_id,
+            "hand_snapshot_sha256": snapshot_digest,
+            "material_a": material_ids[0],
+            "material_b": material_ids[1],
+            "execution_context": "production_basic_cards_batch:zhangba_material",
+        }
+    )
+
+
+def _zhangba_material_handle(
+    session_id: str,
+    session_secret: bytes,
+    window_id: str,
+    actor_id: str,
+    snapshot_digest: str,
+    material_ids: tuple[str, str],
+) -> str:
+    """生成绑定当前丈八材料对的不透明句柄。"""
+
+    # UNREACHABLE while zhangba PARTIAL/fail-closed（VIRTUAL_CARD_SUBCARD_
+    # LIFECYCLE_RULE_GAP）：仅由丈八虚拟杀枚举/apply路径调用，丈八门禁
+    # 失败关闭后不可达；不得被其他路径当作已证明正式生产能力使用。
+
+    digest = hmac.new(
+        session_secret,
+        _zhangba_material_message(
+            session_id,
+            window_id,
+            actor_id,
+            snapshot_digest,
+            material_ids,
+        ).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return ZHANGBA_MATERIAL_HANDLE_PREFIX + digest[:ZHANGBA_MATERIAL_HANDLE_HEX_CHARS]
+
+
+def _resolve_zhangba_material_handle(
+    session_id: str,
+    session_secret: bytes,
+    state: GameState,
+    window_id: str,
+    actor_id: str,
+    snapshot_digest: str | None,
+    snapshot_handles: Mapping[str, tuple[str, str]],
+    handle: object,
+) -> tuple[str, str] | None:
+    """把丈八材料句柄解析为窗口快照中的真实材料对；任何绑定不符返回None。"""
+
+    # UNREACHABLE while zhangba PARTIAL/fail-closed：旧快照解析实现，
+    # 当前无调用点（apply 使用 direct 重算版本），待丈八恢复时清理或复用。
+
+    if snapshot_digest is None or not isinstance(handle, str):
+        return None
+    material_ids = snapshot_handles.get(handle)
+    if material_ids is None:
+        return None
+    expected = _zhangba_material_handle(
+        session_id,
+        session_secret,
+        window_id,
+        actor_id,
+        snapshot_digest,
+        material_ids,
+    )
+    if not hmac.compare_digest(expected, handle):
+        return None
+    for instance_id in material_ids:
+        if state.location_of(instance_id) != ZoneRef.hand(actor_id):
+            return None
+    current_digest = sha256_value(
+        tuple(state.card_ids_in(ZoneRef.hand(actor_id)))
+    )
+    if not hmac.compare_digest(current_digest, snapshot_digest):
+        return None
+    return material_ids
+
+
+def _resolve_zhangba_handle_direct(
+    session_id: str,
+    session_secret: bytes,
+    state: GameState,
+    window_id: str,
+    actor_id: str,
+    handle: object,
+) -> tuple[str, str] | None:
+    """把丈八材料句柄与当前权威手牌逐对重算比对（服务端direct解析）。
+
+    枚举不修改运行时（合法动作枚举必须无副作用），因此 apply 时直接对
+    当前手牌的全部两两组合重算HMAC句柄并比对提交句柄；句柄绑定当前
+    手牌摘要，任何手牌变化都会使旧句柄失效。"""
+
+    # UNREACHABLE while zhangba PARTIAL/fail-closed：仅由丈八虚拟杀
+    # apply 路径调用。
+
+    if not isinstance(handle, str):
+        return None
+    hand_ids = tuple(state.card_ids_in(ZoneRef.hand(actor_id)))
+    snapshot_digest = sha256_value(hand_ids)
+    for index, first in enumerate(hand_ids):
+        for second in hand_ids[index + 1 :]:
+            material_ids = (first, second)
+            expected = _zhangba_material_handle(
+                session_id,
+                session_secret,
+                window_id,
+                actor_id,
+                snapshot_digest,
+                material_ids,
+            )
+            if hmac.compare_digest(expected, handle):
+                return material_ids
+    return None
+
+
+def _zhangba_virtual_card(
+    state: GameState,
+    instance_id: str,
+    material_ids: tuple[str, ...],
+) -> CardInstance:
+    """返回丈八虚拟【杀】的规则身份对象。
+
+    虚拟杀不是新的实体卡牌：不进入 state.cards / zones，牌守恒继续针对
+    实体牌成立。颜色按 Knowledge 7.8：两张材料均为红色→红、均为黑色→黑、
+    一红一黑→无色；转化出的【杀】没有花色和点数。"""
+
+    # UNREACHABLE while zhangba PARTIAL/fail-closed：仅由丈八虚拟杀路径调用。
+
+    if len(material_ids) != 2:
+        raise ProductionBatchError("丈八虚拟杀必须恰好由两张材料组成")
+    colors = tuple(
+        state.cards_by_id[instance].color
+        for instance in material_ids
+    )
+    if colors[0] == colors[1] == "红":
+        color = "红"
+    elif colors[0] == colors[1] == "黑":
+        color = "黑"
+    else:
+        color = "无"
+    return CardInstance(
+        instance_id=instance_id,
+        deck_id="virtual",
+        card_key="sgs_basic_sha",
+        card_name="杀",
+        card_type="基本牌",
+        suit="无",
+        color=color,
+        rank="无",
+        card_variant="zhangba_virtual",
+    )
+
+
+def _virtual_slash_card(
+    state: GameState, runtime: "_BatchRuntime", instance_id: str
+) -> CardInstance | None:
+    """返回当前挂起虚拟【杀】（丈八蛇矛）的规则身份对象；非虚拟返回None。"""
+
+    # UNREACHABLE while zhangba PARTIAL/fail-closed：_slash_card 的虚拟
+    # 分支仅在 pending_slash.virtual=True 时可达，丈八门禁关闭后不可达；
+    # 实体牌路径直接查 state.cards_by_id，行为与撤回前完全一致。
+
+    pending = runtime.pending_slash
+    if (
+        pending is None
+        or not pending.virtual
+        or pending.slash_instance_id != instance_id
+    ):
+        return None
+    return _zhangba_virtual_card(state, instance_id, pending.material_ids)
 
 
 ZONE_CHOICE_TRICK_KEYS: tuple[str, ...] = (
@@ -1200,7 +1517,7 @@ class ArmorDamageResolution:
     ``final_amount`` 是经过全部已实现防具修正后的最终实际伤害（非负）；
     ``modifiers`` 按确定顺序记录实际生效的修正原因；``prevented`` 表示
     最终伤害为0（本批四种防具不会自然归零，该分支由统一接口保留给未来
-    防止类效果）；``armor_ignored`` 表示本次效果处于“无视防具”上下文，
+    防止类效果）；``armor_ignored`` 表示本次效果处于目标防具无效（armor invalid）上下文，
     全部防具修正被抑制。
     """
 
@@ -1233,7 +1550,7 @@ def resolve_armor_damage(
     """统一防具伤害修正：藤甲火属性伤害+1，再按白银狮子限制（2点或更多
     改为1点）。修正顺序确定、可序列化、可回放；最终伤害不得为负。
 
-    ``ignore_armor=True`` 表示当前效果处于“无视防具”上下文（未来武器
+    ``ignore_armor=True`` 表示当前效果处于目标防具无效（armor invalid）上下文（代码历史字段名保留；未来武器
     技能接入的统一入口）；此时全部防具修正被抑制。本批四种防具不会把
     伤害归零，``prevented`` 分支由统一接口保留。"""
 
@@ -1248,7 +1565,7 @@ def resolve_armor_damage(
     if declared_amount < 0:
         raise ValueError("声明伤害不能为负数")
     if not isinstance(ignore_armor, bool):
-        raise TypeError("无视防具上下文必须是布尔值")
+        raise TypeError("防具无效上下文（ignore_armor）必须是布尔值")
 
     modifiers: list[str] = []
     final_amount = declared_amount
@@ -1286,13 +1603,15 @@ def armor_invalidates_effect(
     card_instance_id: str,
     card_key: str,
     ignore_armor: bool = False,
+    card_color: str | None = None,
 ) -> tuple[str, str] | None:
     """统一防具“牌无效”判断：返回（无效原因，防具实体ID）或None。
 
     仁王盾：黑色“杀”（普通／火／雷【杀】按实体牌颜色判断）对装备者无效；
     藤甲：普通【杀】、【南蛮入侵】、【万箭齐发】对装备者无效。无色牌与
-    无视防具上下文不触发。返回原因用于在响应窗口前产生统一取消事件，
-    不在【杀】代码中静默return。"""
+    防具无效（armor invalid）上下文不触发。``card_color`` 供虚拟牌（丈八蛇矛转化杀）提供
+    规则颜色；未提供时按实体牌颜色判断。返回原因用于在响应窗口前产生
+    统一取消事件，不在【杀】代码中静默return。"""
 
     if not isinstance(state, GameState):
         raise TypeError("统一防具无效判断必须接收GameState")
@@ -1311,8 +1630,9 @@ def armor_invalidates_effect(
         return None
     armor_key = state.cards_by_id[armor_id].card_key
     if armor_key == "sgs_armor_renwangdun" and card_key in SLASH_CARD_KEYS:
-        card = state.cards_by_id[card_instance_id]
-        if card.color == "黑":
+        if card_color is None:
+            card_color = state.cards_by_id[card_instance_id].color
+        if card_color == "黑":
             return "renwangdun_black_slash", armor_id
         return None
     if armor_key == "sgs_armor_tengjia" and card_key in (
@@ -1342,6 +1662,25 @@ def _chain_trigger_conditions(
     if isinstance(actual_damage, bool) or not isinstance(actual_damage, int):
         raise TypeError("实际伤害必须是整数")
     return actual_damage > 0
+
+
+def _weapon_damage_bonus_at_damage(
+    state: GameState, attacker_id: str, target_id: str
+) -> int:
+    """古锭刀“造成伤害时”判定（USER_CONFIRMED_MOBILE_RULE＋
+    IN_GAME_CARD_TEXT_CONFIRMED，2026-08-08 用户移动版游戏内文本与实测）。
+
+    游戏内文本：“锁定技，当你使用【杀】对目标角色造成伤害时，若该角色
+    没有手牌，则此伤害+1。”判定时机是造成伤害时，不是使用/指定目标时；
+    必须在此刻读取目标当前权威 hand zone——目标从被指定到伤害发生之间的
+    手牌变化必须影响最终判定，不得使用指定目标时保存的旧 hand_count。"""
+
+    if (
+        equipped_weapon_key(state, attacker_id) == "sgs_weapon_gudingdao"
+        and not state.card_ids_in(ZoneRef.hand(target_id))
+    ):
+        return 1
+    return 0
 
 
 def _ordered_chain_candidate_ids(
@@ -1832,6 +2171,22 @@ class ProductionBasicCardBatch:
             if runtime.pending_fire_attack is None:
                 raise ProductionBatchError("【火攻】弃牌阶段缺少结算状态")
             return runtime.pending_fire_attack.user_id
+        if runtime.phase is ProductionPhase.WEAPON_AFTER_DAMAGE:
+            if runtime.pending_weapon_choice is None:
+                raise ProductionBatchError("武器触发选择阶段缺少挂起状态")
+            return runtime.pending_weapon_choice.attacker_id
+        if runtime.phase is ProductionPhase.WEAPON_SLASH_CHOICE:
+            if runtime.pending_slash_choice is None:
+                raise ProductionBatchError("被闪后/伤害前武器选择缺少挂起状态")
+            return runtime.pending_slash_choice.attacker_id
+        if runtime.phase is ProductionPhase.WEAPON_DISCARD_TWO:
+            if runtime.pending_discard_two is None:
+                raise ProductionBatchError("弃2张窗口缺少挂起状态")
+            return runtime.pending_discard_two.chooser_id
+        if runtime.phase is ProductionPhase.HANBING_DISCARD:
+            if runtime.pending_hanbing_discard is None:
+                raise ProductionBatchError("寒冰剑逐张弃置窗口缺少挂起状态")
+            return runtime.pending_hanbing_discard.attacker_id
         if runtime.phase is ProductionPhase.WUGU_PICK:
             if runtime.pending_wugu is None:
                 raise ProductionBatchError("五谷选牌阶段缺少选牌状态")
@@ -2005,6 +2360,19 @@ class ProductionBasicCardBatch:
                 ),
                 "discard_phase_selected_ids": list(
                     runtime.discard_phase_selected_ids
+                ),
+                "pending_weapon_choice": (
+                    None
+                    if runtime.pending_weapon_choice is None
+                    else {
+                        "weapon_key": runtime.pending_weapon_choice.weapon_key,
+                        "kind": runtime.pending_weapon_choice.kind,
+                        "attacker_id": (
+                            runtime.pending_weapon_choice.attacker_id
+                        ),
+                        "target_id": runtime.pending_weapon_choice.target_id,
+                        "window_id": runtime.pending_weapon_choice.window_id,
+                    }
                 ),
                 "pending_judgment": (
                     None
@@ -2182,6 +2550,52 @@ class ProductionBasicCardBatch:
         elif self.phase is ProductionPhase.PLAY:
             for adapter in self._formal_registry.adapters.values():
                 actions.extend(adapter.enumerate_legal_actions(state, context))
+            # CP-04P 丈八蛇矛（7.8 当前确认）：两张手牌当作普通【杀】使用。
+            # 虚拟杀不是新的实体卡牌：action 的 card_instance_id 为确定性
+            # 合成虚拟标识（回合＋两张材料），材料对只通过不透明HMAC句柄
+            # 暴露；出牌阶段使用虚拟杀消耗正常【杀】额度。
+            if (
+                equipped_weapon_key(state, actor) == "sgs_weapon_zhangbashemao"
+                and self._runtime.slash_used_counts.get(actor, 0) == 0
+            ):
+                hand_ids = tuple(state.card_ids_in(ZoneRef.hand(actor)))
+                if len(hand_ids) >= 2:
+                    window_id = (
+                        f"zhangba:{self._runtime.turn_number}:{actor}"
+                    )
+                    snapshot_digest = sha256_value(hand_ids)
+                    for index, first in enumerate(hand_ids):
+                        for second in hand_ids[index + 1 :]:
+                            material_ids = (first, second)
+                            handle = _zhangba_material_handle(
+                                self._session_id,
+                                self._session_secret,
+                                window_id,
+                                actor,
+                                snapshot_digest,
+                                material_ids,
+                            )
+                            virtual_id = (
+                                f"virtual:zhangba:"
+                                f"{self._runtime.turn_number}:"
+                                f"{first}:{second}"
+                            )
+                            actions.append(
+                                LegalAction(
+                                    action_type=ActionType.USE_CARD,
+                                    actor_id=actor,
+                                    card_instance_id=virtual_id,
+                                    target_ids=(self.opponent_of(actor),),
+                                    payload={
+                                        "operation": "use_slash",
+                                        "card_key": "sgs_basic_sha",
+                                        "card_name": "杀",
+                                        "zhangba_virtual": True,
+                                        "handle": handle,
+                                        "window_id": window_id,
+                                    },
+                                )
+                            )
             actions.append(
                 LegalAction(
                     action_type=ActionType.PASS,
@@ -2284,6 +2698,314 @@ class ProductionBasicCardBatch:
                                 **base,
                                 "operation": "discard_phase_submit",
                                 "selected_count": len(selected_set),
+                            },
+                        )
+                    )
+        elif self.phase is ProductionPhase.WEAPON_AFTER_DAMAGE:
+            runtime = self._runtime
+            choice = runtime.pending_weapon_choice
+            if choice is None:
+                raise ProductionBatchError("武器触发选择阶段缺少挂起状态")
+            if context.actor_id != choice.attacker_id:
+                return ()
+            if choice.kind == "qilingong_discard_mount":
+                for slot in ("attack_horse", "defense_horse"):
+                    zone = ZoneRef.equipment(choice.target_id, slot)
+                    for instance_id in state.card_ids_in(zone):
+                        actions.append(
+                            LegalAction(
+                                action_type=ActionType.MOVE_CARD,
+                                actor_id=context.actor_id,
+                                card_instance_id=instance_id,
+                                target_ids=(choice.target_id,),
+                                payload={
+                                    "operation": "weapon_discard_mount",
+                                    "card_key": _card_key(state, instance_id),
+                                    "window_id": choice.window_id,
+                                },
+                            )
+                        )
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.PASS,
+                        actor_id=context.actor_id,
+                        payload={
+                            "operation": "pass_weapon_choice",
+                            "window_id": choice.window_id,
+                        },
+                    )
+                )
+        elif self.phase is ProductionPhase.WEAPON_SLASH_CHOICE:
+            runtime = self._runtime
+            choice = runtime.pending_slash_choice
+            if choice is None:
+                raise ProductionBatchError("被闪后/伤害前武器选择缺少挂起状态")
+            if context.actor_id != choice.attacker_id:
+                return ()
+            base = {"window_id": choice.window_id}
+            if choice.kind == "guanshifu_force_hit":
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.PASS,
+                        actor_id=context.actor_id,
+                        target_ids=(choice.target_id,),
+                        payload={**base, "operation": "weapon_force_hit"},
+                    )
+                )
+            elif choice.kind == "hanbing_prevent":
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.PASS,
+                        actor_id=context.actor_id,
+                        target_ids=(choice.target_id,),
+                        payload={
+                            **base,
+                            "operation": "weapon_prevent_damage",
+                        },
+                    )
+                )
+            elif choice.kind == "qinglong_continue":
+                # CP-04P 青龙偃月刀（7.6 用户整理解释）：被【闪】响应后可
+                # 继续对该目标使用一张【杀】。候选杀只接受隐藏手牌句柄，
+                # 客户端不得提交裸实体ID；攻击范围与距离在窗口打开时已按
+                # 原目标校验，实际使用前在应用层再次动态重检。
+                if (
+                    choice.snapshot_digest is None
+                    or sha256_value(
+                        tuple(
+                            state.card_ids_in(
+                                ZoneRef.hand(choice.attacker_id)
+                            )
+                        )
+                    )
+                    != choice.snapshot_digest
+                ):
+                    return ()
+                state_hash = state_sha256(canonical_state_snapshot(state))
+                for handle in choice.handles:
+                    actions.append(
+                        LegalAction(
+                            action_type=ActionType.RESPOND,
+                            actor_id=context.actor_id,
+                            target_ids=(choice.target_id,),
+                            payload={
+                                **base,
+                                "operation": "qinglong_use_slash",
+                                "handle": handle,
+                                "state_hash": state_hash,
+                            },
+                        )
+                    )
+            actions.append(
+                LegalAction(
+                    action_type=ActionType.PASS,
+                    actor_id=context.actor_id,
+                    payload={**base, "operation": "pass_weapon_choice"},
+                )
+            )
+        elif self.phase is ProductionPhase.WEAPON_DISCARD_TWO:
+            runtime = self._runtime
+            discard_two = runtime.pending_discard_two
+            if discard_two is None:
+                raise ProductionBatchError("弃2张窗口缺少挂起状态")
+            if context.actor_id != discard_two.chooser_id:
+                return ()
+            if (
+                discard_two.snapshot_digest is None
+                or sha256_value(
+                    tuple(
+                        state.card_ids_in(
+                            ZoneRef.hand(discard_two.cards_owner_id)
+                        )
+                    )
+                )
+                != discard_two.snapshot_digest
+            ):
+                return ()
+            state_hash = state_sha256(canonical_state_snapshot(state))
+            selected = set(discard_two.selected_ids)
+            base = {
+                "window_id": discard_two.window_id,
+                "state_hash": state_hash,
+            }
+            for instance_id in state.card_ids_in(
+                ZoneRef.hand(discard_two.cards_owner_id)
+            ):
+                if instance_id in selected:
+                    continue
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.CHOOSE_OPTION,
+                        actor_id=context.actor_id,
+                        card_instance_id=instance_id,
+                        target_ids=(discard_two.cards_owner_id,),
+                        payload={
+                            **base,
+                            "operation": "select_discard_two",
+                            "handle": _hand_choice_handle(
+                                self._session_id,
+                                self._session_secret,
+                                discard_two.window_id,
+                                discard_two.cards_owner_id,
+                                "hand",
+                                discard_two.snapshot_digest,
+                                instance_id,
+                            ),
+                        },
+                    )
+                )
+            for slot in EQUIPMENT_SLOTS:
+                for instance_id in state.card_ids_in(
+                    ZoneRef.equipment(discard_two.cards_owner_id, slot)
+                ):
+                    if instance_id in selected:
+                        continue
+                    if instance_id == discard_two.excluded_instance_id:
+                        # 贯石斧自身不能作为发动代价（USER_CONFIRMED_MOBILE_RULE，
+                        # 2026-08-08 用户移动版实测确认）：当前正在发动技能的
+                        # 【贯石斧】实体必须排除在候选集合之外；通用“牌=手牌区＋
+                        # 装备区”区域规则不变，这只是贯石斧自身的特殊排除。
+                        continue
+                    actions.append(
+                        LegalAction(
+                            action_type=ActionType.MOVE_CARD,
+                            actor_id=context.actor_id,
+                            card_instance_id=instance_id,
+                            target_ids=(discard_two.cards_owner_id,),
+                            payload={
+                                **base,
+                                "operation": "select_discard_two",
+                                "zone": f"equipment:{slot}",
+                                "card_key": _card_key(state, instance_id),
+                            },
+                        )
+                    )
+            for instance_id in discard_two.selected_ids:
+                zone = discard_two.selected_zones.get(instance_id, "hand")
+                if zone != "hand":
+                    actions.append(
+                        LegalAction(
+                            action_type=ActionType.MOVE_CARD,
+                            actor_id=context.actor_id,
+                            card_instance_id=instance_id,
+                            target_ids=(discard_two.cards_owner_id,),
+                            payload={
+                                **base,
+                                "operation": "unselect_discard_two",
+                                "zone": zone,
+                                "card_key": _card_key(state, instance_id),
+                            },
+                        )
+                    )
+                    continue
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.CHOOSE_OPTION,
+                        actor_id=context.actor_id,
+                        card_instance_id=instance_id,
+                        target_ids=(discard_two.cards_owner_id,),
+                        payload={
+                            **base,
+                            "operation": "unselect_discard_two",
+                            "handle": _hand_choice_handle(
+                                self._session_id,
+                                self._session_secret,
+                                discard_two.window_id,
+                                discard_two.cards_owner_id,
+                                "hand",
+                                discard_two.snapshot_digest,
+                                instance_id,
+                            ),
+                        },
+                    )
+                )
+            equipment_count = sum(
+                len(
+                    state.card_ids_in(
+                        ZoneRef.equipment(discard_two.cards_owner_id, slot)
+                    )
+                )
+                for slot in EQUIPMENT_SLOTS
+            )
+            required = min(
+                2,
+                len(state.card_ids_in(ZoneRef.hand(discard_two.cards_owner_id)))
+                + equipment_count,
+            )
+            if len(selected) == required:
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.PASS,
+                        actor_id=context.actor_id,
+                        target_ids=(discard_two.cards_owner_id,),
+                        payload={
+                            **base,
+                            "operation": "discard_two_submit",
+                        },
+                    )
+                )
+        elif self.phase is ProductionPhase.HANBING_DISCARD:
+            runtime = self._runtime
+            hanbing = runtime.pending_hanbing_discard
+            if hanbing is None:
+                raise ProductionBatchError("寒冰剑逐张弃置窗口缺少挂起状态")
+            if context.actor_id != hanbing.attacker_id:
+                return ()
+            if (
+                hanbing.snapshot_digest is None
+                or sha256_value(
+                    tuple(
+                        state.card_ids_in(ZoneRef.hand(hanbing.target_id))
+                    )
+                )
+                != hanbing.snapshot_digest
+            ):
+                return ()
+            state_hash = state_sha256(canonical_state_snapshot(state))
+            base = {
+                "window_id": hanbing.window_id,
+                "state_hash": state_hash,
+                "step": hanbing.step,
+            }
+            for instance_id in state.card_ids_in(
+                ZoneRef.hand(hanbing.target_id)
+            ):
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.CHOOSE_OPTION,
+                        actor_id=context.actor_id,
+                        card_instance_id=instance_id,
+                        target_ids=(hanbing.target_id,),
+                        payload={
+                            **base,
+                            "operation": "hanbing_discard_card",
+                            "handle": _hand_choice_handle(
+                                self._session_id,
+                                self._session_secret,
+                                hanbing.window_id,
+                                hanbing.target_id,
+                                "hand",
+                                hanbing.snapshot_digest,
+                                instance_id,
+                            ),
+                        },
+                    )
+                )
+            for slot in EQUIPMENT_SLOTS:
+                for instance_id in state.card_ids_in(
+                    ZoneRef.equipment(hanbing.target_id, slot)
+                ):
+                    actions.append(
+                        LegalAction(
+                            action_type=ActionType.MOVE_CARD,
+                            actor_id=context.actor_id,
+                            card_instance_id=instance_id,
+                            target_ids=(hanbing.target_id,),
+                            payload={
+                                **base,
+                                "operation": "hanbing_discard_card",
+                                "zone": f"equipment:{slot}",
+                                "card_key": _card_key(state, instance_id),
                             },
                         )
                     )
@@ -2521,6 +3243,42 @@ class ProductionBasicCardBatch:
                 return self.apply_discard_phase_submit(state, context, action)
             raise InvalidActionError("弃牌阶段只支持选择与提交批量弃牌动作")
 
+        if self.phase is ProductionPhase.WEAPON_AFTER_DAMAGE:
+            if operation == "weapon_discard_mount":
+                return self.apply_weapon_discard_mount(state, context, action)
+            if operation == "pass_weapon_choice":
+                return self.apply_pass_weapon_choice(state, context, action)
+            raise InvalidActionError("武器触发选择阶段只支持弃坐骑或放弃")
+
+        if self.phase is ProductionPhase.WEAPON_SLASH_CHOICE:
+            if operation == "weapon_force_hit":
+                return self.apply_weapon_force_hit(state, context, action)
+            if operation == "weapon_prevent_damage":
+                return self.apply_weapon_prevent_damage(state, context, action)
+            if operation == "qinglong_use_slash":
+                return self.apply_qinglong_continue_slash(
+                    state, context, action
+                )
+            if operation == "pass_weapon_choice":
+                return self.apply_pass_weapon_slash_choice(
+                    state, context, action
+                )
+            raise InvalidActionError("被闪后/伤害前武器选择阶段只支持发动或放弃")
+
+        if self.phase is ProductionPhase.WEAPON_DISCARD_TWO:
+            if operation == "select_discard_two":
+                return self.apply_select_discard_two(state, context, action)
+            if operation == "unselect_discard_two":
+                return self.apply_unselect_discard_two(state, context, action)
+            if operation == "discard_two_submit":
+                return self.apply_discard_two_submit(state, context, action)
+            raise InvalidActionError("弃2张窗口只支持选择、取消与提交")
+
+        if self.phase is ProductionPhase.HANBING_DISCARD:
+            if operation == "hanbing_discard_card":
+                return self.apply_hanbing_discard_card(state, context, action)
+            raise InvalidActionError("寒冰剑逐张弃置窗口只支持选择并弃置一张牌")
+
         if self.phase is ProductionPhase.SLASH_RESPONSE:
             if operation == "play_dodge":
                 return self._formal_registry.adapter_for(
@@ -2655,7 +3413,11 @@ class ProductionBasicCardBatch:
     ) -> SlashAdapter:
         if action.card_instance_id is None:
             raise InvalidActionError("卡牌动作必须指定实体牌")
-        card_key = state.cards_by_id[action.card_instance_id].card_key
+        if str(action.card_instance_id).startswith("virtual:"):
+            # 丈八蛇矛虚拟杀：不是实体牌，卡牌键由动作负载提供。
+            card_key = str(action.payload.get("card_key", ""))
+        else:
+            card_key = state.cards_by_id[action.card_instance_id].card_key
         adapter = self._formal_registry.adapter_for(card_key)
         if not isinstance(adapter, SlashAdapter):
             raise InvalidActionError(
@@ -2751,6 +3513,11 @@ class ProductionBasicCardBatch:
             discard_phase_selected_ids=(),
             discard_phase_handles=MappingProxyType({}),
             discard_phase_snapshot_digest=None,
+            pending_weapon_choice=None,
+            pending_slash_choice=None,
+            pending_discard_two=None,
+            pending_hanbing_discard=None,
+            damage_card_already_finished=False,
         )
 
     # ------------------------------------------------------------------
@@ -2906,12 +3673,14 @@ class ProductionBasicCardBatch:
         rescue_reason: str,
         defer_root_finish: bool = False,
         ignore_armor: bool = False,
+        weapon_choice: tuple[str, str, int] | None = None,
+        card_already_finished: bool = False,
     ) -> tuple[GameState, _BatchRuntime]:
         """统一正式伤害管线：原始伤害、横置解除、传导根与濒死挂起。
 
         ``defer_root_finish`` 供闪电等根牌使用：根牌完成时点由
         ``_complete_root_resolution`` 控制（传导/濒死子结算完成后再弃置），
-        避免在传导开始前提前弃置本体。``ignore_armor`` 表示“无视防具”
+        避免在传导开始前提前弃置本体。``ignore_armor`` 表示目标防具无效（armor invalid）上下文，
         上下文（统一接口，本批无真实武器调用者），修正顺序由统一
         ``resolve_armor_damage`` 决定并进入事件审计。"""
 
@@ -2924,6 +3693,17 @@ class ProductionBasicCardBatch:
             ignore_armor=ignore_armor,
         )
         amount = resolution.final_amount
+        # CP-04P 青釭剑生命周期终点B（Knowledge 7.2.1 用户实测确认）：
+        # 进入伤害时，本次伤害结算应用完成即清除本次【杀】的防具无效
+        # 状态；后续濒死救援、麒麟弓弃坐骑等窗口不再受本次青釭剑影响，
+        # 目标防具恢复正常（清除后由后续正式效果弃置白银狮子可正常回复）。
+        if runtime.pending_slash is not None:
+            runtime = replace(
+                runtime,
+                pending_slash=replace(
+                    runtime.pending_slash, ignore_armor=False
+                ),
+            )
         if amount == 0:
             # 最终伤害为0：不扣减HP、不进入濒死、不触发传导；记录统一
             # 防止事件并按根牌完成出口收尾（不产生 damage 事件）。
@@ -2947,10 +3727,14 @@ class ProductionBasicCardBatch:
                 if runtime.pending_chain is not None:
                     return self._advance_chain(state, runtime)
                 return self._complete_root_resolution(state, runtime)
-            next_state, finish_event = self._finish_processing(
-                state, card_instance_id, resolved_reason
-            )
-            self._events.extend((finish_event,))
+            if not card_already_finished:
+                next_state, finish_event = self._finish_slash_processing(
+                    state, runtime, card_instance_id, resolved_reason
+                )
+                if finish_event is not None:
+                    self._events.extend((finish_event,))
+            else:
+                next_state = state
             if runtime.pending_chain is not None:
                 return self._advance_chain(next_state, runtime)
             return self._complete_root_resolution(next_state, runtime)
@@ -2973,7 +3757,82 @@ class ProductionBasicCardBatch:
             },
         )
         (damage_event,) = self._events.extend((damage_event,))
+        if weapon_choice is not None:
+            # CP-04P 麒麟弓：伤害已真实造成（HP已扣、damage事件已产生）后，
+            # 打开武器触发选择窗口；结算参数挂起，窗口关闭后由
+            # _continue_after_weapon_choice 恢复濒死检查／传导／根牌完成。
+            weapon_key, choice_target, amount_actual = weapon_choice
+            pending = _PendingWeaponChoice(
+                weapon_key=weapon_key,
+                kind="qilingong_discard_mount",
+                attacker_id=card_user or "",
+                target_id=choice_target,
+                slash_instance_id=card_instance_id,
+                damage_event_id=str(damage_event.sequence),
+                window_id=(
+                    f"weapon-after-damage:{runtime.turn_number}:"
+                    f"{card_instance_id}:{damage_event.sequence}"
+                ),
+                damage_amount=amount_actual,
+                damage_type=damage_type,
+                card_key=card_key,
+                card_user=card_user,
+                source_id=source_id,
+                kill_credit=kill_credit,
+                resolved_reason=resolved_reason,
+                death_reason=death_reason,
+                rescue_reason=rescue_reason,
+                defer_root_finish=defer_root_finish,
+            )
+            return next_state, replace(
+                runtime,
+                phase=ProductionPhase.WEAPON_AFTER_DAMAGE,
+                pending_weapon_choice=pending,
+            )
+        return self._settle_after_damage(
+            next_state,
+            runtime,
+            victim_id=victim_id,
+            card_instance_id=card_instance_id,
+            card_key=card_key,
+            card_user=card_user,
+            source_id=source_id,
+            kill_credit=kill_credit,
+            damage_type=damage_type,
+            amount=amount,
+            damage_event_sequence=damage_event.sequence,
+            resolved_reason=resolved_reason,
+            death_reason=death_reason,
+            rescue_reason=rescue_reason,
+            defer_root_finish=defer_root_finish,
+            card_already_finished=card_already_finished,
+        )
+
+    def _settle_after_damage(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        *,
+        victim_id: str,
+        card_instance_id: str,
+        card_key: str,
+        card_user: str | None,
+        source_id: str | None,
+        kill_credit: str | None,
+        damage_type: str,
+        amount: int,
+        damage_event_sequence: int | None,
+        resolved_reason: str,
+        death_reason: str,
+        rescue_reason: str,
+        defer_root_finish: bool,
+        card_already_finished: bool = False,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """伤害事件后的统一收尾：横置解除传导、濒死挂起、根牌完成。"""
+
+        next_state = state
         next_runtime = runtime
+        victim = next_state.players_by_id[victim_id]
         if _chain_trigger_conditions(damage_type, victim.chained, amount):
             next_state, next_runtime = self._begin_chain(
                 next_state,
@@ -2985,7 +3844,7 @@ class ProductionBasicCardBatch:
                 card_key=card_key,
                 card_user=card_user,
                 source_id=source_id,
-                root_damage_event_id=damage_event.sequence,
+                root_damage_event_id=damage_event_sequence,
             )
         runtime = next_runtime
         if next_state.players_by_id[victim_id].hp <= 0:
@@ -3021,19 +3880,170 @@ class ProductionBasicCardBatch:
                 pending_damage_rescue_reason=rescue_reason,
                 pending_damage_death_reason=death_reason,
                 defer_damage_card_finish=defer_root_finish,
+                damage_card_already_finished=(
+                    card_already_finished
+                    or (
+                        runtime.pending_slash is not None
+                        and runtime.pending_slash.virtual
+                        and runtime.pending_slash.slash_instance_id
+                        == card_instance_id
+                    )
+                ),
             )
         if defer_root_finish:
             # 根牌（闪电）完成时点由 _complete_root_resolution 控制
             if runtime.pending_chain is not None:
                 return self._advance_chain(next_state, runtime)
             return self._complete_root_resolution(next_state, runtime)
-        next_state, finish_event = self._finish_processing(
-            next_state, card_instance_id, resolved_reason
-        )
-        self._events.extend((finish_event,))
+        if not card_already_finished:
+            next_state, finish_event = self._finish_slash_processing(
+                next_state, runtime, card_instance_id, resolved_reason
+            )
+            if finish_event is not None:
+                self._events.extend((finish_event,))
         if runtime.pending_chain is not None:
             return self._advance_chain(next_state, runtime)
         return self._complete_root_resolution(next_state, runtime)
+
+    def apply_weapon_discard_mount(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+    ) -> GameState:
+        """CP-04P 麒麟弓：弃置目标装备区一张坐骑牌并恢复伤害后结算。"""
+
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.WEAPON_AFTER_DAMAGE:
+            raise InvalidActionError("只有武器触发选择阶段可以弃置坐骑")
+        choice = runtime.pending_weapon_choice
+        if choice is None or choice.kind != "qilingong_discard_mount":
+            raise InvalidActionError("当前没有可弃坐骑的麒麟弓触发窗口")
+        if context.actor_id != choice.attacker_id:
+            raise InvalidActionError("只有武器持有者可以发动麒麟弓")
+        if action.payload.get("window_id") != choice.window_id:
+            raise InvalidActionError("弃坐骑动作不属于当前武器触发窗口")
+        if action.card_instance_id is None:
+            raise InvalidActionError("麒麟弓必须指定目标装备区的一张坐骑牌")
+        if action.card_instance_id not in (
+            state.card_ids_in(
+                ZoneRef.equipment(choice.target_id, "attack_horse")
+            )
+            + state.card_ids_in(
+                ZoneRef.equipment(choice.target_id, "defense_horse")
+            )
+        ):
+            raise InvalidActionError("只能弃置目标装备区中的坐骑牌")
+        card_key = _card_key(state, action.card_instance_id)
+        next_state = state.move_card(action.card_instance_id, DISCARD_PILE)
+        self._events.extend(
+            (
+                GameEvent(
+                    event_type=EventType.CARD_MOVED,
+                    card_instance_id=action.card_instance_id,
+                    card_key=card_key,
+                    card_user=context.actor_id,
+                    payload={
+                        "source": _zone_payload(
+                            state.location_of(action.card_instance_id)
+                        ),
+                        "destination": _zone_payload(DISCARD_PILE),
+                        "reason": "qilingong_mount_discard",
+                        "window_id": choice.window_id,
+                    },
+                ),
+                GameEvent(
+                    event_type=EventType.CARD_LOST,
+                    card_instance_id=action.card_instance_id,
+                    card_key=card_key,
+                    target_ids=(choice.target_id,),
+                    payload={
+                        "reason": "qilingong_mount_discard",
+                        "source_zone": _zone_id(
+                            state.location_of(action.card_instance_id)
+                        ),
+                    },
+                ),
+                GameEvent(
+                    event_type=EventType.CARD_DISCARDED,
+                    card_instance_id=action.card_instance_id,
+                    card_key=card_key,
+                    card_user=context.actor_id,
+                    target_ids=(choice.target_id,),
+                    payload={
+                        "reason": "qilingong_mount_discard",
+                        "source_zone": _zone_id(
+                            state.location_of(action.card_instance_id)
+                        ),
+                    },
+                ),
+            )
+        )
+        next_state, next_runtime = self._continue_after_weapon_choice(
+            next_state, runtime
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def apply_pass_weapon_choice(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+    ) -> GameState:
+        """放弃武器触发选择并恢复伤害后结算。"""
+
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.WEAPON_AFTER_DAMAGE:
+            raise InvalidActionError("只有武器触发选择阶段可以放弃")
+        choice = runtime.pending_weapon_choice
+        if choice is None:
+            raise InvalidActionError("当前没有武器触发窗口")
+        if context.actor_id != choice.attacker_id:
+            raise InvalidActionError("只有武器持有者可以放弃武器触发窗口")
+        if action.payload.get("window_id") != choice.window_id:
+            raise InvalidActionError("放弃动作不属于当前武器触发窗口")
+        next_state, next_runtime = self._continue_after_weapon_choice(
+            state, runtime
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def _continue_after_weapon_choice(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """武器触发选择窗口关闭后，用挂起参数恢复伤害后结算。"""
+
+        choice = runtime.pending_weapon_choice
+        if choice is None:
+            raise ProductionBatchError("武器触发选择缺少挂起状态")
+        next_state, next_runtime = self._settle_after_damage(
+            state,
+            runtime,
+            victim_id=choice.target_id,
+            card_instance_id=choice.slash_instance_id,
+            card_key=choice.card_key,
+            card_user=choice.card_user,
+            source_id=choice.source_id,
+            kill_credit=choice.kill_credit,
+            damage_type=choice.damage_type,
+            amount=choice.damage_amount,
+            damage_event_sequence=(
+                int(choice.damage_event_id)
+                if choice.damage_event_id is not None
+                else None
+            ),
+            resolved_reason=choice.resolved_reason,
+            death_reason=choice.death_reason,
+            rescue_reason=choice.rescue_reason,
+            defer_root_finish=choice.defer_root_finish,
+        )
+        return next_state, replace(
+            next_runtime,
+            pending_weapon_choice=None,
+        )
 
     def _apply_chain_damage_to_target(
         self,
@@ -3349,11 +4359,15 @@ class ProductionBasicCardBatch:
         if chain is None:
             raise ProductionBatchError("濒死救援完成但缺少传导挂起状态")
         if dying_id == chain.original_target_id:
-            if runtime.defer_damage_card_finish:
+            if (
+                runtime.defer_damage_card_finish
+                or runtime.damage_card_already_finished
+            ):
                 # 闪电等需要延迟根牌结算的伤害（CP-04L）：闪电本体在
                 # PROCESSING 中等待完整传导与伤害结算结束后，由
                 # _complete_root_resolution 统一弃置；此处不得提前 finish，
-                # 否则传导结束后重复弃置会失败关闭。
+                # 否则传导结束后重复弃置会失败关闭。贯石斧强制命中时
+                # 【杀】本体已因【闪】完成结算，同样不再重复 finish。
                 next_state = state
             else:
                 next_state, finish_event = self._finish_processing(
@@ -3380,11 +4394,51 @@ class ProductionBasicCardBatch:
         runtime = self._runtime
         if runtime.phase is not ProductionPhase.PLAY:
             raise InvalidActionError("【杀】只能在出牌阶段使用")
-        if runtime.slash_used_counts.get(context.actor_id, 0) > 0:
+        equipped_weapon = equipped_weapon_key(state, context.actor_id)
+        if (
+            runtime.slash_used_counts.get(context.actor_id, 0) > 0
+            and equipped_weapon != "sgs_weapon_zhugeliannu"
+        ):
+            # CP-04P：诸葛连弩“你使用【杀】无次数限制”（Knowledge 7.1
+            # 用户整理解释）豁免通常出牌阶段次数上限；其余武器不改变次数。
             raise InvalidActionError("本出牌阶段已经使用过【杀】，受次数限制")
         if action.card_instance_id is None or len(action.target_ids) != 1:
             raise InvalidActionError("【杀】必须指定一张实体牌和恰好一名目标")
-        card = state.cards_by_id[action.card_instance_id]
+        # CP-04P 丈八蛇矛（7.8 当前确认）：两张手牌当作普通【杀】使用。
+        # 虚拟杀不是新的实体卡牌：action.card_instance_id 为确定性合成
+        # 虚拟标识，两张实体材料按正式规则进入弃牌堆；出牌阶段使用虚拟杀
+        # 消耗正常【杀】额度（与实体杀一致）。
+        zhangba_virtual = bool(action.payload.get("zhangba_virtual"))
+        zhangba_materials: tuple[str, str] | None = None
+        if zhangba_virtual:
+            if (
+                equipped_weapon != "sgs_weapon_zhangbashemao"
+                or str(action.payload.get("card_key", "")) != "sgs_basic_sha"
+            ):
+                raise InvalidActionError(
+                    "只有装备丈八蛇矛时才能把两张手牌当作普通【杀】使用"
+                )
+            window_id = (
+                f"zhangba:{runtime.turn_number}:{context.actor_id}"
+            )
+            material_ids = _resolve_zhangba_handle_direct(
+                self._session_id,
+                self._session_secret,
+                state,
+                window_id,
+                context.actor_id,
+                action.payload.get("handle"),
+            )
+            if material_ids is None:
+                raise InvalidActionError(
+                    "丈八材料句柄无效：伪造、跨窗口、跨会话或手牌已变化"
+                )
+            zhangba_materials = material_ids
+            card = _zhangba_virtual_card(
+                state, action.card_instance_id, material_ids
+            )
+        else:
+            card = state.cards_by_id[action.card_instance_id]
         if card.card_key != adapter.card_key:
             raise InvalidActionError("【杀】动作的实体牌与适配器卡牌键不一致")
         if str(action.payload.get("card_key", "")) != adapter.card_key:
@@ -3404,45 +4458,111 @@ class ProductionBasicCardBatch:
                 context.actor_id, 0
             ),
         )
-        if state.location_of(action.card_instance_id) != ZoneRef.hand(
-            context.actor_id
-        ):
+        if not zhangba_virtual and state.location_of(
+            action.card_instance_id
+        ) != ZoneRef.hand(context.actor_id):
             raise InvalidActionError("只能使用行动角色真实手牌中的实体牌")
 
-        next_state, move_event = self._move_to_processing(
-            state, action.card_instance_id, context.actor_id, "slash_use"
-        )
+        if zhangba_virtual:
+            assert zhangba_materials is not None
+            material_window_id = (
+                f"zhangba-materials:{runtime.turn_number}:{context.actor_id}"
+            )
+            next_state, material_events = self._discard_zhangba_materials(
+                state,
+                actor_id=context.actor_id,
+                material_ids=zhangba_materials,
+                window_id=material_window_id,
+                purpose="use_slash",
+            )
+            move_event = None
+        else:
+            next_state, move_event = self._move_to_processing(
+                state, action.card_instance_id, context.actor_id, "slash_use"
+            )
         boosted = runtime.wine_buff_owner_id == context.actor_id
-        used_event = GameEvent(
-            event_type=EventType.CARD_USED,
-            card_instance_id=action.card_instance_id,
-            card_key=adapter.card_key,
-            card_user=context.actor_id,
-            target_ids=(target,),
-            payload={
-                "damage_nature": adapter.damage_nature,
-                "boosted": boosted,
-            },
-        )
-        queued = self._events.extend((used_event, move_event))
+        if zhangba_virtual:
+            used_event = GameEvent(
+                event_type=EventType.CARD_USED,
+                card_instance_id=action.card_instance_id,
+                card_key=adapter.card_key,
+                card_user=context.actor_id,
+                target_ids=(target,),
+                payload={
+                    "damage_nature": adapter.damage_nature,
+                    "boosted": boosted,
+                    "physical_or_virtual": "virtual",
+                    "virtual_source": "sgs_weapon_zhangbashemao",
+                    "material_card_instance_ids": list(
+                        zhangba_materials
+                    ),
+                    "material_window_id": (
+                        f"zhangba-materials:{runtime.turn_number}:"
+                        f"{context.actor_id}"
+                    ),
+                },
+            )
+            queued = self._events.extend(
+                (used_event, *material_events)
+            )
+        else:
+            used_event = GameEvent(
+                event_type=EventType.CARD_USED,
+                card_instance_id=action.card_instance_id,
+                card_key=adapter.card_key,
+                card_user=context.actor_id,
+                target_ids=(target,),
+                payload={
+                    "damage_nature": adapter.damage_nature,
+                    "boosted": boosted,
+                },
+            )
+            queued = self._events.extend((used_event, move_event))
         used_sequence = queued[0].sequence
         assert used_sequence is not None
+        # CP-04P 朱雀羽扇：动作负载 explicit 声明“转火杀”才转换（可由服务端
+        # 枚举得到的动作携带，客户端不能伪造）；伤害属性在结算时按转换结果。
+        fire_converted = bool(action.payload.get("converted_to_fire"))
+        if fire_converted and (
+            adapter.card_key != "sgs_basic_sha"
+            or equipped_weapon != "sgs_weapon_zhuqueyushan"
+        ):
+            raise InvalidActionError(
+                "只有装备朱雀羽扇时使用普通【杀】才能选择转为【火杀】"
+            )
         next_counts = {**runtime.slash_used_counts,
                        context.actor_id: runtime.slash_used_counts.get(
                            context.actor_id, 0
                        ) + 1}
-        invalidation = armor_invalidates_effect(
-            state,
-            victim_id=target,
-            card_instance_id=action.card_instance_id,
-            card_key=adapter.card_key,
-        )
+        ignore_armor = equipped_weapon == "sgs_weapon_qinggangjian"
+        if fire_converted:
+            # 朱雀羽扇转火杀（7.10＋基础术语20.6）：转化后的【杀】不再被
+            # 藤甲普通杀免疫；转化未提供颜色（记为“无”），不触发仁王盾
+            # 黑色杀无效化。八卦阵等响应判定不受影响（只有青釭剑抑制）。
+            invalidation = None
+        else:
+            # CP-04P 青釭剑（Knowledge 7.2 用户整理解释）：使用【杀】指定
+            # 目标后令其防具无效（armor invalid）。ignore_armor（代码历史字段）
+            # 在指定目标后快照到本次【杀】结算，驱动真实防具无效化与防具伤害
+            # 修正两个统一入口；杀结算结束后随 pending_slash 清理，不残留、
+            # 不永久修改目标防具槽。
+            invalidation = armor_invalidates_effect(
+                state,
+                victim_id=target,
+                card_instance_id=action.card_instance_id,
+                card_key=adapter.card_key,
+                ignore_armor=ignore_armor,
+                card_color=(
+                    card.color if zhangba_virtual else None
+                ),
+            )
         if invalidation is not None:
             # 仁王盾／藤甲令【杀】对目标无效：不开闪响应窗口、不造成伤害、
             # 不消耗【闪】、不触发濒死或传导；杀仍算已经使用并进入弃牌堆。
             invalid_reason, armor_id = invalidation
-            next_state, finish_event = self._finish_processing(
+            next_state, finish_event = self._finish_slash_processing(
                 next_state,
+                runtime,
                 action.card_instance_id,
                 f"slash_invalidated_by_{invalid_reason}",
             )
@@ -3459,7 +4579,10 @@ class ProductionBasicCardBatch:
                     "invalidated_by_armor": True,
                 },
             )
-            self._events.extend((cancelled_event, finish_event))
+            if finish_event is not None:
+                self._events.extend((cancelled_event, finish_event))
+            else:
+                self._events.extend((cancelled_event,))
             next_runtime = replace(
                 runtime,
                 slash_used_counts=MappingProxyType(next_counts),
@@ -3477,7 +4600,16 @@ class ProductionBasicCardBatch:
             slash_used_counts=MappingProxyType(next_counts),
             wine_buff_owner_id=None,
             pending_slash=_PendingSlash(
-                context.actor_id, target, action.card_instance_id, boosted
+                context.actor_id,
+                target,
+                action.card_instance_id,
+                boosted,
+                ignore_armor=ignore_armor,
+                fire_converted=fire_converted,
+                virtual=zhangba_virtual,
+                material_ids=(
+                    zhangba_materials if zhangba_virtual else ()
+                ),
             ),
             response_window_id=(
                 f"slash:{runtime.turn_number}:{action.card_instance_id}"
@@ -3538,26 +4670,133 @@ class ProductionBasicCardBatch:
             "dodge_response_complete",
         )
         slash_id = runtime.pending_slash.slash_instance_id
-        next_state, slash_finish = self._finish_processing(
-            next_state, slash_id, "slash_cancelled_by_dodge"
+        next_state, slash_finish = self._finish_slash_processing(
+            next_state, runtime, slash_id, "slash_cancelled_by_dodge"
         )
-        self._events.extend(
-            (
-                bound_event,
-                *dodge_move_events,
-                GameEvent(
-                    event_type=EventType.CARD_EFFECT_CANCELLED,
-                    card_instance_id=slash_id,
-                    card_key=_card_key(state, slash_id),
-                    target_ids=(context.actor_id,),
-                    payload={"reason": "dodge"},
-                ),
-                slash_finish,
+        cancelled_event = GameEvent(
+            event_type=EventType.CARD_EFFECT_CANCELLED,
+            card_instance_id=slash_id,
+            card_key=(
+                "sgs_basic_sha"
+                if runtime.pending_slash.virtual
+                else _card_key(state, slash_id)
+            ),
+            target_ids=(context.actor_id,),
+            payload={"reason": "dodge"},
+        )
+        if slash_finish is not None:
+            self._events.extend(
+                (
+                    bound_event,
+                    *dodge_move_events,
+                    cancelled_event,
+                    slash_finish,
+                )
             )
-        )
-        next_state, next_runtime = self._complete_root_resolution(
-            next_state, runtime
-        )
+        else:
+            self._events.extend(
+                (bound_event, *dodge_move_events, cancelled_event)
+            )
+        pending = runtime.pending_slash
+        assert pending is not None
+        # CP-04P 青釭剑生命周期终点A（Knowledge 7.2.1 用户移动版实测确认）：
+        # 目标以【闪】成功完成本次响应时，在该【闪】相关结算完成后，本次
+        # 【杀】的青釭剑防具无效状态即清除；此后该目标防具恢复正常，后续
+        # 武器窗口与后续独立牌结算不再受本次青釭剑影响（不移除防具实体、
+        # 不永久改变装备状态）。
+        lifecycle_slash = replace(pending, ignore_armor=False)
+        # CP-04P 贯石斧（7.7 当前确认）：使用的【杀】被【闪】响应后，可弃置
+        # 自己手牌区与装备区合计2张牌使此【杀】强制造成伤害。贯石斧自身
+        # 不能作为代价之一（USER_CONFIRMED_MOBILE_RULE，2026-08-08 用户移动版
+        # 实测确认），可弃牌数不足2张时无法发动，直接完成；否则打开选择
+        # 窗口（杀已因闪进入弃牌堆）。
+        guanshifu_affordable = False
+        weapon_key = equipped_weapon_key(state, pending.attacker_id)
+        if weapon_key == "sgs_weapon_guanshifu":
+            weapon_ids = state.card_ids_in(
+                ZoneRef.equipment(pending.attacker_id, "weapon")
+            )
+            own_cards = len(
+                state.card_ids_in(ZoneRef.hand(pending.attacker_id))
+            ) + sum(
+                len(state.card_ids_in(ZoneRef.equipment(pending.attacker_id, slot)))
+                for slot in EQUIPMENT_SLOTS
+            )
+            if weapon_ids:
+                # 排除当前提供技能的贯石斧自身
+                own_cards -= 1
+            guanshifu_affordable = own_cards >= 2
+        if guanshifu_affordable:
+            next_runtime = replace(
+                runtime,
+                phase=ProductionPhase.WEAPON_SLASH_CHOICE,
+                pending_slash=lifecycle_slash,
+                pending_slash_choice=_PendingSlashChoice(
+                    weapon_key="sgs_weapon_guanshifu",
+                    kind="guanshifu_force_hit",
+                    attacker_id=pending.attacker_id,
+                    target_id=pending.target_id,
+                    window_id=(
+                        f"weapon-slash-choice:{runtime.turn_number}:"
+                        f"{pending.slash_instance_id}"
+                    ),
+                    pending_slash=lifecycle_slash,
+                ),
+            )
+        elif weapon_key == "sgs_weapon_qinglongyanyuedao" and any(
+            state.cards_by_id[instance_id].card_key in SLASH_CARD_KEYS
+            for instance_id in state.card_ids_in(
+                ZoneRef.hand(pending.attacker_id)
+            )
+        ):
+            # CP-04P 青龙偃月刀（7.6 用户整理解释）：使用的【杀】被【闪】
+            # 响应后，可继续对该目标使用一张【杀】。攻击者手牌中仍有
+            # 【杀】候选时打开选择窗口；候选只暴露不透明句柄，客户端
+            # 不得提交裸实体ID。攻击范围与距离在窗口打开时按原目标
+            # 校验，实际使用前应用层再次动态重检。
+            window_id = (
+                f"weapon-slash-choice:{runtime.turn_number}:"
+                f"{pending.slash_instance_id}"
+            )
+            hand_ids = tuple(
+                state.card_ids_in(ZoneRef.hand(pending.attacker_id))
+            )
+            snapshot_digest = sha256_value(hand_ids)
+            handles = MappingProxyType(
+                {
+                    _hand_choice_handle(
+                        self._session_id,
+                        self._session_secret,
+                        window_id,
+                        pending.attacker_id,
+                        "hand",
+                        snapshot_digest,
+                        instance_id,
+                    ): instance_id
+                    for instance_id in hand_ids
+                    if state.cards_by_id[instance_id].card_key
+                    in SLASH_CARD_KEYS
+                }
+            )
+            next_runtime = replace(
+                runtime,
+                phase=ProductionPhase.WEAPON_SLASH_CHOICE,
+                pending_slash=lifecycle_slash,
+                pending_slash_choice=_PendingSlashChoice(
+                    weapon_key="sgs_weapon_qinglongyanyuedao",
+                    kind="qinglong_continue",
+                    attacker_id=pending.attacker_id,
+                    target_id=pending.target_id,
+                    window_id=window_id,
+                    pending_slash=lifecycle_slash,
+                    handles=handles,
+                    snapshot_digest=snapshot_digest,
+                ),
+            )
+        else:
+            next_state, next_runtime = self._complete_root_resolution(
+                next_state, replace(runtime, pending_slash=lifecycle_slash)
+            )
         self._commit_runtime(runtime, next_runtime)
         return next_state
 
@@ -3583,27 +4822,1157 @@ class ProductionBasicCardBatch:
         )
 
         pending = runtime.pending_slash
-        slash = state.cards_by_id[pending.slash_instance_id]
+        # CP-04P 寒冰剑（7.3）：使用【杀】将要造成伤害时，可以防止此伤害；
+        # 若如此做，弃置目标2张牌（基础术语第12节：牌=手牌区+装备区）。
+        # 目标可弃牌数不足1张时无法发动（7.3特殊说明），直接进入伤害结算。
+        if (
+            equipped_weapon_key(state, pending.attacker_id)
+            == "sgs_weapon_hanbingjian"
+        ):
+            target_discardable = (
+                len(state.card_ids_in(ZoneRef.hand(pending.target_id)))
+                + len(state.card_ids_in(ZoneRef.equipment(pending.target_id, "armor")))
+                + len(state.card_ids_in(ZoneRef.equipment(pending.target_id, "weapon")))
+                + len(
+                    state.card_ids_in(
+                        ZoneRef.equipment(pending.target_id, "attack_horse")
+                    )
+                )
+                + len(
+                    state.card_ids_in(
+                        ZoneRef.equipment(pending.target_id, "defense_horse")
+                    )
+                )
+            )
+            if target_discardable >= 1:
+                next_runtime = replace(
+                    runtime,
+                    phase=ProductionPhase.WEAPON_SLASH_CHOICE,
+                    pending_slash_choice=_PendingSlashChoice(
+                        weapon_key="sgs_weapon_hanbingjian",
+                        kind="hanbing_prevent",
+                        attacker_id=pending.attacker_id,
+                        target_id=pending.target_id,
+                        window_id=(
+                            f"weapon-slash-choice:{runtime.turn_number}:"
+                            f"{pending.slash_instance_id}"
+                        ),
+                        pending_slash=pending,
+                    ),
+                )
+                self._commit_runtime(runtime, next_runtime)
+                return state
+        next_state, next_runtime = self._continue_slash_damage(
+            state, runtime
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def _continue_slash_damage(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """【杀】伤害结算的统一继续路径：目标放弃响应后进入伤害管线。
+
+        寒冰剑（7.3）选择不发动（放弃）时与目标直接放弃响应走同一条
+        路径；选择发动时由弃牌窗口完成防止路径，不进入本方法。"""
+
+        pending = runtime.pending_slash
+        if pending is None:
+            raise ProductionBatchError("当前没有待结算的【杀】")
+        slash = self._slash_card(state, runtime, pending.slash_instance_id)
         adapter = self._formal_registry.adapter_for(slash.card_key)
         if not isinstance(adapter, SlashAdapter):
             raise InvalidActionError("【杀】伤害结算必须使用【杀】生产适配器")
         window = self._build_window(runtime)
-        window.pass_response(context.actor_id)
+        window.pass_response(pending.target_id)
 
+        # CP-04P 古锭刀（USER_CONFIRMED_MOBILE_RULE＋IN_GAME_CARD_TEXT_
+        # CONFIRMED，2026-08-08 用户移动版游戏内文本与实测）：游戏内文本
+        # “当你使用【杀】对目标角色造成伤害时，若该角色没有手牌，则此
+        # 伤害+1”——判定时机是造成伤害时，必须在伤害管线前读取目标当前
+        # 权威手牌，不使用指定目标时的旧快照。
+        weapon_damage_bonus = _weapon_damage_bonus_at_damage(
+            state, pending.attacker_id, pending.target_id
+        )
+        base_amount = (2 if pending.boosted else 1) + weapon_damage_bonus
+        damage_type = (
+            "火属性" if pending.fire_converted else adapter.damage_nature
+        )
+        # CP-04P 麒麟弓（7.11）：使用【杀】对目标造成伤害时可选弃置目标
+        # 装备区一张坐骑牌。仅在目标实际有坐骑且伤害>0时打开窗口。
+        weapon_choice = None
+        if (
+            equipped_weapon_key(state, pending.attacker_id)
+            == "sgs_weapon_qilingong"
+            and base_amount > 0
+        ):
+            target_mounts = state.card_ids_in(
+                ZoneRef.equipment(pending.target_id, "attack_horse")
+            ) + state.card_ids_in(
+                ZoneRef.equipment(pending.target_id, "defense_horse")
+            )
+            if target_mounts:
+                weapon_choice = (
+                    "sgs_weapon_qilingong",
+                    pending.target_id,
+                    base_amount,
+                )
         next_state, next_runtime = self._apply_damage_and_maybe_chain(
             state,
             runtime,
             victim_id=pending.target_id,
-            amount=2 if pending.boosted else 1,
-            damage_type=adapter.damage_nature,
+            amount=base_amount,
+            damage_type=damage_type,
             card_instance_id=pending.slash_instance_id,
             card_key=slash.card_key,
             card_user=pending.attacker_id,
             source_id=pending.attacker_id,
             kill_credit=pending.attacker_id,
+            ignore_armor=pending.ignore_armor,
+            payload={
+                "weapon_damage_bonus": weapon_damage_bonus,
+            },
+            weapon_choice=weapon_choice,
             resolved_reason="slash_damage_resolved",
             death_reason="slash_damage_resolved_with_death",
             rescue_reason="slash_damage_resolved_after_rescue",
+        )
+        return next_state, next_runtime
+
+    # ------------------------------------------------------------------
+    # CP-04P 武器选择窗口（贯石斧强制命中／寒冰剑防止伤害／青龙偃月刀
+    # 继续使用杀）与弃2张窗口
+    # ------------------------------------------------------------------
+
+    def _enter_weapon_discard_two(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        *,
+        chooser_id: str,
+        cards_owner_id: str,
+        source_kind: str,
+        window_id: str,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """打开武器弃2张选择窗口（贯石斧：攻击者弃自己手牌＋装备；
+        寒冰剑：攻击者选择目标手牌＋装备共2张弃置）。"""
+
+        excluded_instance_id = None
+        if source_kind == "guanshifu_force_hit":
+            weapon_ids = state.card_ids_in(
+                ZoneRef.equipment(cards_owner_id, "weapon")
+            )
+            if len(weapon_ids) == 1:
+                excluded_instance_id = weapon_ids[0]
+        hand_ids = tuple(state.card_ids_in(ZoneRef.hand(cards_owner_id)))
+        snapshot_digest = sha256_value(hand_ids)
+        handles = _zone_choice_handle_snapshot(
+            self._session_id,
+            self._session_secret,
+            state,
+            cards_owner_id,
+            window_id,
+            snapshot_digest,
+        )
+        next_runtime = replace(
+            runtime,
+            phase=ProductionPhase.WEAPON_DISCARD_TWO,
+            pending_discard_two=_PendingDiscardTwo(
+                chooser_id=chooser_id,
+                cards_owner_id=cards_owner_id,
+                source_kind=source_kind,
+                window_id=window_id,
+                handles=handles,
+                snapshot_digest=snapshot_digest,
+                excluded_instance_id=excluded_instance_id,
+            ),
+        )
+        return state, next_runtime
+
+    def apply_weapon_force_hit(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+    ) -> GameState:
+        """贯石斧：发动强制命中，进入弃自己手牌＋装备2张的选择窗口。"""
+
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.WEAPON_SLASH_CHOICE:
+            raise InvalidActionError("贯石斧强制命中只能在被闪后的武器选择窗口发动")
+        choice = runtime.pending_slash_choice
+        if choice is None or choice.kind != "guanshifu_force_hit":
+            raise InvalidActionError("当前没有可发动的贯石斧强制命中窗口")
+        if context.actor_id != choice.attacker_id:
+            raise InvalidActionError("只有武器持有者可以发动贯石斧")
+        if action.payload.get("window_id") != choice.window_id:
+            raise InvalidActionError("贯石斧发动动作不属于当前武器选择窗口")
+        attacker = state.players_by_id[choice.attacker_id]
+        if not attacker.alive:
+            raise InvalidActionError("已死亡角色不能发动贯石斧")
+        next_state, next_runtime = self._enter_weapon_discard_two(
+            state,
+            runtime,
+            chooser_id=choice.attacker_id,
+            cards_owner_id=choice.attacker_id,
+            source_kind="guanshifu_force_hit",
+            window_id=(
+                f"weapon-discard-two:{runtime.turn_number}:"
+                f"{choice.pending_slash.slash_instance_id}"
+            ),
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def apply_weapon_prevent_damage(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+    ) -> GameState:
+        """寒冰剑：发动防止伤害，进入第一次逐张弃置窗口（step 1）。
+
+        2026-08-08 用户移动版实测确认：寒冰剑“弃置目标2张牌”是一张一张
+        弃置，不是同时选择、同时弃置；每次窗口只选择并正式弃置1张，
+        第1张完成后基于最新权威状态重新枚举第2张。"""
+
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.WEAPON_SLASH_CHOICE:
+            raise InvalidActionError("寒冰剑防止伤害只能在伤害前的武器选择窗口发动")
+        choice = runtime.pending_slash_choice
+        if choice is None or choice.kind != "hanbing_prevent":
+            raise InvalidActionError("当前没有可发动的寒冰剑防止伤害窗口")
+        if context.actor_id != choice.attacker_id:
+            raise InvalidActionError("只有武器持有者可以发动寒冰剑")
+        if action.payload.get("window_id") != choice.window_id:
+            raise InvalidActionError("寒冰剑发动动作不属于当前武器选择窗口")
+        attacker = state.players_by_id[choice.attacker_id]
+        target = state.players_by_id[choice.target_id]
+        if not attacker.alive or not target.alive:
+            raise InvalidActionError("寒冰剑发动时角色已死亡")
+        next_state, next_runtime = self._enter_hanbing_discard_step(
+            state,
+            runtime,
+            step=1,
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def _enter_hanbing_discard_step(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        *,
+        step: int,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """打开寒冰剑第 step 次逐张弃置窗口（基于最新权威状态重新快照）。"""
+
+        choice = runtime.pending_slash_choice
+        if choice is None or choice.kind != "hanbing_prevent":
+            raise ProductionBatchError("寒冰剑逐张弃置缺少防止伤害窗口")
+        pending = choice.pending_slash
+        window_id = (
+            f"hanbing-discard:{runtime.turn_number}:"
+            f"{pending.slash_instance_id}:step{step}"
+        )
+        hand_ids = tuple(state.card_ids_in(ZoneRef.hand(pending.target_id)))
+        snapshot_digest = sha256_value(hand_ids)
+        handles = _zone_choice_handle_snapshot(
+            self._session_id,
+            self._session_secret,
+            state,
+            pending.target_id,
+            window_id,
+            snapshot_digest,
+        )
+        next_runtime = replace(
+            runtime,
+            phase=ProductionPhase.HANBING_DISCARD,
+            pending_hanbing_discard=_PendingHanbingDiscard(
+                attacker_id=pending.attacker_id,
+                target_id=pending.target_id,
+                window_id=window_id,
+                step=step,
+                handles=handles,
+                snapshot_digest=snapshot_digest,
+            ),
+        )
+        return state, next_runtime
+
+    def apply_hanbing_discard_card(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+    ) -> GameState:
+        """寒冰剑逐张弃置：选择并正式弃置当前窗口的一张牌。
+
+        每次动作只移动一张牌并登记其独立弃置事件；第1张弃置完成后，
+        根据最新权威状态重新枚举并打开第2次窗口；第2张弃置完成后完成
+        寒冰剑防止结算。stale／伪造动作失败关闭，且不会回滚已经合法
+        完成的第1次弃置，也不会错误地直接完成寒冰剑。"""
+
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.HANBING_DISCARD:
+            raise InvalidActionError("寒冰剑逐张弃置只能在寒冰剑弃置窗口进行")
+        hanbing = runtime.pending_hanbing_discard
+        if hanbing is None:
+            raise InvalidActionError("当前没有打开的寒冰剑逐张弃置窗口")
+        if context.actor_id != hanbing.attacker_id:
+            raise InvalidActionError("只有寒冰剑持有者可以选择弃置目标牌")
+        if action.payload.get("operation") != "hanbing_discard_card":
+            raise InvalidActionError("弃置动作负载无效")
+        if action.payload.get("window_id") != hanbing.window_id:
+            raise InvalidActionError("弃置动作不属于当前寒冰剑弃置窗口")
+        if action.payload.get("step") != hanbing.step:
+            raise InvalidActionError("弃置动作绑定的弃置步数与当前窗口不一致")
+        if str(action.payload.get("state_hash", "")) != state_sha256(
+            canonical_state_snapshot(state)
+        ):
+            raise InvalidActionError("弃置动作绑定的状态哈希已过期")
+        target = state.players_by_id[hanbing.target_id]
+        attacker = state.players_by_id[hanbing.attacker_id]
+        if not target.alive or not attacker.alive:
+            raise InvalidActionError("寒冰剑弃置时角色已死亡")
+        zone_id = str(action.payload.get("zone", "hand"))
+        if zone_id == "hand":
+            instance_id = _resolve_hand_choice_handle(
+                self._session_id,
+                self._session_secret,
+                state,
+                hanbing.window_id,
+                hanbing.target_id,
+                "hand",
+                hanbing.snapshot_digest,
+                hanbing.handles,
+                action.payload.get("handle"),
+            )
+            if instance_id is None:
+                raise InvalidActionError(
+                    "寒冰剑弃置手牌句柄无效：伪造、跨窗口、跨会话或手牌已变化"
+                )
+            source = ZoneRef.hand(hanbing.target_id)
+        else:
+            instance_id = action.card_instance_id
+            if instance_id is None:
+                raise InvalidActionError("寒冰剑弃置装备区牌必须指定实体牌")
+            source = _zone_from_id(zone_id, hanbing.target_id)
+            if state.location_of(instance_id) != source:
+                raise InvalidActionError(
+                    "寒冰剑弃置装备区牌不在指定装备槽中"
+                )
+        # 当前窗口内每次只能弃置一张牌（逐张弃置语义）。
+        next_state = state.move_cards({instance_id: DISCARD_PILE})
+        card_key = _card_key(next_state, instance_id)
+        events: list[GameEvent] = [
+            GameEvent(
+                event_type=EventType.CARD_MOVED,
+                card_instance_id=instance_id,
+                card_key=card_key,
+                card_user=hanbing.attacker_id,
+                payload={
+                    "source": _zone_payload(source),
+                    "destination": _zone_payload(DISCARD_PILE),
+                    "reason": "hanbing_discard",
+                    "window_id": hanbing.window_id,
+                    "hanbing_step": hanbing.step,
+                },
+            ),
+            GameEvent(
+                event_type=EventType.CARD_LOST,
+                card_instance_id=instance_id,
+                card_key=card_key,
+                target_ids=(hanbing.target_id,),
+                payload={
+                    "reason": "hanbing_discard",
+                    "source_zone": _zone_id(source),
+                    "window_id": hanbing.window_id,
+                    "hanbing_step": hanbing.step,
+                },
+            ),
+            GameEvent(
+                event_type=EventType.CARD_DISCARDED,
+                card_instance_id=instance_id,
+                card_key=card_key,
+                card_user=hanbing.attacker_id,
+                target_ids=(hanbing.target_id,),
+                payload={
+                    "reason": "hanbing_discard",
+                    "source_zone": _zone_id(source),
+                    "window_id": hanbing.window_id,
+                    "hanbing_step": hanbing.step,
+                },
+            ),
+        ]
+        if source.kind is ZoneKind.EQUIPMENT and source.equipment_slot == (
+            "armor"
+        ):
+            # 防具离区统一钩子：第1张弃置造成白银狮子离区时立即回复，
+            # 第2次选择必须看到该状态变化。
+            next_state, recovery_events = self._apply_armor_leave_recovery(
+                next_state,
+                instance_id=instance_id,
+                owner_id=hanbing.target_id,
+                reason="hanbing_discard",
+            )
+            events.extend(recovery_events)
+        self._events.extend(tuple(events))
+        if hanbing.step == 1:
+            # 第1张弃置完成：根据此刻最新权威状态重新枚举第2张可弃牌。
+            remaining = len(
+                next_state.card_ids_in(ZoneRef.hand(hanbing.target_id))
+            ) + sum(
+                len(
+                    next_state.card_ids_in(
+                        ZoneRef.equipment(hanbing.target_id, slot)
+                    )
+                )
+                for slot in EQUIPMENT_SLOTS
+            )
+            if remaining >= 1:
+                next_state, next_runtime = self._enter_hanbing_discard_step(
+                    next_state, runtime, step=2
+                )
+                self._commit_runtime(runtime, next_runtime)
+                return next_state
+        next_state, next_runtime = self._finish_hanbing_prevent(
+            next_state, runtime
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def _finish_hanbing_prevent(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """寒冰剑防止路径完成：通过响应窗口、登记统一防止事件并完成
+        本次【杀】结算。不扣减HP、不产生damage事件、不进入濒死或传导。"""
+
+        choice = runtime.pending_slash_choice
+        if choice is None or choice.kind != "hanbing_prevent":
+            raise ProductionBatchError("寒冰剑防止完成缺少防止伤害窗口")
+        pending = choice.pending_slash
+        window = self._build_window(runtime)
+        window.pass_response(pending.target_id)
+        base_amount = (2 if pending.boosted else 1) + (
+            _weapon_damage_bonus_at_damage(
+                state, pending.attacker_id, pending.target_id
+            )
+        )
+        prevented_event = GameEvent(
+            event_type=EventType.DAMAGE_PREVENTED,
+            card_instance_id=pending.slash_instance_id,
+            card_key=_card_key(state, pending.slash_instance_id),
+            card_user=pending.attacker_id,
+            target_ids=(pending.target_id,),
+            payload={
+                "victim_id": pending.target_id,
+                "card_key": _card_key(state, pending.slash_instance_id),
+                "declared_amount": base_amount,
+                "final_amount": 0,
+                "modifiers": ["hanbing_prevent"],
+                "armor_ignored": False,
+            },
+        )
+        self._events.extend((prevented_event,))
+        next_state, finish_event = self._finish_processing(
+            state,
+            pending.slash_instance_id,
+            "hanbing_damage_prevented",
+        )
+        self._events.extend((finish_event,))
+        next_state, next_runtime = self._complete_root_resolution(
+            next_state,
+            replace(
+                runtime,
+                pending_slash_choice=None,
+                pending_discard_two=None,
+                pending_hanbing_discard=None,
+            ),
+        )
+        return next_state, next_runtime
+
+    def _resolve_weapon_slash_choice_handle(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        handle: object,
+    ) -> str | None:
+        """解析青龙偃月刀继续杀窗口的隐藏手牌句柄为真实【杀】实体。"""
+
+        choice = runtime.pending_slash_choice
+        if choice is None or choice.kind != "qinglong_continue":
+            return None
+        return _resolve_hand_choice_handle(
+            self._session_id,
+            self._session_secret,
+            state,
+            choice.window_id,
+            choice.attacker_id,
+            "hand",
+            choice.snapshot_digest,
+            choice.handles,
+            handle,
+        )
+
+    def apply_qinglong_continue_slash(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+    ) -> GameState:
+        """青龙偃月刀：被闪后选择一张手牌【杀】继续对原目标使用。"""
+
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.WEAPON_SLASH_CHOICE:
+            raise InvalidActionError("青龙偃月刀继续杀只能在被闪后的武器选择窗口使用")
+        choice = runtime.pending_slash_choice
+        if choice is None or choice.kind != "qinglong_continue":
+            raise InvalidActionError("当前没有可继续使用【杀】的青龙偃月刀窗口")
+        if context.actor_id != choice.attacker_id:
+            raise InvalidActionError("只有武器持有者可以继续使用【杀】")
+        if action.payload.get("window_id") != choice.window_id:
+            raise InvalidActionError("继续使用【杀】动作不属于当前武器选择窗口")
+        if str(action.payload.get("state_hash", "")) != state_sha256(
+            canonical_state_snapshot(state)
+        ):
+            raise InvalidActionError("继续使用【杀】动作绑定的状态哈希已过期")
+        attacker = state.players_by_id[choice.attacker_id]
+        target = state.players_by_id.get(choice.target_id)
+        if not attacker.alive or target is None or not target.alive:
+            raise InvalidActionError(
+                "继续使用【杀】时原目标已失效，不能使用【杀】"
+            )
+        # 第二次动态重检：攻击范围与距离按原目标当前状态重新判定。
+        if not is_valid_slash_target(
+            state, choice.attacker_id, choice.target_id
+        ):
+            raise InvalidActionError(
+                "第二次检测失败：原目标已不在当前攻击范围内"
+            )
+        instance_id = self._resolve_weapon_slash_choice_handle(
+            state, runtime, action.payload.get("handle")
+        )
+        if instance_id is None:
+            raise InvalidActionError(
+                "继续使用【杀】句柄无效、过期或伪造；不接受裸实体ID提交"
+            )
+        card = state.cards_by_id[instance_id]
+        if card.card_key not in SLASH_CARD_KEYS:
+            raise InvalidActionError("继续使用实体必须是普通／火／雷【杀】")
+        if state.location_of(instance_id) != ZoneRef.hand(
+            choice.attacker_id
+        ):
+            raise InvalidActionError("继续使用【杀】实体必须仍在攻击者手牌中")
+        # 武器技能门禁：继续使用的【杀】仍受攻击者当前武器技能约束。
+        check_weapon_skill_gate(
+            state,
+            actor_id=choice.attacker_id,
+            decision="use_slash",
+            target_id=choice.target_id,
+            slash_card_key=card.card_key,
+            slash_used_count=runtime.slash_used_counts.get(
+                choice.attacker_id, 0
+            ),
+        )
+        next_state, next_runtime = self._apply_qinglong_slash_use(
+            state,
+            runtime,
+            slash_instance_id=instance_id,
+            attacker_id=choice.attacker_id,
+            target_id=choice.target_id,
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def _apply_qinglong_slash_use(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        *,
+        slash_instance_id: str,
+        attacker_id: str,
+        target_id: str,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """青龙偃月刀继续【杀】的正式使用子结算。
+
+        继续使用的【杀】由青龙偃月刀技能授权，不受“通常每个出牌阶段只能
+        使用1张【杀】”限制，且不消耗普通出牌阶段【杀】使用次数额度
+        （USER_CONFIRMED_MOBILE_RULE，2026-08-08 用户移动版实测确认：
+        正常使用【杀】→被【闪】→青龙追杀后，手牌中其他【杀】仍保持可
+        正常使用状态）。每一张追杀仍是一次真实的【杀】使用：产生独立
+        CARD_USED 事件并进入完整闪响应、伤害、濒死、救援结算（A.历史
+        意义保留），但 `slash_used_counts`（普通出牌阶段额度）不因追杀
+        增加（B.额度意义）。后续【杀】按正常流程结算。"""
+
+        card = state.cards_by_id[slash_instance_id]
+        adapter = self._formal_registry.adapter_for(card.card_key)
+        if not isinstance(adapter, SlashAdapter):
+            raise ProductionBatchError("青龙偃月刀继续杀必须使用【杀】生产适配器")
+        next_state, move_event = self._move_to_processing(
+            state, slash_instance_id, attacker_id, "qinglong_continue_slash_use"
+        )
+        boosted = runtime.wine_buff_owner_id == attacker_id
+        used_event = GameEvent(
+            event_type=EventType.CARD_USED,
+            card_instance_id=slash_instance_id,
+            card_key=card.card_key,
+            card_user=attacker_id,
+            target_ids=(target_id,),
+            payload={
+                "damage_nature": adapter.damage_nature,
+                "boosted": boosted,
+                "weapon_continue_context": "qinglongyanyuedao",
+                "ignore_slash_use_limit": True,
+                "root_slash_instance_id": (
+                    runtime.pending_slash_choice.pending_slash.slash_instance_id
+                    if runtime.pending_slash_choice is not None
+                    else None
+                ),
+            },
+        )
+        queued = self._events.extend((used_event, move_event))
+        used_sequence = queued[0].sequence
+        assert used_sequence is not None
+        # 青龙偃月刀自身不提供令目标防具无效／伤害修正；青釭剑、古锭刀与
+        # 朱雀羽扇不可能同时装备，按当前武器槽读取快照保持统一口径。
+        equipped_weapon = equipped_weapon_key(state, attacker_id)
+        ignore_armor = equipped_weapon == "sgs_weapon_qinggangjian"
+        next_runtime = replace(
+            runtime,
+            phase=ProductionPhase.SLASH_RESPONSE,
+            wine_buff_owner_id=None,
+            pending_slash=_PendingSlash(
+                attacker_id,
+                target_id,
+                slash_instance_id,
+                boosted,
+                ignore_armor=ignore_armor,
+            ),
+            pending_slash_choice=None,
+            pending_discard_two=None,
+            response_window_id=(
+                f"slash:{runtime.turn_number}:{slash_instance_id}"
+            ),
+            response_window_order=(target_id,),
+            response_window_source_sequence=used_sequence,
+            bagua_attempted=False,
+        )
+        return next_state, next_runtime
+
+    # ------------------------------------------------------------------
+    # CP-04P 丈八蛇矛：两张手牌当作普通【杀】使用或打出（虚拟杀）
+    # ------------------------------------------------------------------
+
+    def _slash_card(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        instance_id: str,
+    ) -> CardInstance:
+        """统一【杀】身份查询：实体杀查 state.cards_by_id；丈八虚拟杀查
+        当前挂起虚拟杀（不进入实体牌目录）。"""
+
+        # 实体路径（所有当前已证明生产路径）直接查 state.cards_by_id，
+        # 与撤回 virtual: 放行前行为完全一致；虚拟分支仅 pending_slash.
+        # virtual=True 时可达，而丈八保持 PARTIAL/fail-closed 后不可达。
+
+        if instance_id in state.cards_by_id:
+            return state.cards_by_id[instance_id]
+        virtual = _virtual_slash_card(state, runtime, instance_id)
+        if virtual is None:
+            raise ProductionBatchError(
+                f"找不到实体牌或当前挂起虚拟杀{instance_id!r}"
+            )
+        return virtual
+
+    def _finish_slash_processing(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        instance_id: str,
+        reason: str,
+    ) -> tuple[GameState, GameEvent | None]:
+        """实体【杀】完成结算；丈八虚拟杀无实体在PROCESSING，跳过finish。
+
+        虚拟杀的两张实体材料在转换时已按正式规则进入弃牌堆，结算完成
+        不产生额外的实体牌移动事件；重执行路径一致。"""
+
+        # 实体路径等价 _finish_processing（所有已证明生产路径不变）；
+        # 虚拟分支仅 pending_slash.virtual=True 时可达，丈八 fail-closed
+        # 后不可达（UNREACHABLE while zhangba PARTIAL）。
+
+        pending = runtime.pending_slash
+        if (
+            pending is not None
+            and pending.virtual
+            and pending.slash_instance_id == instance_id
+        ):
+            return state, None
+        return self._finish_processing(state, instance_id, reason)
+
+    def _discard_zhangba_materials(
+        self,
+        state: GameState,
+        *,
+        actor_id: str,
+        material_ids: tuple[str, str],
+        window_id: str,
+        purpose: str,
+    ) -> tuple[GameState, tuple[GameEvent, ...]]:
+        """丈八虚拟杀的两张实体材料作为本次转换的 subcards 随虚拟杀
+        使用/打出一次性进入弃牌堆。
+
+        UNREACHABLE while zhangba PARTIAL/fail-closed：仅由丈八虚拟杀
+        使用/打出 apply 路径调用；不得被其他路径当作已证明正式生产能力。
+
+        依据基础术语第20.4/20.6节（当前确认）与第12节措辞通则：丈八蛇矛
+        文本“将两张手牌当【杀】使用或打出”没有“弃置”字样，材料不是
+        一次独立的弃置动作（discard cost）——不得产生 CARD_DISCARDED
+        事件（基础术语：除非具体效果明确使用“弃置”一词，否则不得自动
+        视为某名角色执行了一次“弃置牌”的操作）；材料作为虚拟杀的材料
+        实体（subcards）随本次 CARD_USED/CARD_PLAYED 进入弃牌堆，离开
+        手牌登记 CARD_LOST（失去牌）。材料必须是当前真实手牌（装备区、
+        判定区不得作为材料）；任一非法则整批不移动。两张材料属于同一次
+        转换，共享同一转换窗口ID。
+
+        规则缺口记录（VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP）：
+        材料在“使用/打出”时的精确 zone 生命周期时点（A.先作为 subcards
+        进入PROCESSING、结算完成后再进入弃牌堆；B.开始结算前直接进入
+        弃牌堆）在项目 Knowledge 中没有明确确认通则；当前按“材料随本次
+        虚拟杀使用/打出进入弃牌堆”的最小一致模型实现，待用户确认。"""
+
+        hand_set = set(state.card_ids_in(ZoneRef.hand(actor_id)))
+        for instance_id in material_ids:
+            if instance_id not in hand_set:
+                raise ProductionBatchError(
+                    "丈八材料必须是当前真实手牌；装备区、判定区不得作为材料"
+                )
+        if len(set(material_ids)) != len(material_ids):
+            raise ProductionBatchError("丈八材料不允许重复选择同一实体")
+        next_state = state.move_cards(
+            {instance_id: DISCARD_PILE for instance_id in material_ids}
+        )
+        events: list[GameEvent] = []
+        for instance_id in material_ids:
+            source = state.location_of(instance_id)
+            card_key = _card_key(next_state, instance_id)
+            events.extend(
+                (
+                    GameEvent(
+                        event_type=EventType.CARD_MOVED,
+                        card_instance_id=instance_id,
+                        card_key=card_key,
+                        card_user=actor_id,
+                        payload={
+                            "source": _zone_payload(source),
+                            "destination": _zone_payload(DISCARD_PILE),
+                            "reason": "zhangba_material",
+                            "window_id": window_id,
+                            "purpose": purpose,
+                        },
+                    ),
+                    GameEvent(
+                        event_type=EventType.CARD_LOST,
+                        card_instance_id=instance_id,
+                        card_key=card_key,
+                        target_ids=(actor_id,),
+                        payload={
+                            "reason": "zhangba_material",
+                            "source_zone": _zone_id(source),
+                            "window_id": window_id,
+                            "purpose": purpose,
+                        },
+                    ),
+                )
+            )
+        return next_state, tuple(events)
+
+    def _zhangba_virtual_id(
+        self, runtime: _BatchRuntime, material_ids: tuple[str, str]
+    ) -> str:
+        # UNREACHABLE while zhangba PARTIAL/fail-closed：当前无调用点
+        # （virtual id 在各枚举/apply 点内联构造），待丈八恢复时清理或复用。
+        return (
+            f"virtual:zhangba:{runtime.turn_number}:"
+            f"{material_ids[0]}:{material_ids[1]}"
+        )
+
+    def apply_pass_weapon_slash_choice(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+    ) -> GameState:
+        """放弃被闪后/伤害前武器选择：贯石斧与青龙偃月刀放弃时按被闪
+        完成收尾；寒冰剑放弃时按正常伤害结算继续。"""
+
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.WEAPON_SLASH_CHOICE:
+            raise InvalidActionError("放弃武器选择只能在被闪后/伤害前窗口进行")
+        choice = runtime.pending_slash_choice
+        if choice is None:
+            raise InvalidActionError("当前没有打开的被闪后/伤害前武器选择窗口")
+        if context.actor_id != choice.attacker_id:
+            raise InvalidActionError("只有武器持有者可以放弃武器选择")
+        if action.payload.get("window_id") != choice.window_id:
+            raise InvalidActionError("放弃动作不属于当前武器选择窗口")
+        if choice.kind == "hanbing_prevent":
+            # 寒冰剑放弃发动：继续本次【杀】的正常伤害结算。
+            next_state, next_runtime = self._continue_slash_damage(
+                state, runtime
+            )
+        else:
+            # 贯石斧／青龙偃月刀放弃：本次【杀】已因【闪】结束。
+            next_state, next_runtime = self._complete_root_resolution(
+                state, replace(runtime, pending_slash_choice=None)
+            )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def apply_select_discard_two(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+    ) -> GameState:
+        """弃2张窗口选择动作：把一张手牌或装备区牌加入待弃集合。
+
+        选择过程不移动牌、不产生正式弃牌事件；只有提交动作确认后才统一
+        弃置。手牌只接受隐藏句柄，装备区牌接受实体ID（装备区公开）。"""
+
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.WEAPON_DISCARD_TWO:
+            raise InvalidActionError("只有武器弃2张窗口可以选择待弃牌")
+        discard_two = runtime.pending_discard_two
+        if discard_two is None:
+            raise InvalidActionError("当前没有打开的武器弃2张窗口")
+        if context.actor_id != discard_two.chooser_id:
+            raise InvalidActionError("只有选择者可以选择待弃牌")
+        if action.payload.get("operation") != "select_discard_two":
+            raise InvalidActionError("选择动作负载无效")
+        if action.payload.get("window_id") != discard_two.window_id:
+            raise InvalidActionError("选择动作不属于当前弃2张窗口")
+        if str(action.payload.get("state_hash", "")) != state_sha256(
+            canonical_state_snapshot(state)
+        ):
+            raise InvalidActionError("选择动作绑定的状态哈希已过期")
+        if len(discard_two.selected_ids) >= 2:
+            raise InvalidActionError("弃2张窗口最多选择2张牌")
+        zone_id = str(action.payload.get("zone", "hand"))
+        if zone_id == "hand":
+            instance_id = _resolve_hand_choice_handle(
+                self._session_id,
+                self._session_secret,
+                state,
+                discard_two.window_id,
+                discard_two.cards_owner_id,
+                "hand",
+                discard_two.snapshot_digest,
+                discard_two.handles,
+                action.payload.get("handle"),
+            )
+            if instance_id is None:
+                raise InvalidActionError(
+                    "待弃手牌句柄无效：伪造、跨窗口、跨会话或手牌已变化"
+                )
+        else:
+            instance_id = action.card_instance_id
+            if instance_id is None:
+                raise InvalidActionError("装备区待弃牌必须指定实体牌")
+            zone = _zone_from_id(zone_id, discard_two.cards_owner_id)
+            if state.location_of(instance_id) != zone:
+                raise InvalidActionError("装备区待弃牌不在指定装备槽中")
+            if (
+                discard_two.source_kind == "guanshifu_force_hit"
+                and zone == ZoneRef.equipment(
+                    discard_two.cards_owner_id, "weapon"
+                )
+            ):
+                # 纵深防御：贯石斧自身不能作为发动代价（枚举层已排除，
+                # 应用层再次拒绝任何指向武器槽的选择动作）。
+                raise InvalidActionError(
+                    "贯石斧自身不能作为发动代价的弃牌候选"
+                )
+        if instance_id in discard_two.selected_ids:
+            raise InvalidActionError("同一张牌不能重复加入待弃集合")
+        next_runtime = replace(
+            runtime,
+            pending_discard_two=replace(
+                discard_two,
+                selected_ids=(*discard_two.selected_ids, instance_id),
+                selected_zones=MappingProxyType(
+                    {
+                        **discard_two.selected_zones,
+                        instance_id: zone_id,
+                    }
+                ),
+            ),
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return state
+
+    def apply_unselect_discard_two(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+    ) -> GameState:
+        """弃2张窗口取消选择动作：把一张已选牌移出待弃集合。"""
+
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.WEAPON_DISCARD_TWO:
+            raise InvalidActionError("只有武器弃2张窗口可以取消选择待弃牌")
+        discard_two = runtime.pending_discard_two
+        if discard_two is None:
+            raise InvalidActionError("当前没有打开的武器弃2张窗口")
+        if context.actor_id != discard_two.chooser_id:
+            raise InvalidActionError("只有选择者可以取消选择待弃牌")
+        if action.payload.get("operation") != "unselect_discard_two":
+            raise InvalidActionError("取消选择动作负载无效")
+        if action.payload.get("window_id") != discard_two.window_id:
+            raise InvalidActionError("取消选择动作不属于当前弃2张窗口")
+        zone_id = str(action.payload.get("zone", "hand"))
+        if zone_id == "hand":
+            instance_id = _resolve_hand_choice_handle(
+                self._session_id,
+                self._session_secret,
+                state,
+                discard_two.window_id,
+                discard_two.cards_owner_id,
+                "hand",
+                discard_two.snapshot_digest,
+                discard_two.handles,
+                action.payload.get("handle"),
+            )
+            if instance_id is None:
+                raise InvalidActionError(
+                    "待弃手牌句柄无效：伪造、跨窗口、跨会话或手牌已变化"
+                )
+        else:
+            instance_id = action.card_instance_id
+            if instance_id is None:
+                raise InvalidActionError("装备区待弃牌必须指定实体牌")
+        if instance_id not in discard_two.selected_ids:
+            raise InvalidActionError("只能取消选择已在待弃集合中的牌")
+        next_runtime = replace(
+            runtime,
+            pending_discard_two=replace(
+                discard_two,
+                selected_ids=tuple(
+                    instance
+                    for instance in discard_two.selected_ids
+                    if instance != instance_id
+                ),
+                selected_zones=MappingProxyType(
+                    {
+                        key: value
+                        for key, value in discard_two.selected_zones.items()
+                        if key != instance_id
+                    }
+                ),
+            ),
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return state
+
+    def apply_discard_two_submit(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+    ) -> GameState:
+        """贯石斧弃2张窗口提交：把待弃集合一次性原子弃置并强制造成伤害。
+
+        贯石斧（7.7）：两张牌一起选择并一起弃置的发动代价——恰好弃置
+        攻击者自己手牌＋装备2张后按原【杀】参数强制造成伤害。寒冰剑
+        已改用独立逐张弃置状态机（HANBING_DISCARD），不进入本窗口。"""
+
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.WEAPON_DISCARD_TWO:
+            raise InvalidActionError("只有武器弃2张窗口可以提交弃置")
+        discard_two = runtime.pending_discard_two
+        choice = runtime.pending_slash_choice
+        if discard_two is None or choice is None:
+            raise InvalidActionError("当前没有可提交的武器弃2张窗口")
+        if discard_two.source_kind != "guanshifu_force_hit":
+            raise InvalidActionError("弃2张窗口只支持贯石斧批量代价")
+        if context.actor_id != discard_two.chooser_id:
+            raise InvalidActionError("只有选择者可以提交弃置")
+        if action.payload.get("operation") != "discard_two_submit":
+            raise InvalidActionError("提交动作负载无效")
+        if action.payload.get("window_id") != discard_two.window_id:
+            raise InvalidActionError("提交动作不属于当前弃2张窗口")
+        if str(action.payload.get("state_hash", "")) != state_sha256(
+            canonical_state_snapshot(state)
+        ):
+            raise InvalidActionError("提交动作绑定的状态哈希已过期")
+        if (
+            discard_two.snapshot_digest is None
+            or sha256_value(
+                tuple(
+                    state.card_ids_in(
+                        ZoneRef.hand(discard_two.cards_owner_id)
+                    )
+                )
+            )
+            != discard_two.snapshot_digest
+        ):
+            raise InvalidActionError(
+                "弃2张窗口打开后被弃手牌已变化，旧提交失败关闭"
+            )
+        selected_ids = tuple(discard_two.selected_ids)
+        if len(selected_ids) == 0:
+            raise InvalidActionError("弃2张窗口至少需要选择1张牌")
+        if len(set(selected_ids)) != len(selected_ids):
+            raise InvalidActionError("弃2张窗口不允许重复选择同一实体")
+        if (
+            discard_two.excluded_instance_id is not None
+            and discard_two.excluded_instance_id in selected_ids
+        ):
+            # 提交时权威验证（不能只依赖枚举阶段曾经排除）：贯石斧自身
+            # 不能作为发动代价，任一非法则整批不移动（USER_CONFIRMED_
+            # MOBILE_RULE，2026-08-08 用户移动版实测确认）。
+            raise InvalidActionError(
+                "贯石斧自身不能作为发动代价；提交失败关闭且整批不移动"
+            )
+        hand_set = set(
+            state.card_ids_in(ZoneRef.hand(discard_two.cards_owner_id))
+        )
+        equipment_set: set[str] = set()
+        for slot in EQUIPMENT_SLOTS:
+            equipment_set.update(
+                state.card_ids_in(
+                    ZoneRef.equipment(discard_two.cards_owner_id, slot)
+                )
+            )
+        # 提交时权威验证：贯石斧自身（当前武器槽中的【贯石斧】实体）不能
+        # 作为发动代价（USER_CONFIRMED_MOBILE_RULE）；不能只依赖枚举层
+        # 的排除，提交必须再次校验。任一非法则整批不移动。
+        weapon_ids = set(
+            state.card_ids_in(
+                ZoneRef.equipment(discard_two.cards_owner_id, "weapon")
+            )
+        )
+        for instance_id in selected_ids:
+            if instance_id in weapon_ids:
+                raise InvalidActionError(
+                    "贯石斧自身不能作为发动代价；整批弃置失败关闭"
+                )
+        for instance_id in selected_ids:
+            if (
+                instance_id not in hand_set
+                and instance_id not in equipment_set
+            ):
+                raise InvalidActionError(
+                    "弃2张只能包含被弃角色当前手牌与装备区牌，"
+                    "不允许判定区或其他角色牌"
+                )
+        if len(selected_ids) != 2:
+            raise InvalidActionError("贯石斧必须恰好弃置2张牌")
+        # 一次性原子弃置：全部选中牌在同一窗口ID下统一离开原区域。
+        next_state = state.move_cards(
+            {instance_id: DISCARD_PILE for instance_id in selected_ids}
+        )
+        reason = "guanshifu_discard"
+        events: list[GameEvent] = []
+        for instance_id in selected_ids:
+            source = state.location_of(instance_id)
+            card_key = _card_key(next_state, instance_id)
+            move_event = GameEvent(
+                event_type=EventType.CARD_MOVED,
+                card_instance_id=instance_id,
+                card_key=card_key,
+                card_user=context.actor_id,
+                payload={
+                    "source": _zone_payload(source),
+                    "destination": _zone_payload(DISCARD_PILE),
+                    "reason": reason,
+                    "window_id": discard_two.window_id,
+                },
+            )
+            lost_event = GameEvent(
+                event_type=EventType.CARD_LOST,
+                card_instance_id=instance_id,
+                card_key=card_key,
+                target_ids=(discard_two.cards_owner_id,),
+                payload={
+                    "reason": reason,
+                    "source_zone": _zone_id(source),
+                    "window_id": discard_two.window_id,
+                },
+            )
+            discarded_event = GameEvent(
+                event_type=EventType.CARD_DISCARDED,
+                card_instance_id=instance_id,
+                card_key=card_key,
+                card_user=context.actor_id,
+                target_ids=(discard_two.cards_owner_id,),
+                payload={
+                    "reason": reason,
+                    "source_zone": _zone_id(source),
+                    "window_id": discard_two.window_id,
+                },
+            )
+            events.extend((move_event, lost_event, discarded_event))
+            if source.kind is ZoneKind.EQUIPMENT and source.equipment_slot == (
+                "armor"
+            ):
+                # 防具离区统一钩子：白银狮子被武器效果弃置时恢复1点体力。
+                next_state, recovery_events = (
+                    self._apply_armor_leave_recovery(
+                        next_state,
+                        instance_id=instance_id,
+                        owner_id=discard_two.cards_owner_id,
+                        reason=reason,
+                    )
+                )
+                events.extend(recovery_events)
+        self._events.extend(tuple(events))
+        # 贯石斧强制命中：弃牌完成后按原【杀】参数直接造成伤害。
+        pending = choice.pending_slash
+        slash = self._slash_card(state, runtime, pending.slash_instance_id)
+        adapter = self._formal_registry.adapter_for(slash.card_key)
+        if not isinstance(adapter, SlashAdapter):
+            raise ProductionBatchError("贯石斧强制命中必须使用【杀】适配器")
+        base_amount = (2 if pending.boosted else 1) + (
+            _weapon_damage_bonus_at_damage(
+                state, pending.attacker_id, pending.target_id
+            )
+        )
+        damage_type = (
+            "火属性" if pending.fire_converted else adapter.damage_nature
+        )
+        next_state, next_runtime = self._apply_damage_and_maybe_chain(
+            next_state,
+            runtime,
+            victim_id=pending.target_id,
+            amount=base_amount,
+            damage_type=damage_type,
+            card_instance_id=pending.slash_instance_id,
+            card_key=slash.card_key,
+            card_user=pending.attacker_id,
+            source_id=pending.attacker_id,
+            kill_credit=pending.attacker_id,
+            ignore_armor=pending.ignore_armor,
+            payload={
+                "weapon_damage_bonus": _weapon_damage_bonus_at_damage(
+                    state, pending.attacker_id, pending.target_id
+                ),
+                "weapon_effect": "guanshifu_force_hit",
+            },
+            card_already_finished=True,
+            resolved_reason="guanshifu_force_hit_damage",
+            death_reason="guanshifu_force_hit_with_death",
+            rescue_reason="guanshifu_force_hit_after_rescue",
+        )
+        next_runtime = replace(
+            next_runtime,
+            pending_slash_choice=None,
+            pending_discard_two=None,
         )
         self._commit_runtime(runtime, next_runtime)
         return next_state
@@ -4613,6 +6982,63 @@ class ProductionBasicCardBatch:
                     },
                 )
             )
+        # CP-04P 丈八蛇矛（7.8 当前确认）：响应【决斗】需要打出【杀】时
+        # 同样可以把两张手牌当作普通【杀】打出；材料对只通过不透明句柄
+        # 暴露。
+        if (
+            equipped_weapon_key(state, context.actor_id)
+            == "sgs_weapon_zhangbashemao"
+            and len(state.card_ids_in(ZoneRef.hand(context.actor_id))) >= 2
+        ):
+            window_id = (
+                f"duel-zhangba:{runtime.turn_number}:"
+                f"{duel.trick_instance_id}"
+            )
+            hand_ids = tuple(
+                state.card_ids_in(ZoneRef.hand(context.actor_id))
+            )
+            snapshot_digest = sha256_value(hand_ids)
+            for index, first in enumerate(hand_ids):
+                for second in hand_ids[index + 1 :]:
+                    material_ids = (first, second)
+                    material_handle = _zhangba_material_handle(
+                        self._session_id,
+                        self._session_secret,
+                        window_id,
+                        context.actor_id,
+                        snapshot_digest,
+                        material_ids,
+                    )
+                    virtual_id = (
+                        f"virtual:zhangba:{runtime.turn_number}:"
+                        f"{first}:{second}"
+                    )
+                    actions.append(
+                        LegalAction(
+                            action_type=ActionType.PLAY_CARD,
+                            actor_id=context.actor_id,
+                            card_instance_id=virtual_id,
+                            target_ids=(duel.target_id,),
+                            payload={
+                                "operation": "play_slash_for_duel",
+                                "card_key": "sgs_basic_sha",
+                                "card_name": "杀",
+                                "response_to": duel.trick_instance_id,
+                                "root_trick_instance_id": (
+                                    duel.trick_instance_id
+                                ),
+                                "duel_user_id": duel.user_id,
+                                "duel_target_id": duel.target_id,
+                                "duel_response_index": (
+                                    duel.response_index
+                                ),
+                                "duel_round": duel.round_index,
+                                "handle": material_handle,
+                                "window_id": window_id,
+                                "zhangba_virtual": True,
+                            },
+                        )
+                    )
         return tuple(actions)
 
     def apply_duel_slash_play(
@@ -4637,20 +7063,6 @@ class ProductionBasicCardBatch:
             raise InvalidActionError("响应【决斗】的【杀】动作类型必须是打出")
         if action.card_instance_id is None:
             raise InvalidActionError("响应【决斗】必须指定真实实体【杀】")
-        card = state.cards_by_id[action.card_instance_id]
-        if card.card_key not in SLASH_CARD_KEYS:
-            raise InvalidActionError(
-                "响应【决斗】的实体牌必须是当前卡名为【杀】的正式实体【杀】"
-            )
-        if state.location_of(action.card_instance_id) != ZoneRef.hand(
-            context.actor_id
-        ):
-            raise InvalidActionError("只能打出行动角色真实手牌中的实体牌")
-        check_weapon_skill_gate(
-            state,
-            actor_id=context.actor_id,
-            decision="play_slash",
-        )
         payload = action.payload
         if str(payload.get("operation", "")) != "play_slash_for_duel":
             raise InvalidActionError("【决斗】响应动作负载无效")
@@ -4668,6 +7080,130 @@ class ProductionBasicCardBatch:
             )
         if payload.get("duel_round") != duel.round_index:
             raise InvalidActionError("【决斗】响应动作绑定的回合轮次已过期")
+
+        zhangba_virtual = bool(payload.get("zhangba_virtual"))
+        if zhangba_virtual:
+            # 丈八蛇矛虚拟打出：响应【决斗】时把两张手牌当作普通【杀】
+            # 打出；材料对只通过不透明句柄解析。
+            if (
+                equipped_weapon_key(state, context.actor_id)
+                != "sgs_weapon_zhangbashemao"
+            ):
+                raise InvalidActionError(
+                    "丈八蛇矛在选择前已失去，旧转化动作失败关闭"
+                )
+            window_id = (
+                f"duel-zhangba:{runtime.turn_number}:"
+                f"{duel.trick_instance_id}"
+            )
+            if payload.get("window_id") != window_id:
+                raise InvalidActionError("丈八材料选择窗口已过期")
+            material_ids = _resolve_zhangba_handle_direct(
+                self._session_id,
+                self._session_secret,
+                state,
+                window_id,
+                context.actor_id,
+                payload.get("handle"),
+            )
+            if material_ids is None:
+                raise InvalidActionError(
+                    "丈八材料句柄无效：伪造、跨窗口、跨会话或手牌已变化"
+                )
+            virtual_id = (
+                f"virtual:zhangba:{runtime.turn_number}:"
+                f"{material_ids[0]}:{material_ids[1]}"
+            )
+            if action.card_instance_id != virtual_id:
+                raise InvalidActionError(
+                    "丈八虚拟杀动作与材料组合不一致"
+                )
+            check_weapon_skill_gate(
+                state,
+                actor_id=context.actor_id,
+                decision="play_slash",
+            )
+            next_state, material_events = (
+                self._discard_zhangba_materials(
+                    state,
+                    actor_id=context.actor_id,
+                    material_ids=material_ids,
+                    window_id=(
+                        f"zhangba-materials:{runtime.turn_number}:"
+                        f"{context.actor_id}"
+                    ),
+                    purpose="duel_slash_response",
+                )
+            )
+            played_event = GameEvent(
+                event_type=EventType.CARD_PLAYED,
+                card_instance_id=virtual_id,
+                card_key="sgs_basic_sha",
+                card_user=context.actor_id,
+                target_ids=(duel.target_id,),
+                payload={
+                    "response_to": duel.trick_instance_id,
+                    "root_trick_instance_id": duel.trick_instance_id,
+                    "response_action": "play",
+                    "purpose": "duel_slash_response",
+                    "creates_card_used_event": False,
+                    "creates_card_played_event": True,
+                    "counts_for_use_or_play_total": True,
+                    "physical_or_virtual": "virtual",
+                    "virtual_source": "sgs_weapon_zhangbashemao",
+                    "material_card_instance_ids": list(material_ids),
+                    "response_provider": context.actor_id,
+                    "duel_user_id": duel.user_id,
+                    "duel_target_id": duel.target_id,
+                    "duel_response_index": duel.response_index,
+                    "duel_round": duel.round_index,
+                    "next_responder": duel.opponent_id,
+                },
+            )
+            self._events.extend((played_event, *material_events))
+            next_round = (duel.response_index + 1) // 2
+            next_duel = replace(
+                duel,
+                responder_id=duel.opponent_id,
+                opponent_id=duel.responder_id,
+                round_index=next_round,
+                response_index=duel.response_index + 1,
+                slash_sequence=(*duel.slash_sequence, virtual_id),
+            )
+            if not state.players_by_id[next_duel.responder_id].alive:
+                next_state, finish_event = self._finish_processing(
+                    next_state,
+                    duel.trick_instance_id,
+                    "duel_resolved_responder_dead",
+                    extra={
+                        "dead_responder": next_duel.responder_id,
+                        "root_trick_instance_id": duel.trick_instance_id,
+                    },
+                )
+                self._events.extend((finish_event,))
+                next_runtime = self._return_to_play(runtime)
+            else:
+                next_runtime = replace(
+                    runtime,
+                    pending_duel=next_duel,
+                )
+            self._commit_runtime(runtime, next_runtime)
+            return next_state
+
+        card = state.cards_by_id[action.card_instance_id]
+        if card.card_key not in SLASH_CARD_KEYS:
+            raise InvalidActionError(
+                "响应【决斗】的实体牌必须是当前卡名为【杀】的正式实体【杀】"
+            )
+        if state.location_of(action.card_instance_id) != ZoneRef.hand(
+            context.actor_id
+        ):
+            raise InvalidActionError("只能打出行动角色真实手牌中的实体牌")
+        check_weapon_skill_gate(
+            state,
+            actor_id=context.actor_id,
+            decision="play_slash",
+        )
 
         played_event = GameEvent(
             event_type=EventType.CARD_PLAYED,
@@ -5559,15 +8095,20 @@ class ProductionBasicCardBatch:
                     "creates_card_played_event": False,
                 },
             )
-            next_state, slash_finish = self._finish_processing(
+            next_state, slash_finish = self._finish_slash_processing(
                 next_state,
+                runtime,
                 pending.slash_instance_id,
                 "slash_cancelled_by_bagua",
             )
             cancelled_event = GameEvent(
                 event_type=EventType.CARD_EFFECT_CANCELLED,
                 card_instance_id=pending.slash_instance_id,
-                card_key=_card_key(state, pending.slash_instance_id),
+                card_key=(
+                    "sgs_basic_sha"
+                    if pending.virtual
+                    else _card_key(state, pending.slash_instance_id)
+                ),
                 card_user=pending.attacker_id,
                 target_ids=(context.actor_id,),
                 payload={
@@ -5576,9 +8117,12 @@ class ProductionBasicCardBatch:
                     "virtual_response": True,
                 },
             )
-            self._events.extend(
-                (virtual_dodge, cancelled_event, slash_finish)
-            )
+            if slash_finish is not None:
+                self._events.extend(
+                    (virtual_dodge, cancelled_event, slash_finish)
+                )
+            else:
+                self._events.extend((virtual_dodge, cancelled_event))
             next_state, next_runtime = self._complete_root_resolution(
                 next_state, next_runtime
             )
@@ -5932,6 +8476,31 @@ class ProductionBasicCardBatch:
                     payload={**base_payload, "handle": handle},
                 )
             )
+            # CP-04P 朱雀羽扇×借刀杀人（2026-08-08 用户移动版实测确认）：
+            # 被【借刀杀人】要求使用【杀】时同样可以发动朱雀羽扇，把普通
+            # 【杀】转换为火【杀】。只有第一目标当前装备朱雀羽扇且候选是
+            # 普通【杀】时才提供转换动作；应用层在 apply 时再次动态校验
+            # （武器在选择前失去则旧转换动作 stale 失败关闭）。
+            instance_id = runtime.borrowed_sword_slash_handles.get(handle)
+            if (
+                instance_id is not None
+                and state.cards_by_id[instance_id].card_key
+                == "sgs_basic_sha"
+                and equipped_weapon_key(state, pending.first_target_id)
+                == "sgs_weapon_zhuqueyushan"
+            ):
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.RESPOND,
+                        actor_id=pending.first_target_id,
+                        target_ids=(pending.first_target_id,),
+                        payload={
+                            **base_payload,
+                            "handle": handle,
+                            "converted_to_fire": True,
+                        },
+                    )
+                )
         actions.append(
             LegalAction(
                 action_type=ActionType.PASS,
@@ -6031,6 +8600,21 @@ class ProductionBasicCardBatch:
             pending.first_target_id
         ):
             raise InvalidActionError("借刀【杀】实体必须仍在第一目标手牌中")
+        fire_converted = bool(action.payload.get("converted_to_fire"))
+        if fire_converted:
+            # 朱雀羽扇×借刀：应用层动态重检——必须是普通【杀】且第一目标
+            # 当前仍装备朱雀羽扇；武器在选择前失去则旧转换动作失败关闭。
+            if card.card_key != "sgs_basic_sha":
+                raise InvalidActionError(
+                    "朱雀羽扇只能把普通【杀】转换为火【杀】"
+                )
+            if (
+                equipped_weapon_key(state, pending.first_target_id)
+                != "sgs_weapon_zhuqueyushan"
+            ):
+                raise InvalidActionError(
+                    "朱雀羽扇在选择前已失去，旧转换动作失败关闭"
+                )
         check_weapon_skill_gate(
             state,
             actor_id=pending.first_target_id,
@@ -6044,6 +8628,7 @@ class ProductionBasicCardBatch:
             slash_instance_id=instance_id,
             attacker_id=pending.first_target_id,
             target_id=pending.second_target_id,
+            fire_converted=fire_converted,
         )
         self._commit_runtime(runtime, next_runtime)
         return next_state
@@ -6057,6 +8642,7 @@ class ProductionBasicCardBatch:
         slash_instance_id: str,
         attacker_id: str,
         target_id: str,
+        fire_converted: bool = False,
     ) -> tuple[GameState, _BatchRuntime]:
         """借刀要求的正式【杀】使用子结算。
 
@@ -6075,20 +8661,29 @@ class ProductionBasicCardBatch:
             state, slash_instance_id, attacker_id, "borrowed_sword_slash_use"
         )
         boosted = runtime.wine_buff_owner_id == attacker_id
+        damage_nature = (
+            "火属性" if fire_converted else adapter.damage_nature
+        )
+        use_payload: dict[str, object] = {
+            "damage_nature": damage_nature,
+            "boosted": boosted,
+            "forced_use_context": "borrowed_sword",
+            "ignore_slash_use_limit": True,
+            "root_trick_instance_id": pending.trick_instance_id,
+            "root_trick_user_id": pending.user_id,
+        }
+        if fire_converted:
+            use_payload["converted_to_fire"] = True
+            use_payload["weapon_convert_context"] = (
+                "zhuqueyushan_borrowed_sword"
+            )
         used_event = GameEvent(
             event_type=EventType.CARD_USED,
             card_instance_id=slash_instance_id,
             card_key=card.card_key,
             card_user=attacker_id,
             target_ids=(target_id,),
-            payload={
-                "damage_nature": adapter.damage_nature,
-                "boosted": boosted,
-                "forced_use_context": "borrowed_sword",
-                "ignore_slash_use_limit": True,
-                "root_trick_instance_id": pending.trick_instance_id,
-                "root_trick_user_id": pending.user_id,
-            },
+            payload=use_payload,
         )
         queued = self._events.extend((used_event, move_event))
         used_sequence = queued[0].sequence
@@ -6097,13 +8692,77 @@ class ProductionBasicCardBatch:
             **runtime.slash_used_counts,
             attacker_id: runtime.slash_used_counts.get(attacker_id, 0) + 1,
         }
+        # CP-04P：借刀强制【杀】同样按武器技能来源读取第一目标的当前
+        # 武器槽（青釭剑无视目标防具；古锭刀伤害+1由伤害时统一判定点按
+        # 目标当前权威手牌动态计算，不在使用/指定目标时快照；武器技能
+        # 只读取第一目标当前武器槽，不读取借刀使用者的武器，与借刀
+        # 第二目标距离口径一致）。
+        equipped_weapon = equipped_weapon_key(state, attacker_id)
+        ignore_armor = equipped_weapon == "sgs_weapon_qinggangjian"
+        # CP-04P 朱雀羽扇×借刀：转火杀按火【杀】身份结算——从使用入口
+        # 开始，藤甲普通杀免疫等无效化检查按转化后的身份处理（转换后
+        # 不再被藤甲免疫；未转换的普通杀仍按普通杀身份接受无效化检查）。
+        if not fire_converted:
+            invalidation = armor_invalidates_effect(
+                state,
+                victim_id=target_id,
+                card_instance_id=slash_instance_id,
+                card_key=card.card_key,
+                ignore_armor=ignore_armor,
+            )
+            if invalidation is not None:
+                invalid_reason, armor_id = invalidation
+                next_state, finish_event = self._finish_processing(
+                    next_state,
+                    slash_instance_id,
+                    f"slash_invalidated_by_{invalid_reason}",
+                )
+                cancelled_event = GameEvent(
+                    event_type=EventType.CARD_EFFECT_CANCELLED,
+                    card_instance_id=slash_instance_id,
+                    card_key=card.card_key,
+                    card_user=attacker_id,
+                    target_ids=(target_id,),
+                    payload={
+                        "reason": invalid_reason,
+                        "armor_instance_id": armor_id,
+                        "armor_key": _card_key(state, armor_id),
+                        "invalidated_by_armor": True,
+                        "forced_use_context": "borrowed_sword",
+                    },
+                )
+                self._events.extend((cancelled_event, finish_event))
+                base_runtime = replace(
+                    runtime,
+                    slash_used_counts=MappingProxyType(next_counts),
+                    wine_buff_owner_id=None,
+                    pending_slash=None,
+                    pending_borrowed_sword=replace(
+                        pending,
+                        stage="slash_resolving",
+                        chosen_slash_instance_id=slash_instance_id,
+                        decision="use_slash",
+                        requirement_fulfilled=True,
+                    ),
+                    borrowed_sword_slash_handles=MappingProxyType({}),
+                    borrowed_sword_slash_snapshot_digest=None,
+                )
+                next_state, next_runtime = self._complete_root_resolution(
+                    next_state, base_runtime
+                )
+                return next_state, next_runtime
         next_runtime = replace(
             runtime,
             phase=ProductionPhase.SLASH_RESPONSE,
             slash_used_counts=MappingProxyType(next_counts),
             wine_buff_owner_id=None,
             pending_slash=_PendingSlash(
-                attacker_id, target_id, slash_instance_id, boosted
+                attacker_id,
+                target_id,
+                slash_instance_id,
+                boosted,
+                ignore_armor=ignore_armor,
+                fire_converted=fire_converted,
             ),
             pending_borrowed_sword=replace(
                 pending,
@@ -7568,6 +10227,60 @@ class ProductionBasicCardBatch:
                     },
                 )
             )
+        # CP-04P 丈八蛇矛（7.8 当前确认）：响应需要打出【杀】的入口
+        # （【南蛮入侵】）同样可以把两张手牌当作普通【杀】打出；材料对
+        # 只通过不透明句柄暴露。
+        if (
+            any(
+                card_key in SLASH_CARD_KEYS
+                for card_key in adapter.response_card_keys
+            )
+            and equipped_weapon_key(state, current)
+            == "sgs_weapon_zhangbashemao"
+            and len(state.card_ids_in(ZoneRef.hand(current))) >= 2
+        ):
+            hand_ids = tuple(state.card_ids_in(ZoneRef.hand(current)))
+            snapshot_digest = sha256_value(hand_ids)
+            for index, first in enumerate(hand_ids):
+                for second in hand_ids[index + 1 :]:
+                    material_ids = (first, second)
+                    material_handle = _zhangba_material_handle(
+                        self._session_id,
+                        self._session_secret,
+                        window_id,
+                        current,
+                        snapshot_digest,
+                        material_ids,
+                    )
+                    virtual_id = (
+                        f"virtual:zhangba:{runtime.turn_number}:"
+                        f"{first}:{second}"
+                    )
+                    actions.append(
+                        LegalAction(
+                            action_type=ActionType.PLAY_CARD,
+                            actor_id=context.actor_id,
+                            card_instance_id=virtual_id,
+                            target_ids=(current,),
+                            payload={
+                                "operation": adapter.response_operation,
+                                "response_to": group.trick_instance_id,
+                                "root_trick_instance_id": (
+                                    group.trick_instance_id
+                                ),
+                                "target_id": current,
+                                "target_index": (
+                                    group.current_target_index
+                                ),
+                                "window_id": window_id,
+                                "state_hash": state_sha256(
+                                    canonical_state_snapshot(state)
+                                ),
+                                "handle": material_handle,
+                                "zhangba_virtual": True,
+                            },
+                        )
+                    )
         return tuple(actions)
 
     def apply_group_response_play(
@@ -7621,6 +10334,92 @@ class ProductionBasicCardBatch:
             raise InvalidActionError(
                 f"{adapter.card_name}响应动作绑定的状态哈希与当前状态不一致"
             )
+        if bool(payload.get("zhangba_virtual")):
+            # 丈八蛇矛虚拟打出：响应【南蛮入侵】时把两张手牌当作普通
+            # 【杀】打出；材料对只通过不透明句柄解析。
+            if adapter.card_key != "sgs_trick_nanmanruqin":
+                raise InvalidActionError(
+                    "只有响应【南蛮入侵】要求打出【杀】时可以使用丈八转化"
+                )
+            if (
+                equipped_weapon_key(state, context.actor_id)
+                != "sgs_weapon_zhangbashemao"
+            ):
+                raise InvalidActionError(
+                    "丈八蛇矛在选择前已失去，旧转化动作失败关闭"
+                )
+            window_id = self._group_response_window_id(runtime, group)
+            material_ids = _resolve_zhangba_handle_direct(
+                self._session_id,
+                self._session_secret,
+                state,
+                window_id,
+                context.actor_id,
+                payload.get("handle"),
+            )
+            if material_ids is None:
+                raise InvalidActionError(
+                    "丈八材料句柄无效：伪造、跨窗口、跨会话或手牌已变化"
+                )
+            virtual_id = (
+                f"virtual:zhangba:{runtime.turn_number}:"
+                f"{material_ids[0]}:{material_ids[1]}"
+            )
+            if action.card_instance_id != virtual_id:
+                raise InvalidActionError(
+                    "丈八虚拟杀动作与材料组合不一致"
+                )
+            check_weapon_skill_gate(
+                state,
+                actor_id=context.actor_id,
+                decision="play_slash",
+            )
+            next_state, material_events = (
+                self._discard_zhangba_materials(
+                    state,
+                    actor_id=context.actor_id,
+                    material_ids=material_ids,
+                    window_id=(
+                        f"zhangba-materials:{runtime.turn_number}:"
+                        f"{context.actor_id}"
+                    ),
+                    purpose=f"{group.trick_key}_response",
+                )
+            )
+            played_event = GameEvent(
+                event_type=EventType.CARD_PLAYED,
+                card_instance_id=virtual_id,
+                card_key="sgs_basic_sha",
+                card_user=context.actor_id,
+                target_ids=(current,),
+                payload={
+                    "response_to": group.trick_instance_id,
+                    "root_trick_instance_id": group.trick_instance_id,
+                    "response_action": "play",
+                    "purpose": f"{group.trick_key}_response",
+                    "creates_card_used_event": False,
+                    "creates_card_played_event": True,
+                    "counts_for_use_or_play_total": True,
+                    "physical_or_virtual": "virtual",
+                    "virtual_source": "sgs_weapon_zhangbashemao",
+                    "material_card_instance_ids": list(material_ids),
+                    "response_provider": context.actor_id,
+                    "group_target_id": current,
+                    "group_target_index": group.current_target_index,
+                    "group_target_count": len(group.target_sequence),
+                    "group_user_id": group.user_id,
+                },
+            )
+            self._events.extend((played_event, *material_events))
+            resolved = self._group_resolved_event(
+                next_state, group, current, result="responded"
+            )
+            self._events.extend((resolved,))
+            next_state, next_runtime = self._advance_group_target(
+                next_state, runtime, group, current
+            )
+            self._commit_runtime(runtime, next_runtime)
+            return next_state
         handle = payload.get("handle")
         instance_id = _resolve_group_response_handle(
             self._session_id,
@@ -7988,7 +10787,10 @@ class ProductionBasicCardBatch:
                     next_state, runtime, dying_id, rescued=True
                 )
             else:
-                if runtime.defer_damage_card_finish:
+                if (
+                    runtime.defer_damage_card_finish
+                    or runtime.damage_card_already_finished
+                ):
                     next_state = next_state
                 else:
                     next_state, finish_event = self._finish_processing(
@@ -8086,7 +10888,10 @@ class ProductionBasicCardBatch:
                     next_state, runtime, dying_id, rescued=True
                 )
             else:
-                if runtime.defer_damage_card_finish:
+                if (
+                    runtime.defer_damage_card_finish
+                    or runtime.damage_card_already_finished
+                ):
                     next_state = next_state
                 else:
                     next_state, finish_event = self._finish_processing(
@@ -8163,7 +10968,10 @@ class ProductionBasicCardBatch:
                 )
                 self._commit_runtime(runtime, next_runtime)
                 return next_state
-            if runtime.defer_damage_card_finish:
+            if (
+                runtime.defer_damage_card_finish
+                or runtime.damage_card_already_finished
+            ):
                 # 根牌（闪电）完成时点由 _complete_root_resolution 控制
                 next_state = state
             else:
@@ -8200,7 +11008,10 @@ class ProductionBasicCardBatch:
         if chain is not None and dying_id != chain.original_target_id:
             # 传导目标死亡时根牌已完成结算，不再重复处理根牌。
             finish_events: list[GameEvent] = []
-        elif runtime.defer_damage_card_finish:
+        elif (
+            runtime.defer_damage_card_finish
+            or runtime.damage_card_already_finished
+        ):
             # 根牌（闪电）完成时点由本路径统一清理
             finish_events = []
         else:
@@ -8329,6 +11140,11 @@ class ProductionBasicCardBatch:
             discard_phase_selected_ids=(),
             discard_phase_handles=MappingProxyType({}),
             discard_phase_snapshot_digest=None,
+            pending_weapon_choice=None,
+            pending_slash_choice=None,
+            pending_discard_two=None,
+            pending_hanbing_discard=None,
+            damage_card_already_finished=False,
         )
         self._commit_runtime(runtime, next_runtime)
         return next_state
@@ -9483,6 +12299,7 @@ class ProductionBasicCardBatch:
             discard_phase_selected_ids=(),
             discard_phase_handles=MappingProxyType({}),
             discard_phase_snapshot_digest=None,
+            pending_weapon_choice=None,
         )
         self._commit_runtime(runtime, next_runtime)
         return next_state
@@ -9542,6 +12359,7 @@ class ProductionBasicCardBatch:
             discard_phase_selected_ids=(),
             discard_phase_handles=MappingProxyType({}),
             discard_phase_snapshot_digest=None,
+            pending_weapon_choice=None,
         )
         self._commit_runtime(runtime, next_runtime)
         return next_state

@@ -1218,9 +1218,11 @@ def test_slash_use_still_normal_without_armor() -> None:
     assert not _events_of(game, EventType.CARD_EFFECT_CANCELLED)
 
 
-def test_qinggang_gate_still_fails_closed_when_target_has_armor() -> None:
-    """真实武器“无视防具”调用仍为 NOT PROVEN：青釭剑对穿防具目标使用
-    杀时由集中式武器门禁失败关闭，不得静默接入防具无视效果。"""
+def test_qinggang_ignores_target_armor_through_real_armor_path() -> None:
+    """CP-04P：青釭剑真实 ignore_armor 接入统一防具无效化入口。
+
+    目标装备藤甲（免疫普通【杀】）时，装备青釭剑的使用者使用普通【杀】
+    不再被藤甲无效化，响应窗口正常打开；杀结算结束后防具恢复正常。"""
     game = _fresh(seed=3)
     _equip_armor_fixture(game, TENGJIA, _other(game))
     qinggang = next(
@@ -1234,8 +1236,14 @@ def test_qinggang_gate_still_fails_closed_when_target_has_armor() -> None:
         r for r in game.formal_registry.records if r.card_key == SHA
     )
     _give_exact_hand(game, slash_record.instance_id, _me(game))
-    with pytest.raises(UnsupportedRuleError):
-        _action(game, "use_slash", card_key=SHA)
+    slash_action = _action(game, "use_slash", card_key=SHA)
+    assert slash_action is not None, "青釭剑下藤甲免疫必须被抑制"
+    _step(game, slash_action)
+    assert game.phase is ProductionPhase.SLASH_RESPONSE
+    # 防具实体仍在目标装备区，未被移除
+    assert game.state.card_ids_in(
+        ZoneRef.equipment(_other(game), "armor")
+    )
 
 
 def test_judgment_entry_indices_invariant_regression() -> None:
