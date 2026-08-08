@@ -284,23 +284,43 @@ def attack_range_of(state: GameState, player_id: str) -> int:
 
 
 def base_seat_distance(state: GameState, source_id: str, target_id: str) -> int:
-    """按当前座次的环形座次计算基础距离。
+    """按当前座次的环形座次计算基础距离（G-001 修复：死亡角色从距离环跳过）。
 
-    距离 = 顺时针与逆时针座位步数中的较小值；自己到自己的基础距离为0；
-    死亡角色按基础术语第16节由存活角色环跳过（当前双人生产切片中由
-    调用方先行排除死亡目标）。"""
+    距离 = 顺时针与逆时针座位步数中的较小值；只在该角色为存活角色的环
+    中计算——死亡角色按基础术语第16节由存活角色环跳过（角色死亡后相邻
+    关系因环收缩）。自己到自己的基础距离为0；两名不同存活角色之间的
+    基础距离最低为1（环收缩到仅剩两名存活角色时仍为1）；source 或 target
+    为死亡角色时失败关闭（调用方必须先排除死亡目标）。"""
 
     players = state.players_by_id
     if source_id not in players or target_id not in players:
         raise UnsupportedRuleError(f"计算距离时找不到角色{source_id!r}或{target_id!r}")
     if source_id == target_id:
         return 0
-    seats = sorted(player.seat for player in state.players)
-    source_seat = players[source_id].seat
-    target_seat = players[target_id].seat
-    span = abs(source_seat - target_seat)
-    ring_size = len(seats)
-    return min(span, ring_size - span)
+    source = players[source_id]
+    target = players[target_id]
+    if not source.alive or not target.alive:
+        raise UnsupportedRuleError(
+            f"角色{source_id!r}或{target_id!r}已死亡；死亡角色不参与距离环，"
+            "调用方必须先排除死亡目标"
+        )
+    alive = sorted(
+        (player for player in state.players if player.alive),
+        key=lambda player: player.seat,
+    )
+    if len(alive) < 2:
+        raise UnsupportedRuleError("距离环至少需要两名存活角色")
+    ring_ids = [player.player_id for player in alive]
+    source_index = ring_ids.index(source_id)
+    target_index = ring_ids.index(target_id)
+    span = abs(source_index - target_index)
+    ring_size = len(ring_ids)
+    distance = min(span, ring_size - span)
+    if distance < 1:
+        # 两名不同存活角色之间的基础距离最低为1（如5人环中1与5相邻，
+        # 或中间角色全部死亡后环收缩为相邻）
+        distance = 1
+    return distance
 
 
 def effective_distance(state: GameState, source_id: str, target_id: str) -> int:
@@ -384,9 +404,15 @@ def hand_limit_of(state: GameState, player_id: str) -> int:
 
 
 def is_valid_slash_target(state: GameState, attacker_id: str, target_id: str) -> bool:
-    """真实执行【杀】系列的目标与距离合法性检查。"""
+    """真实执行【杀】系列的目标与距离合法性检查（G-001：拒绝死亡目标）。"""
 
     if attacker_id == target_id:
+        return False
+    target = state.players_by_id.get(target_id)
+    if target is None or not target.alive:
+        return False
+    attacker = state.players_by_id.get(attacker_id)
+    if attacker is None or not attacker.alive:
         return False
     return actual_distance(state, attacker_id, target_id) <= attack_range_of(
         state, attacker_id
@@ -415,12 +441,15 @@ def check_weapon_skill_gate(
 ) -> None:
     """集中式武器技能影响门禁（CP-04K）。
 
-    11种武器只实现牌本体，专属技能全部保持 partial。本函数在首次需要
-    作出相关判断前检查：若能以当前完整公开状态证明专属技能不可能影响
-    本次合法性、可选动作或结算结果则直接返回；否则抛出
-    ``UnsupportedRuleError`` 失败关闭。失败发生在任何状态、事件、RNG、
-    pending或处理区变化之前。禁止把未知条件当作 false，禁止把武器技能
-    近似为无效果。
+    11种武器中8种（诸葛连弩、青釭剑、寒冰剑、古锭刀、青龙偃月刀、贯石斧、
+    朱雀羽扇、麒麟弓）已在双人生产入口实现完整生产语义并计入 COMPLETE；
+    3种保持 PARTIAL（雌雄双股剑：CHARACTER_GENDER_METADATA_NOT_AVAILABLE；
+    丈八蛇矛：VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP；方天画戟：
+    MULTIPLAYER/MULTI_TARGET_INFRASTRUCTURE_GAP），本函数在首次需要作出
+    相关判断前检查：若能以当前完整公开状态证明专属技能不可能影响本次
+    合法性、可选动作或结算结果则直接返回；否则抛出 ``UnsupportedRuleError``
+    失败关闭。失败发生在任何状态、事件、RNG、pending或处理区变化之前。
+    禁止把未知条件当作 false，禁止把武器技能近似为无效果。
     """
 
     if decision not in _WEAPON_GATE_DECISIONS:
@@ -2376,8 +2405,9 @@ class WeaponCardAdapter(BasicCardAdapter):
 
     只实现牌本体：出牌阶段主动使用、武器进入weapon槽、同槽替换把旧武器
     原子移入弃牌堆、攻击范围按正式结构化CSV登记值动态计算、装备区公开。
-    武器专属技能全部保持 partial，由 ``check_weapon_skill_gate`` 集中
-    失败关闭，不近似为无效果。
+    武器专属技能状态以 ``WEAPON_SKILL_STATUS`` 为准：8种COMPLETE在双人生
+    产入口真实结算，3种PARTIAL（雌雄双股剑／丈八蛇矛／方天画戟）由
+    ``check_weapon_skill_gate`` 集中失败关闭，不近似为无效果。
     """
 
     def __init__(

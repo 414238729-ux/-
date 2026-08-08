@@ -1053,6 +1053,10 @@ def _use_slash_to_damage(
 
 
 def test_qilingong_discards_target_mount_after_damage() -> None:
+    """麒麟弓窗口在本次伤害真正结算、HP扣减之前打开（USER_CONFIRMED_
+    MOBILE_RULE＋IN_GAME_CARD_TEXT_CONFIRMED）：弃坐骑完成 → HP扣减/DAMAGE。
+    事件顺序必须为：麒麟弓坐骑移动/失牌 → DAMAGE → HP最终状态。"""
+
     game = _fresh(seed=3)
     _equip(game, "sgs_weapon_qilingong")
     mount = next(
@@ -1064,14 +1068,30 @@ def test_qilingong_discards_target_mount_after_damage() -> None:
     _put_hand(game, "sgs_basic_sha")
     _use_slash_to_damage(game)
     assert game.phase is ProductionPhase.WEAPON_AFTER_DAMAGE
-    # 伤害已真实造成（HP已扣、damage事件已产生），再进入弃坐骑窗口
-    damages = _damages(game)
-    assert len(damages) == 1 and damages[0].amount == 1
-    assert game.state.players_by_id["p2"].hp == 3
+    # 窗口打开时：HP尚未扣减、DAMAGE事件尚未产生
+    assert game.state.players_by_id["p2"].hp == 4, (
+        "麒麟弓窗口必须出现在HP扣减之前"
+    )
+    assert not _damages(game), "麒麟弓窗口打开时不得已有DAMAGE事件"
     discard = _action(game, "weapon_discard_mount")
     assert discard is not None and discard.card_instance_id == mount.instance_id
     _step(game, discard)
+    # 弃坐骑完成后：坐骑移动/失牌事件先于DAMAGE事件
+    mount_events = [
+        e
+        for e in game.events
+        if e.card_instance_id == mount.instance_id
+        and e.event_type in (EventType.CARD_MOVED, EventType.CARD_LOST)
+        and e.payload.get("reason") == "qilingong_mount_discard"
+    ]
+    damages = _damages(game)
+    assert len(mount_events) == 2
+    assert len(damages) == 1 and damages[0].amount == 1
+    assert max(e.sequence for e in mount_events) < damages[0].sequence, (
+        "坐骑移动/失牌事件必须先于DAMAGE事件"
+    )
     assert mount.instance_id in game.state.card_ids_in(DISCARD_PILE)
+    assert game.state.players_by_id["p2"].hp == 3
     assert game.phase is ProductionPhase.PLAY
     _assert_conservation(game)
 
@@ -1088,11 +1108,74 @@ def test_qilingong_pass_keeps_mount() -> None:
     _put_hand(game, "sgs_basic_sha")
     _use_slash_to_damage(game)
     assert game.phase is ProductionPhase.WEAPON_AFTER_DAMAGE
+    # 放弃窗口时HP尚未扣减、无DAMAGE
+    assert game.state.players_by_id["p2"].hp == 4
+    assert not _damages(game)
     _step(game, _action(game, "pass_weapon_choice"))
     assert mount.instance_id in game.state.card_ids_in(
         ZoneRef.equipment("p2", "defense_horse")
     )
+    # 放弃后进入真正伤害结算：HP扣减+DAMAGE
+    damages = _damages(game)
+    assert len(damages) == 1 and damages[0].amount == 1
+    assert game.state.players_by_id["p2"].hp == 3
     assert game.phase is ProductionPhase.PLAY
+    _assert_conservation(game)
+
+
+def test_qilingong_dying_after_mount_then_damage() -> None:
+    """目标1HP：麒麟弓先处理 → 再扣到0 → 再进入DYING。"""
+
+    game = _fresh(seed=3)
+    _equip(game, "sgs_weapon_qilingong")
+    _set_hp(game, "p2", 1)
+    mount = next(
+        r for r in game.formal_registry.records if r.card_key == "sgs_mount_defensive"
+    )
+    game._state = game.state.move_card(
+        mount.instance_id, ZoneRef.equipment("p2", "defense_horse")
+    )
+    _put_hand(game, "sgs_basic_sha")
+    _use_slash_to_damage(game)
+    assert game.phase is ProductionPhase.WEAPON_AFTER_DAMAGE
+    assert game.state.players_by_id["p2"].hp == 1
+    assert not _damages(game)
+    discard = _action(game, "weapon_discard_mount")
+    assert discard is not None
+    _step(game, discard)
+    assert mount.instance_id in game.state.card_ids_in(DISCARD_PILE)
+    damages = _damages(game)
+    assert len(damages) == 1 and damages[0].amount == 1
+    assert game.state.players_by_id["p2"].hp == 0
+    assert game.phase is ProductionPhase.DYING_RESCUE, (
+        "麒麟弓处理完成后扣到0，再进入DYING"
+    )
+    _assert_conservation(game)
+
+
+def test_qilingong_pass_then_dying() -> None:
+    """目标1HP且放弃麒麟弓：放弃窗口结束 → damage → dying。"""
+
+    game = _fresh(seed=3)
+    _equip(game, "sgs_weapon_qilingong")
+    _set_hp(game, "p2", 1)
+    mount = next(
+        r for r in game.formal_registry.records if r.card_key == "sgs_mount_defensive"
+    )
+    game._state = game.state.move_card(
+        mount.instance_id, ZoneRef.equipment("p2", "defense_horse")
+    )
+    _put_hand(game, "sgs_basic_sha")
+    _use_slash_to_damage(game)
+    assert game.phase is ProductionPhase.WEAPON_AFTER_DAMAGE
+    _step(game, _action(game, "pass_weapon_choice"))
+    assert mount.instance_id in game.state.card_ids_in(
+        ZoneRef.equipment("p2", "defense_horse")
+    )
+    assert len(_damages(game)) == 1
+    assert game.state.players_by_id["p2"].hp == 0
+    assert game.phase is ProductionPhase.DYING_RESCUE
+    _assert_conservation(game)
 
 
 def test_qilingong_no_window_when_target_has_no_mount() -> None:
@@ -1701,3 +1784,136 @@ def test_guanshifu_submit_authoritative_rejects_self() -> None:
     )
     assert game.phase is ProductionPhase.WEAPON_DISCARD_TWO
     _assert_conservation(game)
+
+
+# ----------------------------------------------------------------------
+# G-003 修复：丈八统一 fail-closed（WHOLE_REPO_AUDIT_REMEDIATION_1）
+# ----------------------------------------------------------------------
+
+
+def _zhangba_non_slash_hand(game, player_id: str) -> None:
+    """清空该角色手牌并放入两张非实体杀手牌（满足材料数量但无实体杀）。"""
+    for instance_id in list(game.state.card_ids_in(ZoneRef.hand(player_id))):
+        game._state = game.state.move_card(instance_id, DISCARD_PILE)
+    for key in ("sgs_basic_shan", "sgs_basic_tao"):
+        record = next(r for r in game.formal_registry.records if r.card_key == key)
+        game._state = game.state.move_card(
+            record.instance_id, ZoneRef.hand(player_id)
+        )
+
+
+def test_zhangba_play_public_legal_actions_fails_closed() -> None:
+    """装备丈八＋两张非实体杀手牌：出牌阶段 public legal_actions 必须以
+    PARTIAL/UnsupportedRule 边界失败关闭，而不是生成 virtual:zhangba:*
+    candidate 后撞公共实体验证器。"""
+    game = _fresh(seed=3)
+    _equip(game, "sgs_weapon_zhangbashemao")
+    _zhangba_non_slash_hand(game, "p1")
+    with pytest.raises(UnsupportedRuleError):
+        game.legal_actions()
+    _assert_conservation(game)
+
+
+def test_zhangba_duel_public_legal_actions_fails_closed() -> None:
+    """响应【决斗】时装备丈八＋两张非实体杀手牌：决斗响应 public
+    legal_actions 必须在枚举 virtual proposal 之前直接失败关闭。"""
+    game = _fresh(seed=3)
+    _equip(game, "sgs_weapon_zhangbashemao", "p2")
+    _zhangba_non_slash_hand(game, "p2")
+    _step(game, _action(game, "use_duel"))
+    _step(game, _action(game, "pass_trick_response"))
+    _step(game, _action(game, "pass_trick_response"))
+    assert game.phase is ProductionPhase.DUEL_RESPONSE
+    with pytest.raises(UnsupportedRuleError):
+        game.legal_actions()
+    _assert_conservation(game)
+
+
+def test_zhangba_nanman_public_legal_actions_fails_closed() -> None:
+    """响应【南蛮入侵】时装备丈八＋两张非实体杀手牌：南蛮响应 public
+    legal_actions 必须在枚举 virtual proposal 之前直接失败关闭。"""
+    game = _fresh(seed=3)
+    _equip(game, "sgs_weapon_zhangbashemao", "p2")
+    _zhangba_non_slash_hand(game, "p2")
+    _put_hand(game, "sgs_trick_nanmanruqin")
+    _step(game, _action(game, "use_nanman"))
+    _step(game, _action(game, "pass_trick_response"))
+    _step(game, _action(game, "pass_trick_response"))
+    assert game.phase is ProductionPhase.NANMAN_RESPONSE
+    with pytest.raises(UnsupportedRuleError):
+        game.legal_actions()
+    _assert_conservation(game)
+
+
+def test_qilingong_timing_replay_reexecutes() -> None:
+    """麒麟弓 choice 与事件顺序（坐骑移动/失牌→DAMAGE）必须被 strict
+    replay 确定性重现；篡改事件顺序被拒绝。"""
+
+    def fixture(game: ProductionBasicCardBatch) -> None:
+        _equip(game, "sgs_weapon_qilingong")
+        for instance_id in list(game.state.card_ids_in(ZoneRef.hand("p2"))):
+            game._state = game.state.move_card(instance_id, DISCARD_PILE)
+        mount = next(
+            r
+            for r in game.formal_registry.records
+            if r.card_key == "sgs_mount_offensive"
+        )
+        game._state = game.state.move_card(
+            mount.instance_id, ZoneRef.equipment("p2", "attack_horse")
+        )
+        _put_hand(game, "sgs_basic_sha")
+
+    from scripts.sgs_engine.production_replay import (
+        ProductionReplayDivergenceError,
+        ProductionReplayFormatError,
+        ProductionReexecutionReplay,
+        record_reference_production_batch,
+        reexecute_production_replay,
+    )
+
+    class _QilinController(BatchReferenceController):
+        strategy_version = "production-batch-qilin-controller.v1"
+
+        def choose(self, legal_actions, context):
+            for action in legal_actions:
+                if action.payload.get("operation") == "use_slash":
+                    return action
+            return super().choose(legal_actions, context)
+
+    record = record_reference_production_batch(
+        seed=3, fixture=fixture, controller=_QilinController()
+    )
+    # 事件顺序：坐骑移动/失牌先于DAMAGE
+    mount_seq = [
+        e["sequence"]
+        for e in record.events
+        if e.get("payload", {}).get("reason") == "qilingong_mount_discard"
+        and e.get("event_type") in ("card_moved", "card_lost")
+    ]
+    damage_seq = [
+        e["sequence"]
+        for e in record.events
+        if e.get("event_type") == "damage"
+    ]
+    assert mount_seq and damage_seq
+    assert max(mount_seq) < damage_seq[0]
+    result = reexecute_production_replay(record, fixture=fixture)
+    assert result.verified is True
+    # 篡改：把DAMAGE sequence 提前到坐骑移动之前（交换sequence）
+    tampered = copy.deepcopy(record.to_dict())
+    events = tampered["events"]
+    dmg = next(e for e in events if e.get("event_type") == "damage")
+    mount = next(
+        e
+        for e in events
+        if e.get("payload", {}).get("reason") == "qilingong_mount_discard"
+        and e.get("event_type") == "card_moved"
+    )
+    dmg["sequence"], mount["sequence"] = mount["sequence"], dmg["sequence"]
+    del tampered["record_sha256"]
+    with pytest.raises(
+        (ProductionReplayFormatError, ProductionReplayDivergenceError)
+    ):
+        reexecute_production_replay(
+            ProductionReexecutionReplay.from_dict(tampered), fixture=fixture
+        )

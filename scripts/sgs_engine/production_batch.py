@@ -373,7 +373,15 @@ class _PendingChainDamage:
 
 @dataclass(frozen=True, slots=True)
 class _PendingWeaponChoice:
-    """CP-04P 武器触发选择窗口挂起状态（当前用于麒麟弓伤害后弃坐骑）。"""
+    """CP-04P 武器触发选择窗口挂起状态（当前用于麒麟弓弃坐骑）。
+
+    麒麟弓时序（USER_CONFIRMED_MOBILE_RULE＋IN_GAME_CARD_TEXT_CONFIRMED，
+    2026-08-08 用户移动版卡面文本与牌局记录确认）：本次【杀】确定将造成
+    伤害（防具解析后 final_amount>0）→ 麒麟弓触发窗口（弃坐骑／放弃）→
+    坐骑正式离开装备区并完成对应牌移动/事件 → 然后本次伤害正式结算、
+    HP 扣减／DAMAGE event → HP<=0 再进入 dying/rescue → 后续正式结算。
+    因此窗口在 HP 扣减与 DAMAGE event 之前打开，挂起参数用于窗口关闭后
+    执行真正的伤害结算。"""
 
     weapon_key: str
     kind: str
@@ -382,7 +390,7 @@ class _PendingWeaponChoice:
     slash_instance_id: str
     damage_event_id: str | None
     window_id: str
-    # 伤害后待恢复的原始结算参数（濒死检查／传导／根牌完成）
+    # 窗口关闭后执行真正伤害结算所需的原始参数（HP扣减+DAMAGE+濒死/传导/根牌）
     damage_amount: int
     damage_type: str
     card_key: str
@@ -393,6 +401,10 @@ class _PendingWeaponChoice:
     death_reason: str
     rescue_reason: str
     defer_root_finish: bool
+    declared_amount: int = 0
+    modifiers: tuple[str, ...] = ()
+    armor_ignored: bool = False
+    extra_payload: Mapping[str, object] = MappingProxyType({})
 
 
 @dataclass(frozen=True, slots=True)
@@ -2558,6 +2570,20 @@ class ProductionBasicCardBatch:
                 equipped_weapon_key(state, actor) == "sgs_weapon_zhangbashemao"
                 and self._runtime.slash_used_counts.get(actor, 0) == 0
             ):
+                # G-003 统一 fail-closed：丈八蛇矛保持 PARTIAL（VIRTUAL_CARD_
+                # SUBCARD_LIFECYCLE_RULE_GAP），在正式枚举 virtual proposal
+                # 之前直接门禁拒绝（decision=use_slash，手牌≥2时抛
+                # UnsupportedRuleError），不生成 virtual:zhangba:* candidate
+                # 后再撞公共实体验证器。
+                check_weapon_skill_gate(
+                    state,
+                    actor_id=actor,
+                    decision="use_slash",
+                    target_id=self.opponent_of(actor),
+                    slash_used_count=self._runtime.slash_used_counts.get(
+                        actor, 0
+                    ),
+                )
                 hand_ids = tuple(state.card_ids_in(ZoneRef.hand(actor)))
                 if len(hand_ids) >= 2:
                     window_id = (
@@ -3738,6 +3764,93 @@ class ProductionBasicCardBatch:
             if runtime.pending_chain is not None:
                 return self._advance_chain(next_state, runtime)
             return self._complete_root_resolution(next_state, runtime)
+        if weapon_choice is not None:
+            # CP-04P 麒麟弓（USER_CONFIRMED_MOBILE_RULE＋IN_GAME_CARD_TEXT_
+            # CONFIRMED，2026-08-08 用户移动版卡面文本与牌局记录确认）：本次
+            # 【杀】确定将造成伤害（防具解析后 final_amount>0）时，在 HP 扣减
+            # 与 DAMAGE event 之前打开麒麟弓触发窗口；弃置坐骑/放弃完成后，
+            # 由 _continue_after_weapon_choice 执行真正的伤害结算（HP扣减→
+            # DAMAGE→濒死/传导/根牌）。不再把麒麟弓放在 HP 已扣、DAMAGE
+            # 已生成之后。
+            weapon_key, choice_target, amount_actual = weapon_choice
+            pending = _PendingWeaponChoice(
+                weapon_key=weapon_key,
+                kind="qilingong_discard_mount",
+                attacker_id=card_user or "",
+                target_id=choice_target,
+                slash_instance_id=card_instance_id,
+                damage_event_id=None,
+                window_id=(
+                    f"weapon-after-damage:{runtime.turn_number}:"
+                    f"{card_instance_id}"
+                ),
+                damage_amount=amount_actual,
+                damage_type=damage_type,
+                card_key=card_key,
+                card_user=card_user,
+                source_id=source_id,
+                kill_credit=kill_credit,
+                resolved_reason=resolved_reason,
+                death_reason=death_reason,
+                rescue_reason=rescue_reason,
+                defer_root_finish=defer_root_finish,
+                declared_amount=resolution.declared_amount,
+                modifiers=tuple(resolution.modifiers),
+                armor_ignored=resolution.armor_ignored,
+                extra_payload=MappingProxyType(dict(payload or {})),
+            )
+            return state, replace(
+                runtime,
+                phase=ProductionPhase.WEAPON_AFTER_DAMAGE,
+                pending_weapon_choice=pending,
+            )
+        return self._apply_resolved_damage_and_settle(
+            state,
+            runtime,
+            victim_id=victim_id,
+            amount=amount,
+            damage_type=damage_type,
+            card_instance_id=card_instance_id,
+            card_key=card_key,
+            card_user=card_user,
+            source_id=source_id,
+            kill_credit=kill_credit,
+            payload=payload,
+            resolution=resolution,
+            resolved_reason=resolved_reason,
+            death_reason=death_reason,
+            rescue_reason=rescue_reason,
+            defer_root_finish=defer_root_finish,
+            card_already_finished=card_already_finished,
+        )
+
+    def _apply_resolved_damage_and_settle(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        *,
+        victim_id: str,
+        amount: int,
+        damage_type: str,
+        card_instance_id: str,
+        card_key: str,
+        card_user: str | None,
+        source_id: str | None,
+        kill_credit: str | None,
+        payload: Mapping[str, object] | None,
+        resolution: ArmorDamageResolution,
+        resolved_reason: str,
+        death_reason: str,
+        rescue_reason: str,
+        defer_root_finish: bool,
+        card_already_finished: bool,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """真正伤害结算：HP 扣减 → DAMAGE event → 濒死/传导/根牌收尾。
+
+        普通杀伤害与麒麟弓窗口关闭后共用本路径，保证 DAMAGE event 永远
+        在 HP 扣减时产生，且麒麟弓相关坐骑移动/失牌事件先于 DAMAGE。"""
+
+        victim = state.players_by_id[victim_id]
         next_state = _replace_player(state, victim_id, hp=victim.hp - amount)
         damage_event = DamageEvent(
             target_id=victim_id,
@@ -3757,38 +3870,6 @@ class ProductionBasicCardBatch:
             },
         )
         (damage_event,) = self._events.extend((damage_event,))
-        if weapon_choice is not None:
-            # CP-04P 麒麟弓：伤害已真实造成（HP已扣、damage事件已产生）后，
-            # 打开武器触发选择窗口；结算参数挂起，窗口关闭后由
-            # _continue_after_weapon_choice 恢复濒死检查／传导／根牌完成。
-            weapon_key, choice_target, amount_actual = weapon_choice
-            pending = _PendingWeaponChoice(
-                weapon_key=weapon_key,
-                kind="qilingong_discard_mount",
-                attacker_id=card_user or "",
-                target_id=choice_target,
-                slash_instance_id=card_instance_id,
-                damage_event_id=str(damage_event.sequence),
-                window_id=(
-                    f"weapon-after-damage:{runtime.turn_number}:"
-                    f"{card_instance_id}:{damage_event.sequence}"
-                ),
-                damage_amount=amount_actual,
-                damage_type=damage_type,
-                card_key=card_key,
-                card_user=card_user,
-                source_id=source_id,
-                kill_credit=kill_credit,
-                resolved_reason=resolved_reason,
-                death_reason=death_reason,
-                rescue_reason=rescue_reason,
-                defer_root_finish=defer_root_finish,
-            )
-            return next_state, replace(
-                runtime,
-                phase=ProductionPhase.WEAPON_AFTER_DAMAGE,
-                pending_weapon_choice=pending,
-            )
         return self._settle_after_damage(
             next_state,
             runtime,
@@ -4014,31 +4095,41 @@ class ProductionBasicCardBatch:
         state: GameState,
         runtime: _BatchRuntime,
     ) -> tuple[GameState, _BatchRuntime]:
-        """武器触发选择窗口关闭后，用挂起参数恢复伤害后结算。"""
+        """武器触发选择窗口关闭后，用挂起参数执行真正伤害结算。
+
+        麒麟弓窗口在 HP 扣减与 DAMAGE event 之前打开；窗口关闭（弃坐骑或
+        放弃）后，这里才执行 HP 扣减 → DAMAGE event → 濒死/传导/根牌收尾，
+        保证麒麟弓相关坐骑移动/失牌事件先于 DAMAGE（USER_CONFIRMED_MOBILE_
+        RULE＋IN_GAME_CARD_TEXT_CONFIRMED）。"""
 
         choice = runtime.pending_weapon_choice
         if choice is None:
             raise ProductionBatchError("武器触发选择缺少挂起状态")
-        next_state, next_runtime = self._settle_after_damage(
+        resolution = ArmorDamageResolution(
+            declared_amount=choice.declared_amount,
+            final_amount=choice.damage_amount,
+            modifiers=choice.modifiers,
+            prevented=choice.damage_amount == 0,
+            armor_ignored=choice.armor_ignored,
+        )
+        next_state, next_runtime = self._apply_resolved_damage_and_settle(
             state,
             runtime,
             victim_id=choice.target_id,
+            amount=choice.damage_amount,
+            damage_type=choice.damage_type,
             card_instance_id=choice.slash_instance_id,
             card_key=choice.card_key,
             card_user=choice.card_user,
             source_id=choice.source_id,
             kill_credit=choice.kill_credit,
-            damage_type=choice.damage_type,
-            amount=choice.damage_amount,
-            damage_event_sequence=(
-                int(choice.damage_event_id)
-                if choice.damage_event_id is not None
-                else None
-            ),
+            payload=choice.extra_payload,
+            resolution=resolution,
             resolved_reason=choice.resolved_reason,
             death_reason=choice.death_reason,
             rescue_reason=choice.rescue_reason,
             defer_root_finish=choice.defer_root_finish,
+            card_already_finished=False,
         )
         return next_state, replace(
             next_runtime,
@@ -6990,6 +7081,16 @@ class ProductionBasicCardBatch:
             == "sgs_weapon_zhangbashemao"
             and len(state.card_ids_in(ZoneRef.hand(context.actor_id))) >= 2
         ):
+            # G-003 统一 fail-closed：丈八蛇矛保持 PARTIAL（VIRTUAL_CARD_
+            # SUBCARD_LIFECYCLE_RULE_GAP），在正式枚举 virtual proposal
+            # 之前直接门禁拒绝（decision=play_slash，手牌≥2时抛
+            # UnsupportedRuleError），不生成 virtual:zhangba:* candidate
+            # 后再撞公共实体验证器；不恢复全局 virtual: 豁免。
+            check_weapon_skill_gate(
+                state,
+                actor_id=context.actor_id,
+                decision="play_slash",
+            )
             window_id = (
                 f"duel-zhangba:{runtime.turn_number}:"
                 f"{duel.trick_instance_id}"
@@ -10239,6 +10340,15 @@ class ProductionBasicCardBatch:
             == "sgs_weapon_zhangbashemao"
             and len(state.card_ids_in(ZoneRef.hand(current))) >= 2
         ):
+            # G-003 统一 fail-closed：丈八蛇矛保持 PARTIAL（VIRTUAL_CARD_
+            # SUBCARD_LIFECYCLE_RULE_GAP），在正式枚举 virtual proposal
+            # 之前直接门禁拒绝（decision=play_slash），不生成
+            # virtual:zhangba:* candidate 后再撞公共实体验证器。
+            check_weapon_skill_gate(
+                state,
+                actor_id=context.actor_id,
+                decision="play_slash",
+            )
             hand_ids = tuple(state.card_ids_in(ZoneRef.hand(current)))
             snapshot_digest = sha256_value(hand_ids)
             for index, first in enumerate(hand_ids):

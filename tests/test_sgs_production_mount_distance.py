@@ -1153,3 +1153,130 @@ def test_floor_G_shunshou_adjacent_with_offensive_mount_full_path() -> None:
     assert chosen_id in game.state.card_ids_in(ZoneRef.hand(_me(game)))
     assert shunshou.instance_id in game.state.card_ids_in(DISCARD_PILE)
     _assert_conservation(game)
+
+
+# ----------------------------------------------------------------------
+# G-001 修复：死亡角色从距离环跳过（WHOLE_REPO_AUDIT_REMEDIATION_1）
+# ----------------------------------------------------------------------
+
+
+def _structured_multi_state(
+    alive_seats: list[int], *, hp: int = 4
+) -> GameState:
+    """构造 N 人结构化 GameState（死亡角色 alive=False），用于距离环测试。
+
+    仅构造状态与调用公开 distance API，不声称 multi_player_production_proven。"""
+
+    players = tuple(
+        PlayerState(
+            f"p{s}",
+            s,
+            0 if s not in alive_seats else hp,
+            hp,
+            alive=(s in alive_seats),
+        )
+        for s in range(1, max(alive_seats) + 1)
+    )
+    ids = [f"p{s}" for s in range(1, max(alive_seats) + 1)]
+    game = _fresh(seed=3)
+    cards = tuple(
+        CardInstance.from_deck_record(r)
+        for r in game.formal_registry.records
+    )
+    locations = {card.instance_id: DRAW_PILE for card in cards}
+    zone_order = {
+        **{ZoneRef.hand(pid): () for pid in ids},
+        DRAW_PILE: tuple(card.instance_id for card in cards),
+        DISCARD_PILE: (),
+        PROCESSING_ZONE: (),
+        REVEALED_ZONE: (),
+    }
+    return GameState(
+        cards=cards,
+        players=players,
+        card_locations=locations,
+        zone_order=zone_order,
+        deck_id=cards[0].deck_id,
+    )
+
+
+def test_dead_seat_distance_five_player_ring() -> None:
+    """5人全存活：1与5相邻（距离1），1与3距离2。"""
+    state = _structured_multi_state([1, 2, 3, 4, 5])
+    assert base_seat_distance(state, "p1", "p1") == 0
+    assert base_seat_distance(state, "p1", "p2") == 1
+    assert base_seat_distance(state, "p1", "p3") == 2
+    assert base_seat_distance(state, "p1", "p5") == 1
+    assert base_seat_distance(state, "p2", "p5") == 2
+
+
+def test_dead_seat_distance_middle_death_contracts_ring() -> None:
+    """5人环中 p3 死亡：p2 与 p4 变为相邻（距离1），p1 与 p5 仍相邻。"""
+    state = _structured_multi_state([1, 2, 4, 5])
+    assert base_seat_distance(state, "p1", "p2") == 1
+    assert base_seat_distance(state, "p2", "p4") == 1
+    assert base_seat_distance(state, "p1", "p5") == 1
+    assert base_seat_distance(state, "p1", "p4") == 2
+
+
+def test_dead_seat_distance_multiple_deaths() -> None:
+    """多个死亡：p2、p4 死亡后环为 [1,3,5]，p5 与 p1 相邻（距离1）。"""
+    state = _structured_multi_state([1, 3, 5])
+    assert base_seat_distance(state, "p1", "p3") == 1
+    assert base_seat_distance(state, "p3", "p5") == 1
+    assert base_seat_distance(state, "p5", "p1") == 1
+
+
+def test_dead_seat_distance_floor_for_distinct_alive() -> None:
+    """不同存活角色基础距离最低为1：相邻死亡后环收缩为两个存活角色仍为1。"""
+    state = _structured_multi_state([1, 3])
+    assert base_seat_distance(state, "p1", "p3") == 1
+    state4 = _structured_multi_state([1, 2, 4])
+    assert base_seat_distance(state4, "p2", "p4") == 1
+    assert base_seat_distance(state4, "p4", "p1") == 1
+
+
+def test_dead_seat_distance_dead_participant_fails_closed() -> None:
+    """source 或 target 为死亡角色：base_seat_distance 失败关闭。"""
+    state = _structured_multi_state([1, 2, 4])
+    with pytest.raises(UnsupportedRuleError):
+        base_seat_distance(state, "p3", "p1")
+    with pytest.raises(UnsupportedRuleError):
+        base_seat_distance(state, "p1", "p3")
+    with pytest.raises(UnsupportedRuleError):
+        effective_distance(state, "p1", "p3")
+
+
+def test_dead_target_slash_illegal() -> None:
+    """is_valid_slash_target 必须拒绝死亡目标（G-001）。"""
+    state = _structured_multi_state([1, 2, 4])
+    assert is_valid_slash_target(state, "p1", "p2") is True
+    assert is_valid_slash_target(state, "p1", "p3") is False
+    assert is_valid_slash_target(state, "p1", "p1") is False
+    assert is_valid_slash_target(state, "p1", "p9") is False
+
+
+def test_dead_seat_distance_mount_modifiers() -> None:
+    """死亡环收缩后的基础距离仍正确叠加坐骑方向性修正与下限。"""
+    game = _fresh(seed=3)
+    state = _structured_multi_state([1, 2, 4])
+    # 环 [1,2,4]：p1→p4 基础1（相邻）；p1→p2 基础1；p2→p4 基础1
+    assert base_seat_distance(state, "p1", "p4") == 1
+    assert base_seat_distance(state, "p2", "p4") == 1
+    # 给 p4 装防御坐骑（+1）：p1→p4 = 1+1 = 2；p2→p4 = 1+1 = 2
+    defensive = next(
+        r for r in game.formal_registry.records if r.card_key == "sgs_mount_defensive"
+    )
+    state = state.move_card(
+        defensive.instance_id, ZoneRef.equipment("p4", "defense_horse")
+    )
+    assert effective_distance(state, "p1", "p4") == 2
+    assert effective_distance(state, "p2", "p4") == 2
+    # 给 p2 装进攻坐骑（-1）：p2→p4 = 1-1+1 = 1（相邻不能修正为0）
+    offensive = next(
+        r for r in game.formal_registry.records if r.card_key == "sgs_mount_offensive"
+    )
+    state2 = state.move_card(
+        offensive.instance_id, ZoneRef.equipment("p2", "attack_horse")
+    )
+    assert effective_distance(state2, "p2", "p4") == 1
