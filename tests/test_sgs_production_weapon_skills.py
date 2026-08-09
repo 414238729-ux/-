@@ -1917,3 +1917,217 @@ def test_qilingong_timing_replay_reexecutes() -> None:
         reexecute_production_replay(
             ProductionReexecutionReplay.from_dict(tampered), fixture=fixture
         )
+
+
+# ----------------------------------------------------------------------
+# R1-NEW-001：Qilin pending 必须保存 authoritative resolved final damage
+# ----------------------------------------------------------------------
+
+
+def _qilin_mount(game, player_id: str = "p2") -> str:
+    mount = next(
+        r for r in game.formal_registry.records if r.card_key == "sgs_mount_defensive"
+    )
+    game._state = game.state.move_card(
+        mount.instance_id, ZoneRef.equipment(player_id, "defense_horse")
+    )
+    return mount.instance_id
+
+
+def _discard_qilin_mount(game) -> None:
+    action = _action(game, "weapon_discard_mount")
+    assert action is not None
+    _step(game, action)
+
+
+def test_qilin_baiyin_wine_slash_discard_damage_one() -> None:
+    """Wine Slash base=2＋白银狮子 final=1：Qilin弃马后 HP 只减1、DAMAGE=1。"""
+    game = _fresh(seed=3)
+    _equip(game, "sgs_weapon_qilingong")
+    _equip_armor(game, "sgs_armor_baiyinshizi")
+    _set_hp(game, "p2", 3)
+    _qilin_mount(game)
+    _put_hand(game, "sgs_basic_jiu")
+    _put_hand(game, "sgs_basic_sha")
+    _step(game, _action(game, "use_wine_buff", card_key="sgs_basic_jiu"))
+    _step(game, _action(game, "use_slash", card_key="sgs_basic_sha"))
+    _step(game, _action(game, "pass_slash_response"))
+    assert game.phase is ProductionPhase.WEAPON_AFTER_DAMAGE
+    _discard_qilin_mount(game)
+    damages = _damages(game)
+    assert len(damages) == 1
+    assert damages[0].amount == 1, "白银狮子 final=1：Qilin后DAMAGE必须为1"
+    assert damages[0].payload["declared_amount"] == 2
+    assert damages[0].payload["final_amount"] == 1
+    assert "baiyin_cap_one" in damages[0].payload["modifiers"]
+    assert game.state.players_by_id["p2"].hp == 2
+    assert game.phase is ProductionPhase.PLAY
+    _assert_conservation(game)
+
+
+def test_qilin_baiyin_wine_slash_pass_damage_one() -> None:
+    """同场景 Qilin PASS：最终仍=1（不得退回 base 2）。"""
+    game = _fresh(seed=3)
+    _equip(game, "sgs_weapon_qilingong")
+    _equip_armor(game, "sgs_armor_baiyinshizi")
+    _set_hp(game, "p2", 3)
+    _qilin_mount(game)
+    _put_hand(game, "sgs_basic_jiu")
+    _put_hand(game, "sgs_basic_sha")
+    _step(game, _action(game, "use_wine_buff", card_key="sgs_basic_jiu"))
+    _step(game, _action(game, "use_slash", card_key="sgs_basic_sha"))
+    _step(game, _action(game, "pass_slash_response"))
+    assert game.phase is ProductionPhase.WEAPON_AFTER_DAMAGE
+    _step(game, _action(game, "pass_weapon_choice"))
+    damages = _damages(game)
+    assert len(damages) == 1 and damages[0].amount == 1
+    assert game.state.players_by_id["p2"].hp == 2
+    assert game.phase is ProductionPhase.PLAY
+    _assert_conservation(game)
+
+
+def test_qilin_baiyin_dying_boundary() -> None:
+    """目标2HP：不得因错误的2伤进入DYING（正确1伤→HP1不濒死）。"""
+    game = _fresh(seed=3)
+    _equip(game, "sgs_weapon_qilingong")
+    _equip_armor(game, "sgs_armor_baiyinshizi")
+    _set_hp(game, "p2", 2)
+    _qilin_mount(game)
+    _put_hand(game, "sgs_basic_jiu")
+    _put_hand(game, "sgs_basic_sha")
+    _step(game, _action(game, "use_wine_buff", card_key="sgs_basic_jiu"))
+    _step(game, _action(game, "use_slash", card_key="sgs_basic_sha"))
+    _step(game, _action(game, "pass_slash_response"))
+    assert game.phase is ProductionPhase.WEAPON_AFTER_DAMAGE
+    _discard_qilin_mount(game)
+    assert len(_damages(game)) == 1
+    assert game.state.players_by_id["p2"].hp == 1, (
+        "Baiyin final=1：2HP目标不得因错误2伤进入DYING"
+    )
+    assert game.phase is ProductionPhase.PLAY
+    _assert_conservation(game)
+
+
+def test_qilin_tengjia_fire_slash_discard_damage_two() -> None:
+    """Fire Slash base=1＋藤甲 final=2：Qilin弃马后 HP 减2、DAMAGE=2。"""
+    game = _fresh(seed=3)
+    _equip(game, "sgs_weapon_qilingong")
+    _equip_armor(game, "sgs_armor_tengjia")
+    _set_hp(game, "p2", 4)
+    _qilin_mount(game)
+    _put_hand(game, "sgs_basic_huosha")
+    _step(game, _action(game, "use_slash", card_key="sgs_basic_huosha"))
+    _step(game, _action(game, "pass_slash_response"))
+    assert game.phase is ProductionPhase.WEAPON_AFTER_DAMAGE
+    _discard_qilin_mount(game)
+    damages = _damages(game)
+    assert len(damages) == 1
+    assert damages[0].amount == 2, "藤甲火属性+1 final=2：Qilin后DAMAGE必须为2"
+    assert damages[0].damage_type == "火属性"
+    assert "tengjia_fire_plus_one" in damages[0].payload["modifiers"]
+    assert game.state.players_by_id["p2"].hp == 2
+    assert game.phase is ProductionPhase.PLAY
+    _assert_conservation(game)
+
+
+def test_qilin_tengjia_fire_slash_pass_damage_two() -> None:
+    """同场景 Qilin PASS：仍=2。"""
+    game = _fresh(seed=3)
+    _equip(game, "sgs_weapon_qilingong")
+    _equip_armor(game, "sgs_armor_tengjia")
+    _set_hp(game, "p2", 4)
+    _qilin_mount(game)
+    _put_hand(game, "sgs_basic_huosha")
+    _step(game, _action(game, "use_slash", card_key="sgs_basic_huosha"))
+    _step(game, _action(game, "pass_slash_response"))
+    assert game.phase is ProductionPhase.WEAPON_AFTER_DAMAGE
+    _step(game, _action(game, "pass_weapon_choice"))
+    damages = _damages(game)
+    assert len(damages) == 1 and damages[0].amount == 2
+    assert game.state.players_by_id["p2"].hp == 2
+    assert game.phase is ProductionPhase.PLAY
+    _assert_conservation(game)
+
+
+def test_qilin_tengjia_dying_boundary() -> None:
+    """目标2HP：Tengjia final=2 应正确进入DYING。"""
+    game = _fresh(seed=3)
+    _equip(game, "sgs_weapon_qilingong")
+    _equip_armor(game, "sgs_armor_tengjia")
+    _set_hp(game, "p2", 2)
+    _qilin_mount(game)
+    _put_hand(game, "sgs_basic_huosha")
+    _step(game, _action(game, "use_slash", card_key="sgs_basic_huosha"))
+    _step(game, _action(game, "pass_slash_response"))
+    assert game.phase is ProductionPhase.WEAPON_AFTER_DAMAGE
+    _discard_qilin_mount(game)
+    damages = _damages(game)
+    assert len(damages) == 1 and damages[0].amount == 2
+    assert game.state.players_by_id["p2"].hp == 0
+    assert game.phase is ProductionPhase.DYING_RESCUE
+    _assert_conservation(game)
+
+
+def test_qilin_resolved_damage_replay_value() -> None:
+    """strict replay 必须检查最终 DAMAGE value（Baiyin=1），且篡改
+    resolved damage / event amount 被拒绝。"""
+
+    def fixture(game: ProductionBasicCardBatch) -> None:
+        _equip(game, "sgs_weapon_qilingong")
+        for instance_id in list(game.state.card_ids_in(ZoneRef.hand("p2"))):
+            game._state = game.state.move_card(instance_id, DISCARD_PILE)
+        _equip_armor(game, "sgs_armor_baiyinshizi")
+        _set_hp(game, "p2", 3)
+        _qilin_mount(game)
+        _put_hand(game, "sgs_basic_jiu")
+        _put_hand(game, "sgs_basic_sha")
+
+    from scripts.sgs_engine.production_replay import (
+        ProductionReplayDivergenceError,
+        ProductionReplayFormatError,
+        ProductionReexecutionReplay,
+        record_reference_production_batch,
+        reexecute_production_replay,
+    )
+
+    class _QilinWineController(BatchReferenceController):
+        strategy_version = "production-batch-qilin-wine.v1"
+
+        def choose(self, legal_actions, context):
+            for action in legal_actions:
+                if action.payload.get("operation") == "use_wine_buff":
+                    return action
+                if action.payload.get("operation") == "use_slash":
+                    return action
+            return super().choose(legal_actions, context)
+
+    record = record_reference_production_batch(
+        seed=3, fixture=fixture, controller=_QilinWineController()
+    )
+    damages = [
+        e for e in record.events if e.get("event_type") == "damage"
+    ]
+    assert damages, "参考局必须产生DAMAGE"
+    assert damages[0]["payload"]["final_amount"] == 1, (
+        "Baiyin final必须为1"
+    )
+    mount_seq = [
+        e["sequence"]
+        for e in record.events
+        if e.get("payload", {}).get("reason") == "qilingong_mount_discard"
+        and e.get("event_type") in ("card_moved", "card_lost")
+    ]
+    assert max(mount_seq) < damages[0]["sequence"]
+    result = reexecute_production_replay(record, fixture=fixture)
+    assert result.verified is True
+    # 篡改 DAMAGE final_amount：strict reexecute 必须拒绝
+    tampered = copy.deepcopy(record.to_dict())
+    dmg = next(e for e in tampered["events"] if e.get("event_type") == "damage")
+    dmg["payload"]["final_amount"] = 2
+    del tampered["record_sha256"]
+    with pytest.raises(
+        (ProductionReplayFormatError, ProductionReplayDivergenceError)
+    ):
+        reexecute_production_replay(
+            ProductionReexecutionReplay.from_dict(tampered), fixture=fixture
+        )

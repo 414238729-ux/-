@@ -49,6 +49,7 @@ from scripts.sgs_engine.production_cards import (
     attack_range_of,
     base_seat_distance,
     effective_distance,
+    is_target_within_distance,
     is_valid_shunshou_target,
     is_valid_slash_target,
     SLASH_CARD_KEYS,
@@ -1280,3 +1281,26 @@ def test_dead_seat_distance_mount_modifiers() -> None:
         offensive.instance_id, ZoneRef.equipment("p2", "attack_horse")
     )
     assert effective_distance(state2, "p2", "p4") == 1
+
+
+def test_dead_self_distance_fails_closed() -> None:
+    """G-001 R2 dead-self 边界：死亡角色对自身必须失败关闭，不得返回0。"""
+    state = _structured_multi_state([1, 2, 4])
+    with pytest.raises(UnsupportedRuleError):
+        base_seat_distance(state, "p3", "p3")
+    with pytest.raises(UnsupportedRuleError):
+        effective_distance(state, "p3", "p3")
+    with pytest.raises(UnsupportedRuleError):
+        actual_distance(state, "p3", "p3")
+    with pytest.raises(UnsupportedRuleError):
+        is_target_within_distance(state, "p3", "p3", 5)
+    # alive self → 0 保持
+    assert base_seat_distance(state, "p1", "p1") == 0
+    assert effective_distance(state, "p1", "p1") == 0
+    assert actual_distance(state, "p1", "p1") == 0
+    assert is_target_within_distance(state, "p1", "p1", 0) is True
+    # 既有 dead→alive / alive→dead 继续失败关闭
+    with pytest.raises(UnsupportedRuleError):
+        base_seat_distance(state, "p3", "p1")
+    with pytest.raises(UnsupportedRuleError):
+        base_seat_distance(state, "p1", "p3")

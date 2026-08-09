@@ -181,9 +181,12 @@ class _PendingSlash:
     target_id: str
     slash_instance_id: str
     boosted: bool
-    # CP-04P 武器技能快照：青釭剑本次杀令目标防具无效（armor invalid）、
-    # 古锭刀本次杀伤害+1。快照在“使用【杀】指定一个目标后”建立并持续至该次
-    # 杀结算结束（Knowledge 7.2/7.5：效果绑定该次【杀】结算生命周期）。
+    # CP-04P 武器技能状态：青釭剑本次杀令目标防具无效（armor invalid），
+    # 起点为“使用【杀】指定一个目标后”，持续至闪结算完成或本次伤害结算
+    # 完成（Knowledge 7.2.1 用户移动版实测确认）。古锭刀伤害+1 不由本结构
+    # 快照：判定点在“造成伤害时”，由统一伤害判定点（_weapon_damage_bonus_
+    # at_damage）按目标当前权威手牌动态计算（Knowledge 7.5.1，
+    # IN_GAME_CARD_TEXT_CONFIRMED＋USER_CONFIRMED_MOBILE_RULE）。
     ignore_armor: bool = False
     # CP-04P 朱雀羽扇：普通【杀】完成目标指定后可选转为【火杀】（7.10）。
     fire_converted: bool = False
@@ -3719,17 +3722,6 @@ class ProductionBasicCardBatch:
             ignore_armor=ignore_armor,
         )
         amount = resolution.final_amount
-        # CP-04P 青釭剑生命周期终点B（Knowledge 7.2.1 用户实测确认）：
-        # 进入伤害时，本次伤害结算应用完成即清除本次【杀】的防具无效
-        # 状态；后续濒死救援、麒麟弓弃坐骑等窗口不再受本次青釭剑影响，
-        # 目标防具恢复正常（清除后由后续正式效果弃置白银狮子可正常回复）。
-        if runtime.pending_slash is not None:
-            runtime = replace(
-                runtime,
-                pending_slash=replace(
-                    runtime.pending_slash, ignore_armor=False
-                ),
-            )
         if amount == 0:
             # 最终伤害为0：不扣减HP、不进入濒死、不触发传导；记录统一
             # 防止事件并按根牌完成出口收尾（不产生 damage 事件）。
@@ -3749,6 +3741,16 @@ class ProductionBasicCardBatch:
                 },
             )
             self._events.extend((prevented_event,))
+            # R1-NEW-002：非 damage 路径（防止/无效）在本次 resolution
+            # 结束即清除青釭剑防具无效状态（Hanbing prevention 等各自
+            # resolution 结束时清理，不跨结算泄漏）。
+            if runtime.pending_slash is not None:
+                runtime = replace(
+                    runtime,
+                    pending_slash=replace(
+                        runtime.pending_slash, ignore_armor=False
+                    ),
+                )
             if defer_root_finish:
                 if runtime.pending_chain is not None:
                     return self._advance_chain(state, runtime)
@@ -3772,7 +3774,7 @@ class ProductionBasicCardBatch:
             # 由 _continue_after_weapon_choice 执行真正的伤害结算（HP扣减→
             # DAMAGE→濒死/传导/根牌）。不再把麒麟弓放在 HP 已扣、DAMAGE
             # 已生成之后。
-            weapon_key, choice_target, amount_actual = weapon_choice
+            weapon_key, choice_target = weapon_choice
             pending = _PendingWeaponChoice(
                 weapon_key=weapon_key,
                 kind="qilingong_discard_mount",
@@ -3784,7 +3786,11 @@ class ProductionBasicCardBatch:
                     f"weapon-after-damage:{runtime.turn_number}:"
                     f"{card_instance_id}"
                 ),
-                damage_amount=amount_actual,
+                # R1-NEW-001：使用统一防具解析后的 authoritative final
+                # amount（amount 已由 resolution.final_amount 覆盖），
+                # 不使用上游 pre-armor base amount；窗口关闭后按同一
+                # resolved final amount 执行 HP/DAMAGE。
+                damage_amount=amount,
                 damage_type=damage_type,
                 card_key=card_key,
                 card_user=card_user,
@@ -3870,6 +3876,19 @@ class ProductionBasicCardBatch:
             },
         )
         (damage_event,) = self._events.extend((damage_event,))
+        # R1-NEW-002：青釭剑防具无效状态在本次 damage 真正完成（HP 扣减＋
+        # DAMAGE event 产生）之后清除，早于 dying/after-damage/follow-up
+        # 正式效果边界（Knowledge 7.2.1：终点B=本次伤害结算完成，清除后
+        # 防具恢复）。麒麟弓窗口期间防具无效状态保持（窗口在 damage 真正
+        # 发生之前打开），不再出现“damage 尚未发生、armor-invalid 已被
+        # 清除”的可观察状态机阶段。
+        if runtime.pending_slash is not None:
+            runtime = replace(
+                runtime,
+                pending_slash=replace(
+                    runtime.pending_slash, ignore_armor=False
+                ),
+            )
         return self._settle_after_damage(
             next_state,
             runtime,
@@ -4993,6 +5012,11 @@ class ProductionBasicCardBatch:
         )
         # CP-04P 麒麟弓（7.11）：使用【杀】对目标造成伤害时可选弃置目标
         # 装备区一张坐骑牌。仅在目标实际有坐骑且伤害>0时打开窗口。
+        # R1-NEW-001：weapon_choice 不再携带 pre-armor base amount——
+        # 真正完成 resolve_armor_damage 的函数以 resolution.final_amount
+        # 创建 Qilin pending，避免在 Qilin 窗口关闭后用旧 base 重新扣血
+        # （如 Wine Slash base=2＋白银狮子 final=1、Fire Slash base=1＋
+        # 藤甲 final=2 等 armor resolution 差异）。
         weapon_choice = None
         if (
             equipped_weapon_key(state, pending.attacker_id)
@@ -5005,11 +5029,7 @@ class ProductionBasicCardBatch:
                 ZoneRef.equipment(pending.target_id, "defense_horse")
             )
             if target_mounts:
-                weapon_choice = (
-                    "sgs_weapon_qilingong",
-                    pending.target_id,
-                    base_amount,
-                )
+                weapon_choice = ("sgs_weapon_qilingong", pending.target_id)
         next_state, next_runtime = self._apply_damage_and_maybe_chain(
             state,
             runtime,

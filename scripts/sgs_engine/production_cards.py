@@ -295,8 +295,6 @@ def base_seat_distance(state: GameState, source_id: str, target_id: str) -> int:
     players = state.players_by_id
     if source_id not in players or target_id not in players:
         raise UnsupportedRuleError(f"计算距离时找不到角色{source_id!r}或{target_id!r}")
-    if source_id == target_id:
-        return 0
     source = players[source_id]
     target = players[target_id]
     if not source.alive or not target.alive:
@@ -304,6 +302,10 @@ def base_seat_distance(state: GameState, source_id: str, target_id: str) -> int:
             f"角色{source_id!r}或{target_id!r}已死亡；死亡角色不参与距离环，"
             "调用方必须先排除死亡目标"
         )
+    # G-001 dead-self 边界（R2）：先验证参与者存在且存活，再应用
+    # alive self → 0；base_seat_distance(dead, dead) 不得返回 0。
+    if source_id == target_id:
+        return 0
     alive = sorted(
         (player for player in state.players if player.alive),
         key=lambda player: player.seat,
