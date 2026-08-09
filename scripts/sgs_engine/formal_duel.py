@@ -10,10 +10,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
 from .actions import ActionContext, ActionType, LegalAction, UnsupportedRuleError
-from .model import DRAW_PILE, CharacterMetadata
+from .model import DRAW_PILE, CharacterGender, CharacterMetadata
 from .production_batch import (
     FORMAL_NO_SKILL_DUEL_MODE,
     BatchReferenceController,
@@ -47,7 +48,20 @@ _FORMAL_SOURCE_STATUSES: frozenset[str] = frozenset({"当前确认"})
 # 当前仓库没有经 Knowledge 绑定的正式 duel profile，也没有完成可计入验收的
 # 100-seed 严格重执行证据。该哨兵故意是模块私有常量；会话子类或调用方配置
 # 不能把它覆写为 True 来制造 formal_result。
-_FORMAL_EXECUTION_RELEASED = False
+# USER_CONFIRMED_PROJECT_FORMAL_PROFILE（2026-08-09 用户确认）已关闭正式
+# 单挑 profile 与角色来源缺口；丈八蛇矛材料生命周期（USER_CONFIRMED_RULE，
+# HAND→PROCESSING→DISCARD）已关闭 VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP；
+# 雌雄双股剑在 formal duel 中由士兵的 effective gender=NONE 权威提供
+# （无性别不构成“异性”）。正式执行哨兵因此释放；formal_duel_no_skill_ready
+# 仍由 inspect_formal_duel_readiness 依据 100-seed 固定验收现场派生，不由
+# 任何调用方配置覆写。
+_FORMAL_EXECUTION_RELEASED = True
+
+_ACCEPTANCE_ARTIFACT = (
+    Path(__file__).resolve().parents[2]
+    / "docs"
+    / "FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE.json"
+)
 
 
 class FormalDuelConfigurationError(ValueError):
@@ -167,6 +181,41 @@ class FormalDuelConfiguration:
             player_max_hp=(4, 4),
             first_player_policy="deterministic_rng",
             participants=(None, None),
+        )
+
+    @classmethod
+    def formal_profile(cls) -> "FormalDuelConfiguration":
+        """当前项目正式无技能单挑 profile（USER_CONFIRMED_PROJECT_FORMAL_PROFILE，2026-08-09）。
+
+        模式：formal 2-player no-skill duel。参与者为 p1/p2 两名固定无技能
+        占位角色“士兵”（character_key="soldier"）；双方 max_hp=4、
+        initial_hp=4、初始手牌4张；先手由项目唯一 DeterministicRNG 在
+        p1/p2 中决定（不使用 Python random／系统时间／另一随机源）；首
+        回合正常执行完整回合规则、DRAW 阶段正常摸2张（无首回合少摸/
+        跳摸/补正）；手气卡禁用/不存在；无武将技能；无身份/主公技；无
+        模式奖励/击杀奖励；正式权威160张牌堆；一方死亡且无法被合法救援
+        后另一方立即获胜，game over 后不得继续启动新回合或接受动作。
+        士兵 effective gender=NONE（GENDERLESS，USER_CONFIRMED_RULE
+        2026-08-09）：雌雄双股剑不会因双方“异性”而发动。
+        """
+
+        return cls(
+            platform="三国杀移动版",
+            version="2026-07-25牌堆快照",
+            source_location=(
+                "USER_CONFIRMED_PROJECT_FORMAL_PROFILE"
+                "（2026-08-09 用户确认）"
+            ),
+            verification_status="当前确认",
+            deck_applicable=True,
+            initial_hand_count=4,
+            player_hp=(4, 4),
+            player_max_hp=(4, 4),
+            first_player_policy="deterministic_rng",
+            participants=(
+                CharacterMetadata("soldier", CharacterGender.NONE),
+                CharacterMetadata("soldier", CharacterGender.NONE),
+            ),
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -302,6 +351,17 @@ class FormalNoSkillDuelSession(ProductionBasicCardBatch):
         ):
             raise FormalDuelConfigurationError(
                 "正式单挑仍有卡牌／重放门禁未关闭，禁止生成正式结果"
+            )
+        if (
+            configuration.source_confirmed
+            and not analysis_only
+            and configuration != FormalDuelConfiguration.formal_profile()
+        ):
+            # 正式结果只能由项目 canonical formal profile 产生；调用方
+            # 自行构造的“当前确认”配置不能自我授权正式结果。
+            raise FormalDuelConfigurationError(
+                "正式单挑结果只接受项目 canonical formal profile；"
+                "调用方配置不能自我授权"
             )
         self._formal_configuration = configuration
         self._analysis_only = analysis_only
@@ -509,15 +569,17 @@ def inspect_formal_duel_readiness() -> FormalDuelReadiness:
             duel_status = "NOT_APPLICABLE_TO_DUEL"
             reason = "恰好两名玩家时不存在可增加的额外目标；全局多人语义仍为PARTIAL"
         elif card_key == "sgs_weapon_cixiongshuanggujian":
-            # 卡牌通用生产语义已经完整；正式模式能否提供权威参与者性别是
-            # 独立 MODE_GAP，不能再把同一卡牌错误标作实现缺口。
+            # 卡牌通用生产语义已经完整；formal soldier profile 提供
+            # effective gender=NONE 的权威参与者性别（NONE 不构成“异性”），
+            # 不再是模式缺口。
             duel_status = "COMPLETE"
-            reason = "异性目标状态机已实现；正式模式的权威角色来源由独立MODE_GAP跟踪"
+            reason = "异性目标状态机已实现；formal profile 参与者为无性别士兵（NONE）"
         elif card_key == "sgs_weapon_zhangbashemao":
-            duel_status = "RULE_SOURCE_GAP"
+            duel_status = "COMPLETE"
             reason = (
-                "typed virtual-card/subcard引用基础设施已就绪；"
-                "两张材料牌的区域生命周期时点尚未确认"
+                "USER_CONFIRMED_RULE（2026-08-09）：材料 HAND→PROCESSING→"
+                "DISCARD 生命周期已确认并实现；VIRTUAL_CARD_SUBCARD_"
+                "LIFECYCLE_RULE_GAP 已关闭"
             )
         card_statuses.append(
             FormalDuelCardStatus(
@@ -528,23 +590,12 @@ def inspect_formal_duel_readiness() -> FormalDuelReadiness:
                 reason=reason,
             )
         )
-    blockers: list[FormalDuelBlocker] = [
-        FormalDuelBlocker(
-            "FORMAL_DUEL_RULE_PROFILE_NOT_CONFIRMED",
-            "RULE_SOURCE_GAP",
-            "正式单挑牌堆适用、初始配置、先手与角色元数据尚无确认规则源",
-        ),
-        FormalDuelBlocker(
-            "CIXIONG_CHARACTER_METADATA_SOURCE_NOT_AVAILABLE",
-            "MODE_GAP",
-            "雌雄双股剑通用状态机已实现，但正式单挑尚无可装配的权威参与者性别来源",
-        ),
-        FormalDuelBlocker(
-            "VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP",
-            "RULE_SOURCE_GAP",
-            "丈八蛇矛两张材料进入处理区或直接弃牌的精确时点待确认",
-        ),
-    ]
+    # USER_CONFIRMED_PROJECT_FORMAL_PROFILE（2026-08-09）关闭正式 profile
+    # 与参与者角色/性别来源缺口；USER_CONFIRMED_RULE（2026-08-09）关闭
+    # 丈八材料生命周期缺口；雌雄在 formal duel 由士兵 NONE 性别权威提供。
+    # 方天画戟多人/多目标语义仍为全局 PARTIAL，但严格两人 duel 中额外
+    # 多目标不可触发（NOT_APPLICABLE_TO_DUEL），不构成 formal duel blocker。
+    blockers: list[FormalDuelBlocker] = []
     mode_runtime_reachable = False
     try:
         probe = FormalNoSkillDuelSession(
@@ -587,18 +638,10 @@ def inspect_formal_duel_readiness() -> FormalDuelReadiness:
             for item in card_statuses
         )
     )
-    # 当前卡牌语义仍缺丈八；雌雄通用状态机已完成但正式角色来源作为
-    # 独立MODE_GAP保留，方天仅在duel scope经不可触发证明计入。
-    # mode_implemented 由现场 blocker 派生，而不是由调用方或静态 manifest
-    # 提交；规则 profile/角色装配尚未关闭时必须保持 false。
-    mode_implemented = mode_runtime_reachable and not any(
-        item.code
-        in {
-            "FORMAL_DUEL_RULE_PROFILE_NOT_CONFIRMED",
-            "CIXIONG_CHARACTER_METADATA_SOURCE_NOT_AVAILABLE",
-        }
-        for item in blockers
-    )
+    # formal profile（USER_CONFIRMED_PROJECT_FORMAL_PROFILE）与丈八材料
+    # 生命周期（USER_CONFIRMED_RULE）均已关闭；mode_implemented 由现场
+    # blocker 派生，而不是由调用方或静态 manifest 提交。
+    mode_implemented = mode_runtime_reachable and not blockers
     # 该能力只指 analysis-only formal 会话接入了现有逐步规则重执行；并不
     # 表示规则源、卡牌语义或正式结果门禁已经通过。
     from .production_replay import (
@@ -609,18 +652,13 @@ def inspect_formal_duel_readiness() -> FormalDuelReadiness:
     replay_supported = callable(record_reference_formal_duel) and callable(
         reexecute_production_replay
     )
-    unsupported_rules = sum(
-        item.code
-        in {
-            "FORMAL_DUEL_RULE_PROFILE_NOT_CONFIRMED",
-            "VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP",
-        }
-        for item in blockers
+    unsupported_rules = 0
+    # 正式 runner 逐个严格重执行固定 seeds 0..99 的现场结果由正式验收
+    # artifact 现场加载（_load_acceptance_evidence，fail-closed）；缺失、
+    # 损坏或含失败 seed 时保持空，analysis-only 诊断不得冒充验收。
+    acceptance_seed_results: tuple[FormalDuelSeedResult, ...] = (
+        _load_acceptance_evidence()
     )
-    # 只有 canonical 正式配置、卡牌语义和规则缺口全部关闭后，正式 runner
-    # 逐个严格重执行固定 seeds 0..99 的现场结果才能填写这些字段。当前
-    # analysis-only 诊断不得冒充验收，因此精确保持 0/false。
-    acceptance_seed_results: tuple[FormalDuelSeedResult, ...] = ()
     acceptance_seed_count = len(acceptance_seed_results)
     acceptance_natural_end_count = sum(
         item.natural_end for item in acceptance_seed_results
@@ -703,6 +741,7 @@ class FormalDuelSeedResult:
     natural_end: bool
     formal_result_eligible: bool
     reexecution_verified: bool = False
+    final_state_hash: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -722,6 +761,7 @@ class FormalDuelSeedResult:
             "natural_end": self.natural_end,
             "formal_result_eligible": self.formal_result_eligible,
             "reexecution_verified": self.reexecution_verified,
+            "final_state_hash": self.final_state_hash,
         }
 
 
@@ -735,6 +775,97 @@ def _reshuffle_count(events: Sequence[object]) -> int:
             count += 1
         previous = current
     return count
+
+
+def _load_acceptance_evidence() -> tuple["FormalDuelSeedResult", ...]:
+    """从正式100-seed验收artifact现场加载逐seed证据；缺失/损坏保持空。
+
+    artifact 由 canonical 正式验收脚本（scripts/sgs_formal_milestone_b_
+    acceptance.py）以正式 profile、analysis_only=false、seeds 0..99 现场
+    生成，每局经过严格重执行。任何字段缺失、非零 unsupported/approximation、
+    非自然结束、失败 seed 或 seed 集合不精确都会使本函数返回空（fail-closed），
+    不允许用调用方 payload 或静态布尔值伪造验收。
+    """
+
+    import json
+
+    if not _ACCEPTANCE_ARTIFACT.exists():
+        return ()
+    try:
+        with _ACCEPTANCE_ARTIFACT.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, ValueError):
+        return ()
+    if not isinstance(payload, Mapping):
+        return ()
+    if payload.get("schema") != "FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE_v1":
+        return ()
+    if payload.get("mode") != FORMAL_NO_SKILL_DUEL_MODE:
+        return ()
+    if payload.get("passed") is not True:
+        return ()
+    raw_seeds = payload.get("seeds_detail")
+    if not isinstance(raw_seeds, Sequence) or len(raw_seeds) != 100:
+        return ()
+    results: list[FormalDuelSeedResult] = []
+    for item in raw_seeds:
+        if not isinstance(item, Mapping):
+            return ()
+        seed = item.get("seed")
+        if isinstance(seed, bool) or not isinstance(seed, int):
+            return ()
+        winner = item.get("winner")
+        if winner not in {"p1", "p2"}:
+            return ()
+        for field in (
+            "action_count",
+            "turn_count",
+            "reshuffle_count",
+            "unsupported_rules",
+            "approximation_count",
+        ):
+            value = item.get(field)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < 0
+            ):
+                return ()
+        if (
+            item.get("unsupported_rules") != 0
+            or item.get("approximation_count") != 0
+            or item.get("natural_end") is not True
+            or item.get("passed") is not True
+            or item.get("strict_reexecution") is not True
+        ):
+            return ()
+        final_state_hash = item.get("final_state_hash")
+        if not isinstance(final_state_hash, str) or not final_state_hash:
+            return ()
+        results.append(
+            FormalDuelSeedResult(
+                seed=seed,
+                deck_count=160,
+                winner=winner,
+                action_count=item["action_count"],
+                turn_count=item["turn_count"],
+                draw_pile_count=0,
+                reshuffle_count=item["reshuffle_count"],
+                unsupported_rules=0,
+                approximation_count=0,
+                safety_cap_triggered=False,
+                exception_type=None,
+                exception_message=None,
+                reached_card_keys=(),
+                natural_end=True,
+                formal_result_eligible=True,
+                reexecution_verified=True,
+                final_state_hash=final_state_hash,
+            )
+        )
+    if tuple(item.seed for item in results) != tuple(range(100)):
+        return ()
+    return tuple(results)
 
 
 def run_formal_duel_seed_sweep(
@@ -758,6 +889,8 @@ def run_formal_duel_seed_sweep(
         game: FormalNoSkillDuelSession | None = None
         reached: set[str] = set()
         exception: Exception | None = None
+        reexecution_verified = False
+        final_state_hash: str | None = None
         try:
             game = FormalNoSkillDuelSession(
                 seed=seed,
@@ -774,6 +907,30 @@ def run_formal_duel_seed_sweep(
                 card_key = action.payload.get("card_key")
                 if isinstance(card_key, str) and card_key:
                     reached.add(card_key)
+            # USER_CONFIRMED_PROJECT_FORMAL_PROFILE 验收要求：每局 strict
+            # rule reexecution 通过、replay final hash 一致、RNG consumption
+            # 一致。同一 canonical factory 与确定性控制器重录并严格重执行；
+            # 任何重放/重执行不一致都记为该 seed 失败，不得删除重采样。
+            from .production_replay import (
+                ProductionReplayFormatError,
+                record_reference_formal_duel,
+                reexecute_production_replay,
+            )
+
+            record = record_reference_formal_duel(
+                seed,
+                configuration=configuration,
+                analysis_only=analysis_only,
+                controller=FormalDuelReferenceController(),
+                max_steps=max_steps,
+            )
+            verification = reexecute_production_replay(record)
+            reexecution_verified = verification.verified
+            final_state_hash = record.outcome.get("final_game_state_hash")
+            if not isinstance(final_state_hash, str) or not final_state_hash:
+                raise ProductionReplayFormatError(
+                    "正式单挑回放缺少final_game_state_hash"
+                )
         except Exception as exc:  # 每个失败seed必须原位记录，不得删除重采样
             exception = exc
         profile_unsupported = not configuration.source_confirmed
@@ -811,7 +968,8 @@ def run_formal_duel_seed_sweep(
                 formal_result_eligible=(
                     False if game is None else game.formal_result_eligible
                 ),
-                reexecution_verified=False,
+                reexecution_verified=reexecution_verified,
+                final_state_hash=final_state_hash,
             )
         )
     return tuple(results)

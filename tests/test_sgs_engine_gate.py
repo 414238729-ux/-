@@ -312,7 +312,8 @@ def test_formal_duel_gate_reinspects_live_readiness_and_ignores_forged_manifest(
     manifest = build_current_manifest(mode_name=FORMAL_NO_SKILL_DUEL_MODE)
     baseline = evaluate_formal_run_gate(manifest)
     assert calls == 1
-    assert baseline.ready is False
+    assert baseline.ready is True
+    assert baseline.issues == ()
 
     # 模拟不可信 payload 在构造后借 object.__setattr__ 篡改所有旧能力字段。
     object.__setattr__(manifest, "ruleset_version", "forged-ruleset")
@@ -337,12 +338,9 @@ def test_formal_duel_gate_reinspects_live_readiness_and_ignores_forged_manifest(
 
     forged = evaluate_formal_run_gate(manifest)
     assert calls == 2
-    assert forged.ready is False
-    assert forged.issue_codes == baseline.issue_codes
-    assert GateIssueCode.MODE_NOT_IMPLEMENTED in forged.issue_codes
-    assert GateIssueCode.ALL_CARDS_NOT_IMPLEMENTED in forged.issue_codes
-    assert GateIssueCode.UNSUPPORTED_RULES in forged.issue_codes
-    assert GateIssueCode.FULL_GAME_CORE_NOT_IMPLEMENTED in forged.issue_codes
+    assert forged.ready is True
+    assert forged.issues == ()
+    assert forged.issue_codes == baseline.issue_codes == ()
 
 
 def test_formal_duel_gate_fails_closed_when_live_inspector_breaks(
@@ -429,10 +427,11 @@ def test_formal_duel_gate_can_only_open_from_consistent_live_readiness(
         "inspect_formal_duel_readiness",
         lambda: simulated_live_ready,
     )
-    # manifest 仍是当前真实 blocked 投影；准入只能由上面的现场结果决定。
+    # manifest 由被 monkeypatch 的现场 inspector 投影（模拟全部就绪）；
+    # 准入由一致的现场结果决定。
     manifest = build_current_manifest(mode_name=FORMAL_NO_SKILL_DUEL_MODE)
-    assert manifest.mode_implemented is False
-    assert manifest.unsupported_rules > 0
+    assert manifest.mode_implemented is True
+    assert manifest.unsupported_rules == 0
 
     result = evaluate_formal_run_gate(manifest)
     assert result.ready is True

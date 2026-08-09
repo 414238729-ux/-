@@ -37,6 +37,7 @@ from .actions import (
     RuleAdapter,
     RuleRegistry,
     UnsupportedRuleError,
+    VirtualCardReference,
     apply_action,
     enumerate_legal_actions,
     validate_action,
@@ -2725,6 +2726,11 @@ class ProductionBasicCardBatch:
                                     action_type=ActionType.USE_CARD,
                                     actor_id=actor,
                                     card_instance_id=virtual_id,
+                                    virtual_card=VirtualCardReference(
+                                        card_key="sgs_basic_sha",
+                                        conversion_rule_id="zhangba",
+                                        material_card_instance_ids=material_ids,
+                                    ),
                                     target_ids=(self.opponent_of(actor),),
                                     payload={
                                         "operation": "use_slash",
@@ -4819,7 +4825,7 @@ class ProductionBasicCardBatch:
             material_window_id = (
                 f"zhangba-materials:{runtime.turn_number}:{context.actor_id}"
             )
-            next_state, material_events = self._discard_zhangba_materials(
+            next_state, material_events = self._move_zhangba_materials_to_processing(
                 state,
                 actor_id=context.actor_id,
                 material_ids=zhangba_materials,
@@ -4942,12 +4948,6 @@ class ProductionBasicCardBatch:
             # 仁王盾／藤甲令【杀】对目标无效：不开闪响应窗口、不造成伤害、
             # 不消耗【闪】、不触发濒死或传导；杀仍算已经使用并进入弃牌堆。
             invalid_reason, armor_id = invalidation
-            next_state, finish_event = self._finish_slash_processing(
-                next_state,
-                runtime,
-                action.card_instance_id,
-                f"slash_invalidated_by_{invalid_reason}",
-            )
             cancelled_event = GameEvent(
                 event_type=EventType.CARD_EFFECT_CANCELLED,
                 card_instance_id=action.card_instance_id,
@@ -4961,10 +4961,36 @@ class ProductionBasicCardBatch:
                     "invalidated_by_armor": True,
                 },
             )
-            if finish_event is not None:
-                self._events.extend((cancelled_event, finish_event))
+            if zhangba_virtual:
+                # 丈八虚拟杀：材料在本次杀被防具无效化（结算完成）时统一
+                # 从处理区进入弃牌堆（USER_CONFIRMED_RULE，2026-08-09）。
+                assert zhangba_materials is not None
+                next_state, zhangba_finish_events = (
+                    self._finalize_zhangba_materials(
+                        next_state,
+                        actor_id=context.actor_id,
+                        material_ids=zhangba_materials,
+                        window_id=(
+                            f"zhangba-materials:{runtime.turn_number}:"
+                            f"{context.actor_id}"
+                        ),
+                        reason="zhangba_material_finalize",
+                    )
+                )
+                self._events.extend(
+                    (cancelled_event, *zhangba_finish_events)
+                )
             else:
-                self._events.extend((cancelled_event,))
+                next_state, finish_event = self._finish_slash_processing(
+                    next_state,
+                    runtime,
+                    action.card_instance_id,
+                    f"slash_invalidated_by_{invalid_reason}",
+                )
+                if finish_event is not None:
+                    self._events.extend((cancelled_event, finish_event))
+                else:
+                    self._events.extend((cancelled_event,))
             next_runtime = replace(
                 runtime,
                 slash_used_counts=MappingProxyType(next_counts),
@@ -6279,14 +6305,14 @@ class ProductionBasicCardBatch:
         instance_id: str,
         reason: str,
     ) -> tuple[GameState, GameEvent | None]:
-        """实体【杀】完成结算；丈八虚拟杀无实体在PROCESSING，跳过finish。
+        """实体【杀】完成结算；丈八虚拟杀把两张材料从处理区统一清理。
 
-        虚拟杀的两张实体材料在转换时已按正式规则进入弃牌堆，结算完成
-        不产生额外的实体牌移动事件；重执行路径一致。"""
-
-        # 实体路径等价 _finish_processing（所有已证明生产路径不变）；
-        # 虚拟分支仅 pending_slash.virtual=True 时可达，丈八 fail-closed
-        # 后不可达（UNREACHABLE while zhangba PARTIAL）。
+        USER_CONFIRMED_RULE（2026-08-09 用户确认）：材料在虚拟杀整个
+        使用/打出与结算期间保持 PROCESSING，本次虚拟【杀】完整结算完成
+        后 PROCESSING→DISCARD。实体路径等价 _finish_processing（所有已
+        证明生产路径不变）；虚拟分支在 pending_slash.virtual=True 时
+        可达，材料清理事件由本方法直接登记（顺序先于调用方登记的结算
+        收尾事件，重执行路径一致）。"""
 
         pending = runtime.pending_slash
         if (
@@ -6294,10 +6320,25 @@ class ProductionBasicCardBatch:
             and pending.virtual
             and pending.slash_instance_id == instance_id
         ):
-            return state, None
+            if not pending.material_ids:
+                raise ProductionBatchError(
+                    "丈八虚拟杀缺少材料实体记录，失败关闭"
+                )
+            next_state, material_events = self._finalize_zhangba_materials(
+                state,
+                actor_id=pending.attacker_id,
+                material_ids=pending.material_ids,
+                window_id=(
+                    f"zhangba-materials:{runtime.turn_number}:"
+                    f"{pending.attacker_id}"
+                ),
+                reason="zhangba_material_finalize",
+            )
+            self._events.extend(material_events)
+            return next_state, None
         return self._finish_processing(state, instance_id, reason)
 
-    def _discard_zhangba_materials(
+    def _move_zhangba_materials_to_processing(
         self,
         state: GameState,
         *,
@@ -6306,27 +6347,27 @@ class ProductionBasicCardBatch:
         window_id: str,
         purpose: str,
     ) -> tuple[GameState, tuple[GameEvent, ...]]:
-        """丈八虚拟杀的两张实体材料作为本次转换的 subcards 随虚拟杀
-        使用/打出一次性进入弃牌堆。
+        """丈八虚拟杀的两张实体材料作为本次转换的 subcards，权威地从
+        手牌区移入处理区（HAND→PROCESSING）。
 
-        UNREACHABLE while zhangba PARTIAL/fail-closed：仅由丈八虚拟杀
-        使用/打出 apply 路径调用；不得被其他路径当作已证明正式生产能力。
+        USER_CONFIRMED_RULE（2026-08-09 用户确认）：两张材料牌从手牌被
+        用于构成虚拟普通【杀】时，HAND→PROCESSING 是权威牌移动；虚拟
+        【杀】整个使用/打出与结算期间，两张材料实体都继续位于
+        PROCESSING；本次虚拟【杀】完整结算完成后 PROCESSING→DISCARD。
+        不是 HAND→DISCARD 后再独立结算，也不是材料停留在 HAND 直到
+        结算完成。该生命周期适用于丈八合法的“当作【杀】使用或打出”
+        路径（出牌阶段主动使用、决斗/南蛮要求打出、借刀杀人要求使用等
+        复用通用【杀】基础设施的路径，各路径自身既有规则仍须遵守）。
 
         依据基础术语第20.4/20.6节（当前确认）与第12节措辞通则：丈八蛇矛
         文本“将两张手牌当【杀】使用或打出”没有“弃置”字样，材料不是
         一次独立的弃置动作（discard cost）——不得产生 CARD_DISCARDED
-        事件（基础术语：除非具体效果明确使用“弃置”一词，否则不得自动
-        视为某名角色执行了一次“弃置牌”的操作）；材料作为虚拟杀的材料
-        实体（subcards）随本次 CARD_USED/CARD_PLAYED 进入弃牌堆，离开
-        手牌登记 CARD_LOST（失去牌）。材料必须是当前真实手牌（装备区、
-        判定区不得作为材料）；任一非法则整批不移动。两张材料属于同一次
-        转换，共享同一转换窗口ID。
-
-        规则缺口记录（VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP）：
-        材料在“使用/打出”时的精确 zone 生命周期时点（A.先作为 subcards
-        进入PROCESSING、结算完成后再进入弃牌堆；B.开始结算前直接进入
-        弃牌堆）在项目 Knowledge 中没有明确确认通则；当前按“材料随本次
-        虚拟杀使用/打出进入弃牌堆”的最小一致模型实现，待用户确认。"""
+        事件；材料作为虚拟杀的材料实体（subcards）在转换时进入处理区，
+        离开手牌登记 CARD_LOST（失去牌）。材料必须是当前真实手牌（装备
+        区、判定区不得作为材料）；任一非法则整批不移动。两张材料属于
+        同一次转换，共享同一转换窗口ID。VIRTUAL_CARD_SUBCARD_LIFECYCLE_
+        RULE_GAP 已由用户确认关闭。
+        """
 
         hand_set = set(state.card_ids_in(ZoneRef.hand(actor_id)))
         for instance_id in material_ids:
@@ -6337,7 +6378,7 @@ class ProductionBasicCardBatch:
         if len(set(material_ids)) != len(material_ids):
             raise ProductionBatchError("丈八材料不允许重复选择同一实体")
         next_state = state.move_cards(
-            {instance_id: DISCARD_PILE for instance_id in material_ids}
+            {instance_id: PROCESSING_ZONE for instance_id in material_ids}
         )
         events: list[GameEvent] = []
         for instance_id in material_ids:
@@ -6352,7 +6393,7 @@ class ProductionBasicCardBatch:
                         card_user=actor_id,
                         payload={
                             "source": _zone_payload(source),
-                            "destination": _zone_payload(DISCARD_PILE),
+                            "destination": _zone_payload(PROCESSING_ZONE),
                             "reason": "zhangba_material",
                             "window_id": window_id,
                             "purpose": purpose,
@@ -6373,6 +6414,54 @@ class ProductionBasicCardBatch:
                 )
             )
         return next_state, tuple(events)
+
+    def _finalize_zhangba_materials(
+        self,
+        state: GameState,
+        *,
+        actor_id: str,
+        material_ids: tuple[str, ...],
+        window_id: str,
+        reason: str,
+    ) -> tuple[GameState, tuple[GameEvent, ...]]:
+        """本次虚拟【杀】完整结算完成后，两张材料实体从处理区统一进入
+        弃牌堆（PROCESSING→DISCARD）。
+
+        USER_CONFIRMED_RULE（2026-08-09 用户确认）：材料在整个虚拟杀
+        使用/打出与结算期间保持 PROCESSING；结算完成后统一进入
+        DISCARD。被闪、造成伤害、无效、防具无效、防止、角色死亡等所有
+        正常结束路径都到达本清理点；中途响应链存在时不提前弃置。任一
+        材料不在 PROCESSING 时整批失败关闭（不允许半移动状态进入事件流）。
+        """
+
+        for instance_id in material_ids:
+            if state.location_of(instance_id) != PROCESSING_ZONE:
+                raise ProductionBatchError(
+                    "丈八材料清理失败：材料不在处理区，禁止半移动状态"
+                )
+        next_state = state.move_cards(
+            {instance_id: DISCARD_PILE for instance_id in material_ids}
+        )
+        events: list[GameEvent] = []
+        for instance_id in material_ids:
+            source = state.location_of(instance_id)
+            card_key = _card_key(next_state, instance_id)
+            events.append(
+                GameEvent(
+                    event_type=EventType.CARD_MOVED,
+                    card_instance_id=instance_id,
+                    card_key=card_key,
+                    card_user=actor_id,
+                    payload={
+                        "source": _zone_payload(source),
+                        "destination": _zone_payload(DISCARD_PILE),
+                        "reason": reason,
+                        "window_id": window_id,
+                    },
+                )
+            )
+        return next_state, tuple(events)
+
 
     def _zhangba_virtual_id(
         self, runtime: _BatchRuntime, material_ids: tuple[str, str]
@@ -7822,6 +7911,11 @@ class ProductionBasicCardBatch:
                             action_type=ActionType.PLAY_CARD,
                             actor_id=context.actor_id,
                             card_instance_id=virtual_id,
+                            virtual_card=VirtualCardReference(
+                                card_key="sgs_basic_sha",
+                                conversion_rule_id="zhangba",
+                                material_card_instance_ids=material_ids,
+                            ),
                             target_ids=(duel.target_id,),
                             payload={
                                 "operation": "play_slash_for_duel",
@@ -7928,7 +8022,7 @@ class ProductionBasicCardBatch:
                 decision="play_slash",
             )
             next_state, material_events = (
-                self._discard_zhangba_materials(
+                self._move_zhangba_materials_to_processing(
                     state,
                     actor_id=context.actor_id,
                     material_ids=material_ids,
@@ -7965,6 +8059,20 @@ class ProductionBasicCardBatch:
                 },
             )
             self._events.extend((played_event, *material_events))
+            # USER_CONFIRMED_RULE（2026-08-09）：响应【决斗】的丈八
+            # 虚拟杀打出即完成（无后续独立杀结算），材料在打出完成后
+            # 统一从处理区进入弃牌堆。
+            next_state, finalize_events = self._finalize_zhangba_materials(
+                next_state,
+                actor_id=context.actor_id,
+                material_ids=material_ids,
+                window_id=(
+                    f"zhangba-materials:{runtime.turn_number}:"
+                    f"{context.actor_id}"
+                ),
+                reason="zhangba_material_finalize",
+            )
+            self._events.extend(finalize_events)
             next_round = (duel.response_index + 1) // 2
             next_duel = replace(
                 duel,
@@ -9182,23 +9290,17 @@ class ProductionBasicCardBatch:
             for instance_id in hand_ids
             if state.cards_by_id[instance_id].card_key in SLASH_CARD_KEYS
         ]
-        # 丈八蛇矛能够在“要求使用【杀】”的借刀窗口把两张手牌转化为杀。
-        # 即使当前没有实体【杀】，只要材料数量足够，就不能错误走“无合法
-        # 杀→交出武器”。在 subcard 生命周期规则缺口关闭并接入 typed
-        # virtual-card 动作前，这一可扩展状态必须与其他丈八入口一致失败关闭。
-        if (
-            not slash_candidates
-            and equipped_weapon_key(state, first_target)
+        # USER_CONFIRMED_RULE（2026-08-09）：丈八蛇矛能够在“要求使用
+        # 【杀】”的借刀窗口把两张手牌转化为杀。即使当前没有实体【杀】，
+        # 只要装备丈八且材料数量足够，就不走“无合法杀→交出武器”，而是
+        # 打开选择窗口（枚举提供丈八虚拟选项；材料 HAND→PROCESSING→
+        # DISCARD 生命周期与通用使用路径一致）。
+        has_zhangba_virtual = (
+            equipped_weapon_key(state, first_target)
             == "sgs_weapon_zhangbashemao"
             and len(hand_ids) >= 2
-        ):
-            check_weapon_skill_gate(
-                state,
-                actor_id=first_target,
-                decision="forced_slash",
-                target_id=second_target,
-            )
-        if not slash_candidates:
+        )
+        if not slash_candidates and not has_zhangba_virtual:
             return self._borrowed_sword_weapon_gain(
                 state, runtime, decision="no_legal_slash"
             )
@@ -9306,6 +9408,61 @@ class ProductionBasicCardBatch:
                         },
                     )
                 )
+        # USER_CONFIRMED_RULE（2026-08-09）：被【借刀杀人】要求使用【杀】
+        # 时，同样可以把两张手牌当作普通【杀】使用（丈八蛇矛）；材料
+        # HAND→PROCESSING→DISCARD 生命周期与通用使用路径一致。只有第一
+        # 目标当前装备丈八蛇矛且手牌≥2 时提供虚拟选项；材料对只通过
+        # 不透明句柄暴露。
+        if (
+            equipped_weapon_key(state, pending.first_target_id)
+            == "sgs_weapon_zhangbashemao"
+            and len(
+                state.card_ids_in(ZoneRef.hand(pending.first_target_id))
+            )
+            >= 2
+        ):
+            hand_ids = tuple(
+                state.card_ids_in(ZoneRef.hand(pending.first_target_id))
+            )
+            zhangba_window = (
+                f"zhangba-borrowed:{runtime.turn_number}:"
+                f"{pending.first_target_id}"
+            )
+            zhangba_snapshot = sha256_value(hand_ids)
+            for index, first in enumerate(hand_ids):
+                for second in hand_ids[index + 1 :]:
+                    material_ids = (first, second)
+                    zhangba_handle = _zhangba_material_handle(
+                        self._session_id,
+                        self._session_secret,
+                        zhangba_window,
+                        pending.first_target_id,
+                        zhangba_snapshot,
+                        material_ids,
+                    )
+                    virtual_id = (
+                        f"virtual:zhangba:{runtime.turn_number}:"
+                        f"{first}:{second}"
+                    )
+                    actions.append(
+                        LegalAction(
+                            action_type=ActionType.RESPOND,
+                            actor_id=pending.first_target_id,
+                            target_ids=(pending.first_target_id,),
+                            card_instance_id=virtual_id,
+                            virtual_card=VirtualCardReference(
+                                card_key="sgs_basic_sha",
+                                conversion_rule_id="zhangba",
+                                material_card_instance_ids=material_ids,
+                            ),
+                            payload={
+                                **base_payload,
+                                "zhangba_virtual": True,
+                                "handle": zhangba_handle,
+                                "zhangba_window_id": zhangba_window,
+                            },
+                        )
+                    )
         actions.append(
             LegalAction(
                 action_type=ActionType.PASS,
@@ -9381,6 +9538,81 @@ class ProductionBasicCardBatch:
             raise InvalidActionError(
                 "第二次检测失败：第二目标已不在第一目标当前攻击范围内"
             )
+        zhangba_virtual = bool(payload.get("zhangba_virtual"))
+        if zhangba_virtual:
+            # USER_CONFIRMED_RULE（2026-08-09）：丈八蛇矛×借刀——两张
+            # 手牌当作普通【杀】使用；材料 HAND→PROCESSING→DISCARD。
+            # 应用层动态重检：第一目标当前仍装备丈八且材料仍为真实手牌；
+            # 武器在选择前失去则旧转化动作失败关闭。
+            if (
+                equipped_weapon_key(state, pending.first_target_id)
+                != "sgs_weapon_zhangbashemao"
+            ):
+                raise InvalidActionError(
+                    "丈八蛇矛在选择前已失去，旧转化动作失败关闭"
+                )
+            if (
+                len(
+                    state.card_ids_in(
+                        ZoneRef.hand(pending.first_target_id)
+                    )
+                )
+                < 2
+            ):
+                raise InvalidActionError(
+                    "丈八材料不足两张，旧转化动作失败关闭"
+                )
+            zhangba_window = str(payload.get("zhangba_window_id", ""))
+            material_ids = _resolve_zhangba_handle_direct(
+                self._session_id,
+                self._session_secret,
+                state,
+                zhangba_window,
+                pending.first_target_id,
+                payload.get("handle"),
+            )
+            if material_ids is None:
+                raise InvalidActionError(
+                    "丈八材料句柄无效：伪造、跨窗口、跨会话或手牌已变化"
+                )
+            virtual_id = (
+                f"virtual:zhangba:{runtime.turn_number}:"
+                f"{material_ids[0]}:{material_ids[1]}"
+            )
+            if action.card_instance_id != virtual_id:
+                raise InvalidActionError(
+                    "丈八虚拟杀动作与材料组合不一致"
+                )
+            check_weapon_skill_gate(
+                state,
+                actor_id=pending.first_target_id,
+                decision="forced_slash",
+                target_id=pending.second_target_id,
+                slash_card_key="sgs_basic_sha",
+            )
+            next_state, material_events = (
+                self._move_zhangba_materials_to_processing(
+                    state,
+                    actor_id=pending.first_target_id,
+                    material_ids=material_ids,
+                    window_id=(
+                        f"zhangba-materials:{runtime.turn_number}:"
+                        f"{pending.first_target_id}"
+                    ),
+                    purpose="borrowed_sword_slash_use",
+                )
+            )
+            self._events.extend(material_events)
+            next_state, next_runtime = self._apply_forced_slash_use(
+                next_state,
+                runtime,
+                slash_instance_id=virtual_id,
+                attacker_id=pending.first_target_id,
+                target_id=pending.second_target_id,
+                zhangba_materials=material_ids,
+            )
+            self._commit_runtime(runtime, next_runtime)
+            return next_state
         handle = payload.get("handle")
         instance_id = _resolve_borrowed_sword_slash_handle(
             self._session_id,
@@ -9448,23 +9680,41 @@ class ProductionBasicCardBatch:
         attacker_id: str,
         target_id: str,
         fire_converted: bool = False,
+        zhangba_materials: tuple[str, str] | None = None,
     ) -> tuple[GameState, _BatchRuntime]:
         """借刀要求的正式【杀】使用子结算。
 
         绕过“通常出杀次数上限”这一项前置检查（绕过来自借刀规则本身），
         但仍增加第一目标自己的计数；产生第一目标自己的正常 ``card_used``，
-        正常进入闪响应、伤害、濒死、救援、死亡与属性传导。"""
+        正常进入闪响应、伤害、濒死、救援、死亡与属性传导。
+
+        ``zhangba_materials`` 提供时按丈八蛇矛虚拟杀结算（USER_CONFIRMED_
+        RULE，2026-08-09）：两张材料已由调用方权威移入处理区，本函数不
+        再移动实体；``slash_instance_id`` 为确定性虚拟ID，材料在本次杀
+        结算完成时统一从处理区进入弃牌堆。"""
 
         pending = runtime.pending_borrowed_sword
         if pending is None or pending.stage != "slash_request":
             raise ProductionBatchError("强制使用杀缺少借刀挂起状态")
-        card = state.cards_by_id[slash_instance_id]
+        if zhangba_materials is not None:
+            card = _zhangba_virtual_card(
+                state, slash_instance_id, zhangba_materials
+            )
+        else:
+            card = state.cards_by_id[slash_instance_id]
         adapter = self._formal_registry.adapter_for(card.card_key)
         if not isinstance(adapter, SlashAdapter):
             raise ProductionBatchError("借刀强制使用杀必须使用【杀】生产适配器")
-        next_state, move_event = self._move_to_processing(
-            state, slash_instance_id, attacker_id, "borrowed_sword_slash_use"
-        )
+        if zhangba_materials is None:
+            next_state, move_event = self._move_to_processing(
+                state,
+                slash_instance_id,
+                attacker_id,
+                "borrowed_sword_slash_use",
+            )
+        else:
+            next_state = state
+            move_event = None
         boosted = runtime.wine_buff_owner_id == attacker_id
         damage_nature = (
             "火属性" if fire_converted else adapter.damage_nature
@@ -9482,6 +9732,12 @@ class ProductionBasicCardBatch:
             use_payload["weapon_convert_context"] = (
                 "zhuqueyushan_borrowed_sword"
             )
+        if zhangba_materials is not None:
+            use_payload["physical_or_virtual"] = "virtual"
+            use_payload["virtual_source"] = "sgs_weapon_zhangbashemao"
+            use_payload["material_card_instance_ids"] = list(
+                zhangba_materials
+            )
         used_event = GameEvent(
             event_type=EventType.CARD_USED,
             card_instance_id=slash_instance_id,
@@ -9490,7 +9746,12 @@ class ProductionBasicCardBatch:
             target_ids=(target_id,),
             payload=use_payload,
         )
-        queued = self._events.extend((used_event, move_event))
+        if zhangba_materials is not None:
+            # 丈八虚拟杀无实体进入处理区；材料 HAND→PROCESSING 事件
+            # 已由调用方在进入本函数前登记。
+            queued = self._events.extend((used_event,))
+        else:
+            queued = self._events.extend((used_event, move_event))
         used_sequence = queued[0].sequence
         assert used_sequence is not None
         next_counts = {
@@ -9511,6 +9772,10 @@ class ProductionBasicCardBatch:
             boosted,
             ignore_armor=ignore_armor,
             fire_converted=fire_converted,
+            virtual=zhangba_materials is not None,
+            material_ids=(
+                () if zhangba_materials is None else zhangba_materials
+            ),
         )
         borrowed_resolving = replace(
             pending,
@@ -9554,11 +9819,29 @@ class ProductionBasicCardBatch:
             )
             if invalidation is not None:
                 invalid_reason, armor_id = invalidation
-                next_state, finish_event = self._finish_processing(
-                    next_state,
-                    slash_instance_id,
-                    f"slash_invalidated_by_{invalid_reason}",
-                )
+                if zhangba_materials is not None:
+                    # 丈八虚拟杀：无实体在处理区，材料在本次杀被防具无效
+                    # 化（结算完成）时统一从处理区进入弃牌堆。
+                    next_state, zhangba_finish_events = (
+                        self._finalize_zhangba_materials(
+                            next_state,
+                            actor_id=attacker_id,
+                            material_ids=zhangba_materials,
+                            window_id=(
+                                f"zhangba-materials:"
+                                f"{runtime.turn_number}:{attacker_id}"
+                            ),
+                            reason="zhangba_material_finalize",
+                        )
+                    )
+                    finish_events = zhangba_finish_events
+                else:
+                    next_state, finish_event = self._finish_processing(
+                        next_state,
+                        slash_instance_id,
+                        f"slash_invalidated_by_{invalid_reason}",
+                    )
+                    finish_events = (finish_event,)
                 cancelled_event = GameEvent(
                     event_type=EventType.CARD_EFFECT_CANCELLED,
                     card_instance_id=slash_instance_id,
@@ -9573,7 +9856,7 @@ class ProductionBasicCardBatch:
                         "forced_use_context": "borrowed_sword",
                     },
                 )
-                self._events.extend((cancelled_event, finish_event))
+                self._events.extend((cancelled_event, *finish_events))
                 base_runtime = replace(
                     runtime,
                     slash_used_counts=MappingProxyType(next_counts),
@@ -11075,6 +11358,11 @@ class ProductionBasicCardBatch:
                             action_type=ActionType.PLAY_CARD,
                             actor_id=context.actor_id,
                             card_instance_id=virtual_id,
+                            virtual_card=VirtualCardReference(
+                                card_key="sgs_basic_sha",
+                                conversion_rule_id="zhangba",
+                                material_card_instance_ids=material_ids,
+                            ),
                             target_ids=(current,),
                             payload={
                                 "operation": adapter.response_operation,
@@ -11189,7 +11477,7 @@ class ProductionBasicCardBatch:
                 decision="play_slash",
             )
             next_state, material_events = (
-                self._discard_zhangba_materials(
+                self._move_zhangba_materials_to_processing(
                     state,
                     actor_id=context.actor_id,
                     material_ids=material_ids,
@@ -11225,6 +11513,20 @@ class ProductionBasicCardBatch:
                 },
             )
             self._events.extend((played_event, *material_events))
+            # USER_CONFIRMED_RULE（2026-08-09）：响应【南蛮入侵】的丈八
+            # 虚拟杀打出即完成（无后续独立杀结算），材料在打出完成后
+            # 统一从处理区进入弃牌堆。
+            next_state, finalize_events = self._finalize_zhangba_materials(
+                next_state,
+                actor_id=context.actor_id,
+                material_ids=material_ids,
+                window_id=(
+                    f"zhangba-materials:{runtime.turn_number}:"
+                    f"{context.actor_id}"
+                ),
+                reason="zhangba_material_finalize",
+            )
+            self._events.extend(finalize_events)
             resolved = self._group_resolved_event(
                 next_state, group, current, result="responded"
             )

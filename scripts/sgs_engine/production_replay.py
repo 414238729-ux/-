@@ -762,9 +762,14 @@ class ProductionReexecutionReplay:
                 "生产基本牌批次回放必须标记test_only=false"
             )
         if header["formal_result"] is not False:
-            raise ProductionReplayFormatError(
-                "Milestone B门禁尚未开放，formal_result必须为false"
-            )
+            # Milestone B 正式 release 后，正式单挑回放允许 formal_result=true；
+            # 防伪要求：仅正式单挑模式，且 initial_configuration 必须绑定
+            # 项目 canonical formal profile 且 analysis_only=false（在下方
+            # 正式单挑配置解析中继续校验）。
+            if header["mode_id"] != FORMAL_NO_SKILL_DUEL_MODE:
+                raise ProductionReplayFormatError(
+                    "正式结果只能出现在正式单挑模式回放中"
+                )
         if header["production_basic_cards_batch"] is not True:
             raise ProductionReplayFormatError(
                 "生产基本牌批次回放必须标记production_basic_cards_batch=true"
@@ -782,6 +787,24 @@ class ProductionReexecutionReplay:
                 raise ProductionReplayFormatError(
                     "正式单挑initial_configuration.analysis_only必须是布尔值"
                 )
+            if header["formal_result"] is not False:
+                if initial_configuration["analysis_only"] is not False:
+                    raise ProductionReplayFormatError(
+                        "正式结果回放禁止analysis_only"
+                    )
+                from .formal_duel import FormalDuelConfiguration
+
+                raw_config = initial_configuration.get(
+                    "formal_duel_configuration"
+                )
+                if (
+                    raw_config is None
+                    or FormalDuelConfiguration.from_dict(raw_config)
+                    != FormalDuelConfiguration.formal_profile()
+                ):
+                    raise ProductionReplayFormatError(
+                        "正式结果回放必须绑定项目canonical formal profile"
+                    )
         else:
             _require_exact_fields(
                 initial_configuration,

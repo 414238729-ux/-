@@ -288,11 +288,22 @@ def test_virtual_card_reference_cannot_masquerade_as_physical_instance():
         conversion_rule_id="tests.virtual-slash.v1",
         material_card_instance_ids=("c1",),
     )
+    # typed virtual：``virtual:`` 前缀的确定性虚拟标识与 VirtualCardReference
+    # 是合法的虚拟牌动作（丈八蛇矛虚拟杀等），不是实体牌实例。
+    typed = LegalAction(
+        action_type=ActionType.USE_CARD,
+        actor_id="p1",
+        card_instance_id="virtual:zhangba:1:c1:c2",
+        virtual_card=reference,
+    )
+    assert typed.card_instance_id == "virtual:zhangba:1:c1:c2"
+    # 非 ``virtual:`` 前缀的实体ID不得同时携带虚拟牌引用（防虚拟牌冒充
+    # 实体牌实例）。
     with pytest.raises(ValueError, match="同时引用实体牌和虚拟牌"):
         LegalAction(
             action_type=ActionType.USE_CARD,
             actor_id="p1",
-            card_instance_id="virtual:forged",
+            card_instance_id="c1",
             virtual_card=reference,
         )
     with pytest.raises(ValueError, match="不能重复"):

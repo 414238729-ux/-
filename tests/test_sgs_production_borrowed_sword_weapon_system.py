@@ -286,8 +286,10 @@ def test_implemented_and_remaining_card_counts_updated() -> None:
     assert len(registry.unimplemented_card_keys) == 0
     # 完整实现口径：36种／158张（CP-04P：诸葛连弩、青釭剑、寒冰剑、
     # 雌雄双股剑、古锭刀、青龙偃月刀、贯石斧、朱雀羽扇、麒麟弓共9种／
-    # 10张武器为COMPLETE，计入完整实现；丈八蛇矛、方天画戟保持PARTIAL
-    # ——丈八因 VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP 暂不计COMPLETE）
+    # 10张武器为COMPLETE，计入完整实现；丈八蛇矛已按 USER_CONFIRMED_RULE
+    # （2026-08-09）完成材料 HAND→PROCESSING→DISCARD 生命周期并计为
+    # COMPLETE（VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP 已关闭）；
+    # 方天画戟保持 PARTIAL）
     complete_keys = (
         set(PRODUCTION_BASIC_CARD_KEYS)
         | set(PRODUCTION_TRICK_KEYS)
@@ -300,8 +302,8 @@ def test_implemented_and_remaining_card_counts_updated() -> None:
             if status == "COMPLETE"
         }
     )
-    assert len(complete_keys) == 36
-    assert sum(len(registry.instances_of(key)) for key in complete_keys) == 158
+    assert len(complete_keys) == 37
+    assert sum(len(registry.instances_of(key)) for key in complete_keys) == 159
     # 注册表口径：38种适配器／160张实体
     assert sum(len(registry.instances_of(key)) for key in registry.implemented_card_keys) == 160
     assert set(registry.unimplemented_card_keys) == set()
@@ -1433,12 +1435,18 @@ def test_cixiong_holder_slash_fails_closed() -> None:
         )
 
 
-def test_zhangba_possible_expansion_fails_closed() -> None:
-    # 丈八蛇矛（PARTIAL）：subcard生命周期时点规则缺口，手牌>=2时失败关闭
+def test_zhangba_possible_expansion_enumerates_virtual() -> None:
+    # USER_CONFIRMED_RULE（2026-08-09）：丈八材料 HAND→PROCESSING→DISCARD
+    # 已确认并实现（VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP 已关闭）；
+    # 手牌>=2时 legal_actions 枚举丈八虚拟杀使用选项，不再失败关闭
     game = _fresh(seed=3)
     _equip_weapon(game, "sgs_weapon_zhangbashemao")
-    with pytest.raises(UnsupportedRuleError):
-        game.legal_actions()
+    actions = game.legal_actions()
+    assert any(
+        a.payload.get("zhangba_virtual") is True
+        and a.payload.get("operation") == "use_slash"
+        for a in actions
+    )
     # 手牌<2张时可证明无转化材料：按实体杀流程继续
     game2 = _fresh(seed=3)
     _equip_weapon(game2, "sgs_weapon_zhangbashemao")
@@ -1450,6 +1458,9 @@ def test_zhangba_possible_expansion_fails_closed() -> None:
     _swap(game2, sha.instance_id, ZoneRef.hand("p1"))
     ops = [a.payload.get("operation") for a in game2.legal_actions()]
     assert "use_slash" in ops
+    assert not any(
+        a.payload.get("zhangba_virtual") is True for a in game2.legal_actions()
+    )
 
 
 def test_zhuque_entity_plain_slash_convertible_now_implemented() -> None:
@@ -1629,7 +1640,10 @@ def test_gate_failure_leaves_state_events_rng_pending_hash_unchanged() -> None:
     assert game.execution_hash == before_hash
 
 
-def test_zhangba_borrowed_without_entity_slash_fails_closed_atomically() -> None:
+def test_zhangba_borrowed_without_entity_slash_uses_virtual() -> None:
+    """借刀要求使用【杀】时，装备丈八且无实体杀的第一目标可以选择丈八
+    虚拟杀履行（USER_CONFIRMED_RULE，2026-08-09）；材料 HAND→PROCESSING，
+    结算完成后 PROCESSING→DISCARD；借刀履行后武器保留、不交付。"""
     game = _fresh(seed=3)
     jiedao_id, weapon_id, slash_ids = _jiedao_fixture(
         game,
@@ -1646,29 +1660,38 @@ def test_zhangba_borrowed_without_entity_slash_fails_closed_atomically() -> None
 
     _step(game, _action(game, "use_jiedao", card_key=JIEDAO))
     _step(game, _action(game, "pass_trick_response"))
-    before_state = game.state
-    before_runtime = game.runtime
-    before_events = game.events
-    before_rng = game.rng_calls
-    before_step_count = game.step_count
-    before_hash = game.execution_hash
-
-    with pytest.raises(
-        UnsupportedRuleError,
-        match="VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP",
-    ):
-        final_pass = _action(game, "pass_trick_response")
-        assert final_pass is not None
-        _step(game, final_pass)
-
-    assert game.state == before_state
-    assert game.runtime == before_runtime
-    assert game.events == before_events
-    assert game.rng_calls == before_rng
-    assert game.step_count == before_step_count
-    assert game.execution_hash == before_hash
-    assert game.state.location_of(jiedao_id) == PROCESSING_ZONE
-    assert game.state.location_of(weapon_id) == ZoneRef.equipment("p2", "weapon")
+    _step(game, _action(game, "pass_trick_response"))
+    assert game.phase is ProductionPhase.BORROWED_SWORD_CHOICE
+    zhangba_choices = [
+        a
+        for a in game.legal_actions()
+        if a.payload.get("zhangba_virtual") is True
+    ]
+    assert zhangba_choices
+    chosen = zhangba_choices[0]
+    assert str(chosen.card_instance_id or "").startswith("virtual:zhangba:")
+    assert "handle" in chosen.payload
+    _step(game, chosen)
+    # 材料权威移入处理区；进入杀结算链
+    pending = game.runtime.pending_slash
+    assert pending is not None and pending.virtual
+    materials = pending.material_ids
+    assert len(materials) == 2
+    for instance_id in materials:
+        assert game.state.location_of(instance_id) == PROCESSING_ZONE
+    # 完成闪响应/伤害结算（参考控制器），材料在结算完成后进入弃牌堆
+    controller = BatchReferenceController()
+    guard = 0
+    while game.runtime.pending_slash is not None and guard < 40:
+        game.step(controller)
+        guard += 1
+    assert game.runtime.pending_slash is None
+    for instance_id in materials:
+        assert game.state.location_of(instance_id) == DISCARD_PILE
+    # 借刀已履行：武器保留，不交付给使用者
+    assert weapon_id in game.state.card_ids_in(
+        ZoneRef.equipment("p2", "weapon")
+    )
     assert weapon_id not in game.state.card_ids_in(ZoneRef.hand("p1"))
     assert not any(
         event.payload.get("reason") == "borrowed_sword_gain"

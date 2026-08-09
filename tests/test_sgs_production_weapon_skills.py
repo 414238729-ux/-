@@ -10,9 +10,10 @@
 规则来源：knowledge/三国杀卡牌效果.md 7.1–7.11 与
 knowledge/三国杀卡牌结构化数据.csv（攻击范围），并按基础术语20.12
 【杀】牌名/子类型通则处理。
-PARTIAL 仍为 2 种：丈八蛇矛（VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP，正式入口 fail-closed）、
-方天画戟（MULTIPLAYER/MULTI_TARGET_INFRASTRUCTURE_GAP），如实记录在
-WEAPON_SKILL_STATUS。
+PARTIAL 仍为 1 种：方天画戟（MULTIPLAYER/MULTI_TARGET_INFRASTRUCTURE_GAP）。
+丈八蛇矛已按 USER_CONFIRMED_RULE（2026-08-09）完成材料 HAND→PROCESSING→DISCARD
+生命周期并计为 COMPLETE（VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP 已关闭），
+如实记录在 WEAPON_SKILL_STATUS。
 所有正向路径都经过真实生产注册表与 enumerate→validate→apply。
 """
 
@@ -251,13 +252,13 @@ def test_all_weapon_entities_present_with_ranges_and_status() -> None:
         "sgs_weapon_gudingdao",
         "sgs_weapon_qinglongyanyuedao",
         "sgs_weapon_guanshifu",
+        "sgs_weapon_zhangbashemao",
         "sgs_weapon_zhuqueyushan",
         "sgs_weapon_qilingong",
     }
     assert {
         key for key, status in WEAPON_SKILL_STATUS.items() if status == "PARTIAL"
     } == {
-        "sgs_weapon_zhangbashemao",
         "sgs_weapon_fangtianhuaji",
     }
 
@@ -1091,13 +1092,13 @@ def test_partial_weapons_stay_fail_closed() -> None:
         check_weapon_skill_gate(
             game1.state, actor_id="p1", decision="use_slash", target_id="p2"
         )
-    # 丈八蛇矛（PARTIAL）：subcard生命周期时点规则缺口，手牌>=2时失败关闭
+    # 丈八蛇矛（COMPLETE，USER_CONFIRMED_RULE 2026-08-09）：材料
+    # HAND→PROCESSING→DISCARD 生命周期已确认，gate 不再失败关闭
     game2 = _fresh(seed=3)
     _equip(game2, "sgs_weapon_zhangbashemao")
-    with pytest.raises(UnsupportedRuleError):
-        check_weapon_skill_gate(
-            game2.state, actor_id="p1", decision="use_slash", target_id="p2"
-        )
+    check_weapon_skill_gate(
+        game2.state, actor_id="p1", decision="use_slash", target_id="p2"
+    )
 
 
 def test_cixiong_gender_gate_distinguishes_missing_same_and_opposite() -> None:
@@ -1968,21 +1969,33 @@ def _zhangba_non_slash_hand(game, player_id: str) -> None:
         )
 
 
-def test_zhangba_play_public_legal_actions_fails_closed() -> None:
-    """装备丈八＋两张非实体杀手牌：出牌阶段 public legal_actions 必须以
-    PARTIAL/UnsupportedRule 边界失败关闭，而不是生成 virtual:zhangba:*
-    candidate 后撞公共实体验证器。"""
+def test_zhangba_play_public_legal_actions_enumerates_virtual() -> None:
+    """装备丈八＋两张非实体杀手牌：出牌阶段 public legal_actions 生成
+    virtual:zhangba:* use_slash 候选（材料对只通过不透明句柄暴露）。
+    USER_CONFIRMED_RULE（2026-08-09）后不再失败关闭。"""
     game = _fresh(seed=3)
     _equip(game, "sgs_weapon_zhangbashemao")
     _zhangba_non_slash_hand(game, "p1")
-    with pytest.raises(UnsupportedRuleError):
-        game.legal_actions()
+    actions = game.legal_actions()
+    virtual_uses = [
+        a
+        for a in actions
+        if a.payload.get("zhangba_virtual") is True
+        and a.payload.get("operation") == "use_slash"
+    ]
+    assert virtual_uses
+    for action in virtual_uses:
+        assert str(action.card_instance_id or "").startswith(
+            "virtual:zhangba:"
+        )
+        assert "handle" in action.payload
+        assert action.payload.get("card_key") == "sgs_basic_sha"
     _assert_conservation(game)
 
 
-def test_zhangba_duel_public_legal_actions_fails_closed() -> None:
+def test_zhangba_duel_public_legal_actions_enumerates_virtual() -> None:
     """响应【决斗】时装备丈八＋两张非实体杀手牌：决斗响应 public
-    legal_actions 必须在枚举 virtual proposal 之前直接失败关闭。"""
+    legal_actions 枚举 virtual:zhangba:* 打出候选。"""
     game = _fresh(seed=3)
     _equip(game, "sgs_weapon_zhangbashemao", "p2")
     _zhangba_non_slash_hand(game, "p2")
@@ -1990,14 +2003,25 @@ def test_zhangba_duel_public_legal_actions_fails_closed() -> None:
     _step(game, _action(game, "pass_trick_response"))
     _step(game, _action(game, "pass_trick_response"))
     assert game.phase is ProductionPhase.DUEL_RESPONSE
-    with pytest.raises(UnsupportedRuleError):
-        game.legal_actions()
+    actions = game.legal_actions()
+    virtual_plays = [
+        a
+        for a in actions
+        if a.payload.get("zhangba_virtual") is True
+        and a.payload.get("operation") == "play_slash_for_duel"
+    ]
+    assert virtual_plays
+    for action in virtual_plays:
+        assert str(action.card_instance_id or "").startswith(
+            "virtual:zhangba:"
+        )
+        assert "handle" in action.payload
     _assert_conservation(game)
 
 
-def test_zhangba_nanman_public_legal_actions_fails_closed() -> None:
+def test_zhangba_nanman_public_legal_actions_enumerates_virtual() -> None:
     """响应【南蛮入侵】时装备丈八＋两张非实体杀手牌：南蛮响应 public
-    legal_actions 必须在枚举 virtual proposal 之前直接失败关闭。"""
+    legal_actions 枚举 virtual:zhangba:* 打出候选。"""
     game = _fresh(seed=3)
     _equip(game, "sgs_weapon_zhangbashemao", "p2")
     _zhangba_non_slash_hand(game, "p2")
@@ -2006,8 +2030,19 @@ def test_zhangba_nanman_public_legal_actions_fails_closed() -> None:
     _step(game, _action(game, "pass_trick_response"))
     _step(game, _action(game, "pass_trick_response"))
     assert game.phase is ProductionPhase.NANMAN_RESPONSE
-    with pytest.raises(UnsupportedRuleError):
-        game.legal_actions()
+    actions = game.legal_actions()
+    virtual_plays = [
+        a
+        for a in actions
+        if a.payload.get("zhangba_virtual") is True
+        and a.payload.get("operation") == "play_slash_for_nanman"
+    ]
+    assert virtual_plays
+    for action in virtual_plays:
+        assert str(action.card_instance_id or "").startswith(
+            "virtual:zhangba:"
+        )
+        assert "handle" in action.payload
     _assert_conservation(game)
 
 

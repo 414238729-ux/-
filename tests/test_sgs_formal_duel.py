@@ -65,7 +65,9 @@ def test_formal_duel_configuration_cannot_self_authorize_formal_result() -> None
     )
 
     assert confirmed_by_caller.source_confirmed is True
-    with pytest.raises(FormalDuelConfigurationError, match="门禁未关闭"):
+    with pytest.raises(
+        FormalDuelConfigurationError, match="canonical formal profile"
+    ):
         FormalNoSkillDuelSession(
             seed=0,
             configuration=confirmed_by_caller,
@@ -92,10 +94,10 @@ def test_live_readiness_has_exact_mode_scoped_card_semantics() -> None:
     assert readiness.deck_count == 160
     assert readiness.registered_card_key_count == 38
     assert readiness.registered_instance_count == 160
-    assert readiness.global_complete_card_key_count == 36
-    assert readiness.global_complete_instance_count == 158
-    assert readiness.duel_complete_card_key_count == 37
-    assert readiness.duel_complete_instance_count == 159
+    assert readiness.global_complete_card_key_count == 37
+    assert readiness.global_complete_instance_count == 159
+    assert readiness.duel_complete_card_key_count == 38
+    assert readiness.duel_complete_instance_count == 160
     assert len(statuses) == 38
     assert statuses["sgs_weapon_fangtianhuaji"].global_status == "PARTIAL"
     assert (
@@ -104,26 +106,25 @@ def test_live_readiness_has_exact_mode_scoped_card_semantics() -> None:
     )
     assert statuses["sgs_weapon_cixiongshuanggujian"].global_status == "COMPLETE"
     assert statuses["sgs_weapon_cixiongshuanggujian"].duel_status == "COMPLETE"
-    assert statuses["sgs_weapon_zhangbashemao"].duel_status == (
-        "RULE_SOURCE_GAP"
-    )
-    assert "typed virtual-card/subcard" in (
+    assert statuses["sgs_weapon_zhangbashemao"].global_status == "COMPLETE"
+    assert statuses["sgs_weapon_zhangbashemao"].duel_status == "COMPLETE"
+    assert "HAND→PROCESSING→DISCARD" in (
         statuses["sgs_weapon_zhangbashemao"].reason or ""
     )
     blocker_codes = {item.code for item in readiness.blockers}
-    assert "TYPED_VIRTUAL_CARD_REFERENCE_NOT_IMPLEMENTED" not in blocker_codes
+    assert blocker_codes == set()
     assert readiness.mode_runtime_reachable is True
     assert readiness.reexecution_replay_supported is True
-    assert readiness.unsupported_rules == 2
+    assert readiness.unsupported_rules == 0
     assert readiness.approximation_count == 0
-    assert readiness.acceptance_seed_count == 0
-    assert readiness.acceptance_natural_end_count == 0
+    assert readiness.acceptance_seed_count == 100
+    assert readiness.acceptance_natural_end_count == 100
     assert readiness.acceptance_failure_count == 0
-    assert readiness.acceptance_seed_results == ()
-    assert readiness.fixed_seed_acceptance_passed is False
-    assert readiness.all_cards_implemented is False
-    assert readiness.mode_implemented is False
-    assert readiness.formal_duel_no_skill_ready is False
+    assert len(readiness.acceptance_seed_results) == 100
+    assert readiness.fixed_seed_acceptance_passed is True
+    assert readiness.all_cards_implemented is True
+    assert readiness.mode_implemented is True
+    assert readiness.formal_duel_no_skill_ready is True
 
 
 def test_formal_configuration_rejects_non_string_participant_fields() -> None:

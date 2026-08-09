@@ -59,10 +59,17 @@ class CharacterGender(str, Enum):
     未装配角色由 ``PlayerState.character is None`` 表达；角色已装配但
     性别资料未确认则由 ``CharacterMetadata.gender is None`` 表达。需要
     性别的规则对两种未知状态都必须失败关闭。
+
+    ``NONE`` 表示“无性别／当前视为无性别”这一有效规则状态（例如国战
+    中两张武将牌均未明置时当前视为无性别）；它不是资料缺失，任何要求
+    角色为男性/女性、或比较双方性别的效果都不得把 NONE 当作男或女，
+    也不得把两个 NONE 视为“异性”。``gender is None``（资料未确认）与
+    ``gender is CharacterGender.NONE``（确认无性别）语义必须严格区分。
     """
 
     MALE = "male"
     FEMALE = "female"
+    NONE = "none"
 
 
 @dataclass(frozen=True, slots=True)

@@ -194,7 +194,14 @@ class LegalAction:
             self.virtual_card, VirtualCardReference
         ):
             raise TypeError("virtual_card必须是VirtualCardReference或None")
-        if self.card_instance_id is not None and self.virtual_card is not None:
+        if (
+            self.card_instance_id is not None
+            and self.virtual_card is not None
+            and not str(self.card_instance_id).startswith("virtual:")
+        ):
+            # 虚拟牌动作允许以 ``virtual:`` 前缀的确定性虚拟标识作为
+            # card_instance_id（如丈八虚拟杀），同时携带类型化
+            # VirtualCardReference 材料引用；实体牌动作不得同时携带。
             raise ValueError("动作不能同时引用实体牌和虚拟牌")
         if self.skill_id is not None:
             object.__setattr__(self, "skill_id", _text(self.skill_id, "技能ID"))
@@ -529,7 +536,11 @@ def enumerate_legal_actions(
             raise InvalidActionError("规则处理器不得自行签发action_id")
         if candidate.actor_id != context.actor_id:
             raise InvalidActionError("规则处理器返回了不属于当前行动角色的动作")
-        if candidate.card_instance_id is not None and candidate.card_instance_id not in cards:
+        if (
+            candidate.card_instance_id is not None
+            and candidate.virtual_card is None
+            and candidate.card_instance_id not in cards
+        ):
             raise InvalidActionError(
                 f"规则处理器引用了不存在的实体牌{candidate.card_instance_id!r}"
             )

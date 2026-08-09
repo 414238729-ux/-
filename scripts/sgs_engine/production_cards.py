@@ -154,12 +154,13 @@ WEAPON_SKILL_STATUS: Mapping[str, str] = MappingProxyType(
         # 伤害（7.7 当前确认），生产语义已实现。
         "sgs_weapon_guanshifu": "COMPLETE",
         # 丈八蛇矛：两张手牌当作普通【杀】使用或打出（7.8 当前确认）。
-        # 最小正式虚拟牌表示已在本批建立（虚拟杀不进入实体牌目录；材料
-        # 非弃置代价，随本次使用/打出进入弃牌堆），但材料在“使用/打出”
-        # 时的精确 zone 生命周期时点缺少项目确认通则
-        # （VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP），暂不计 COMPLETE，
-        # 待用户确认后恢复。
-        "sgs_weapon_zhangbashemao": "PARTIAL",
+        # 材料 zone 生命周期已由用户确认（USER_CONFIRMED_RULE，2026-08-09）：
+        # HAND→PROCESSING（虚拟杀使用/打出时权威移动），虚拟杀整个使用/
+        # 打出与结算期间两张材料实体保持 PROCESSING，本次虚拟【杀】完整
+        # 结算完成后 PROCESSING→DISCARD；不是 HAND→DISCARD 后再独立结算，
+        # 也不是材料停留在 HAND 直到结算完成。材料非弃置代价，不产生
+        # CARD_DISCARDED。VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP 已关闭。
+        "sgs_weapon_zhangbashemao": "COMPLETE",
         # 方天画戟：双人环境下“至多3个目标”不会产生额外目标，但技能核心
         # 多目标语义未在多人生产入口实现/证明，不得计为COMPLETE。
         "sgs_weapon_fangtianhuaji": "PARTIAL",
@@ -442,6 +443,10 @@ def is_cixiong_opposite_gender_target(
 
     性别只能来自 ``PlayerState.character.gender`` 的权威角色元数据。此函数
     不从玩家ID、座次、身份或模式名称推断，也不把缺失资料静默当作同性。
+    ``CharacterGender.NONE``（确认无性别）是有效规则状态：任何要求角色为
+    男性/女性、或比较双方性别的效果都不得把 NONE 当作男或女，也不得把
+    两个 NONE 视为“异性”——持有者或目标任一方为 NONE 时恒返回 False。
+    ``gender is None``（资料未确认）仍严格失败关闭，与 NONE 严格区分。
     """
 
     actor = state.players_by_id.get(actor_id)
@@ -460,6 +465,13 @@ def is_cixiong_opposite_gender_target(
             "雌雄双股剑技能需要性别判定；正式模式尚未装配权威角色性别"
             "元数据（CHARACTER_GENDER_METADATA_NOT_AVAILABLE），失败关闭"
         )
+    if (
+        actor.character.gender.value == "none"
+        or target.character.gender.value == "none"
+    ):
+        # USER_CONFIRMED_RULE（2026-08-09）：无性别角色不满足任何
+        # 男性/女性条件，也不与任何角色构成“异性”。
+        return False
     return actor.character.gender != target.character.gender
 
 
