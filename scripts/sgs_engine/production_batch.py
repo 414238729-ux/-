@@ -3702,7 +3702,7 @@ class ProductionBasicCardBatch:
         rescue_reason: str,
         defer_root_finish: bool = False,
         ignore_armor: bool = False,
-        weapon_choice: tuple[str, str, int] | None = None,
+        weapon_choice: tuple[str, str] | None = None,
         card_already_finished: bool = False,
     ) -> tuple[GameState, _BatchRuntime]:
         """统一正式伤害管线：原始伤害、横置解除、传导根与濒死挂起。
@@ -3710,8 +3710,11 @@ class ProductionBasicCardBatch:
         ``defer_root_finish`` 供闪电等根牌使用：根牌完成时点由
         ``_complete_root_resolution`` 控制（传导/濒死子结算完成后再弃置），
         避免在传导开始前提前弃置本体。``ignore_armor`` 表示目标防具无效（armor invalid）上下文，
-        上下文（统一接口，本批无真实武器调用者），修正顺序由统一
-        ``resolve_armor_damage`` 决定并进入事件审计。"""
+        由青釭剑生产路径等真实调用者传入（代码历史字段名保留，正式语义为“防具无效”），
+        修正顺序由统一 ``resolve_armor_damage`` 决定并进入事件审计。
+        ``weapon_choice`` 为 ``(weapon_key, choice_target)`` 二元组（麒麟弓等武器选择窗口挂起）；
+        实际伤害金额由已解析的 final amount 随挂起状态传递，不再由调用方在
+        ``weapon_choice`` 中携带（R1-NEW-001）。"""
 
         victim = state.players_by_id[victim_id]
         resolution = resolve_armor_damage(

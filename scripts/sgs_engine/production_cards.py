@@ -162,8 +162,9 @@ WEAPON_SKILL_STATUS: Mapping[str, str] = MappingProxyType(
         # 多目标语义未在多人生产入口实现/证明，不得计为COMPLETE。
         "sgs_weapon_fangtianhuaji": "PARTIAL",
         # 朱雀羽扇：主动出牌阶段使用普通【杀】时可选转为【火杀】（7.10
-        # 用户整理解释），生产语义已实现；借刀强制使用场景的转换选择
-        # 未提供（强制杀按普通杀结算），如实记录为边界。
+        # 用户整理解释），生产语义已实现；借刀强制使用场景同样提供普通
+        # 【杀】转【火杀】正式选择（USER_CONFIRMED_MOBILE_RULE，2026-08-08
+        # 用户移动版实测确认），转换后从使用入口按火杀身份结算。
         "sgs_weapon_zhuqueyushan": "COMPLETE",
         # 麒麟弓：使用【杀】对目标造成伤害时可选弃置目标装备区一张坐骑牌
         # （7.11 用户整理解释），生产语义已实现。

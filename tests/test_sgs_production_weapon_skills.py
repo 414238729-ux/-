@@ -1,12 +1,18 @@
 # -*- coding: utf-8 -*-
 """CP-04P：正式武器技能完整化（已验证部分）生产验收测试。
 
-本批完成并证明：诸葛连弩（无限出杀）、青釭剑（真实 ignore_armor 生命周期）、
-古锭刀（无手牌目标伤害+1）、方天画戟（双人生产入口范围内目标集合不变）。
-规则来源：knowledge/三国杀卡牌效果.md 7.1／7.2／7.5／7.9（用户整理解释／
-当前确认）与 knowledge/三国杀卡牌结构化数据.csv（攻击范围）。
-其余武器（寒冰剑、雌雄双股剑、青龙偃月刀、贯石斧、丈八蛇矛、朱雀羽扇、
-麒麟弓）保持集中式失败关闭门禁，如实记录在 WEAPON_SKILL_STATUS。
+本批完成并证明 8 种 COMPLETE 武器：诸葛连弩（无限出杀）、青釭剑（真实
+防具无效生命周期，代码历史字段 ignore_armor）、寒冰剑（逐张顺序弃置）、
+古锭刀（伤害时动态判定+1）、青龙偃月刀（追杀不消耗普通PLAY额度）、
+贯石斧（批量弃2张且自身不能作为代价）、朱雀羽扇（含借刀强制杀转火杀）、
+麒麟弓（本次伤害真正结算前弃目标坐骑/放弃）。
+规则来源：knowledge/三国杀卡牌效果.md 7.1–7.11 与
+knowledge/三国杀卡牌结构化数据.csv（攻击范围），并按基础术语20.12
+【杀】牌名/子类型通则处理。
+PARTIAL 仍为 3 种：雌雄双股剑（DATA_MODEL_GAP: CHARACTER_GENDER_METADATA_NOT_AVAILABLE）、
+丈八蛇矛（VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP，正式入口 fail-closed）、
+方天画戟（MULTIPLAYER/MULTI_TARGET_INFRASTRUCTURE_GAP），如实记录在
+WEAPON_SKILL_STATUS。
 所有正向路径都经过真实生产注册表与 enumerate→validate→apply。
 """
 
