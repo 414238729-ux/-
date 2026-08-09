@@ -551,7 +551,7 @@ def test_tampered_hmac_key_fails_closed() -> None:
     tampered["authoritative_private"]["session_secret_hex"] = "ab" * 32
     with pytest.raises(ProductionReplayFormatError):
         ProductionReexecutionReplay.from_dict(tampered)
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     rebuilt = ProductionReexecutionReplay.from_dict(tampered)
     with pytest.raises(ProductionReplayDivergenceError):
         reexecute_production_replay(rebuilt)
@@ -569,7 +569,7 @@ def test_tampered_handle_entity_fails_closed() -> None:
     zone_decision["chosen_action"]["payload"]["handle"] = "h_" + "a" * 32
     with pytest.raises(ProductionReplayFormatError):
         ProductionReexecutionReplay.from_dict(tampered)
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     rebuilt = ProductionReexecutionReplay.from_dict(tampered)
     with pytest.raises(ProductionReplayDivergenceError):
         reexecute_production_replay(rebuilt)
@@ -721,5 +721,6 @@ def test_original_zone_target_test_count_unchanged() -> None:
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.startswith("def test_")
     )
-    # CP-04L 第二次复审修复新增 1 项 zone-choice 窗口投影测试（2026-08-06）
-    assert count == 51
+    # 51项历史测试之外，本轮新增1项：不同session secret不得改变隐藏区
+    # 参考控制器实际选择的实体牌（2026-08-09）。
+    assert count == 52

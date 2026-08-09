@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import replace
+from types import MappingProxyType
 
 import pytest
 
@@ -583,8 +584,14 @@ def test_guohe_discards_target_judgment_card() -> None:
     assert game.phase is ProductionPhase.ZONE_CHOICE
     judgment_id = _any_instance_of(game, "sgs_delayed_shandian")
     _fixture_set_state(game, {judgment_id: ZoneRef.judgment("p2")})
+    game._runtime = replace(
+        game.runtime,
+        judgment_entry_indices=MappingProxyType({judgment_id: 1}),
+        judgment_entry_counter=1,
+    )
     _choose_zone(game, "judgment")
     assert game.state.location_of(judgment_id) == DISCARD_PILE
+    assert judgment_id not in game.runtime.judgment_entry_indices
     moved = [
         event
         for event in game.events
@@ -740,8 +747,14 @@ def test_shunshou_gains_target_judgment_card() -> None:
     game = _shunshou_effect_game()
     judgment_id = _any_instance_of(game, "sgs_delayed_shandian")
     _fixture_set_state(game, {judgment_id: ZoneRef.judgment("p2")})
+    game._runtime = replace(
+        game.runtime,
+        judgment_entry_indices=MappingProxyType({judgment_id: 1}),
+        judgment_entry_counter=1,
+    )
     _choose_zone(game, "judgment")
     assert game.state.location_of(judgment_id) == ZoneRef.hand("p1")
+    assert judgment_id not in game.runtime.judgment_entry_indices
     moved = [
         event
         for event in game.events
@@ -845,6 +858,49 @@ def test_hidden_hand_choice_payload_leaks_no_card_face() -> None:
         assert isinstance(handle, str) and handle.startswith("h_")
         assert handle not in game.state.card_ids_in(ZoneRef.hand("p2"))
         assert handle not in game.state.cards_by_id
+
+
+def test_reference_controller_hidden_choice_is_independent_of_session_secret() -> None:
+    selected_instance_ids: list[str] = []
+    handle_sets: list[set[str]] = []
+    hand_orders: list[tuple[str, ...]] = []
+
+    for secret_index in range(32):
+        session_secret = bytes((secret_index,)) * 32
+        game = _fresh(
+            seed=66,
+            session_id="stable-reference-choice",
+            session_secret=session_secret,
+        )
+        _use_trick(game, "use_guohe", GUOHE)
+        _pass(game)
+        _pass(game)
+        assert game.phase is ProductionPhase.ZONE_CHOICE
+        hand_orders.append(tuple(game.state.card_ids_in(ZoneRef.hand("p2"))))
+        hand_actions = [
+            action
+            for action in game.legal_actions()
+            if action.payload.get("zone") == "hand"
+        ]
+        assert hand_actions
+        handle_sets.append(
+            {str(action.payload["handle"]) for action in hand_actions}
+        )
+
+        game.step(BatchReferenceController())
+        discarded = [
+            event
+            for event in game.events
+            if event.event_type is EventType.CARD_DISCARDED
+            and event.payload.get("reason") == "guohechaiqiao_effect"
+        ]
+        assert len(discarded) == 1
+        assert discarded[0].card_instance_id is not None
+        selected_instance_ids.append(discarded[0].card_instance_id)
+
+    assert len(set(hand_orders)) == 1
+    assert len({frozenset(handles) for handles in handle_sets}) == 32
+    assert len(set(selected_instance_ids)) == 1
 
 
 def test_different_hidden_hands_produce_same_decision_structure() -> None:
@@ -1177,7 +1233,7 @@ def test_tampered_zone_choice_replay_fails_closed() -> None:
         == "choose_target_zone_card"
     )
     zone_decision["chosen_action"]["payload"]["handle"] = "h_" + "0" * 32
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     rebuilt = ProductionReexecutionReplay.from_dict(tampered)
     with pytest.raises(ProductionReplayDivergenceError):
         reexecute_production_replay(rebuilt)
@@ -1191,7 +1247,7 @@ def test_tampered_zone_choice_replay_fails_closed() -> None:
         == "choose_target_zone_card"
     )
     zone_decision["chosen_action"]["payload"]["zone"] = "equipment:weapon"
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     rebuilt = ProductionReexecutionReplay.from_dict(tampered)
     with pytest.raises(ProductionReplayDivergenceError):
         reexecute_production_replay(rebuilt)
@@ -1205,7 +1261,7 @@ def test_tampered_zone_choice_replay_fails_closed() -> None:
         and event.get("payload", {}).get("reason") == "guohechaiqiao_effect"
     )
     discarded_event["card_key"] = "sgs_basic_sha"
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(ProductionReplayFormatError):
         ProductionReexecutionReplay.from_dict(tampered)
 

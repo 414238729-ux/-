@@ -1,5 +1,29 @@
 # 三国杀正式实现矩阵
 
+## MILESTONE_B 当前矩阵（2026-08-09）
+
+本节是固定基线 `4c8c4466f1950740c69767a01a0b24cab723b310` 之后、分支 `sol-ultra-milestone-b-formal-duel` 上的 live 开发快照。工作树尚未提交（`commit=null`、`pending`），独立审计尚未运行；它不是已封存 whole-repo audit remediation chain 的续写。
+
+| 范围 | 当前状态 | 现场证据与精确边界 |
+|---|---|---|
+| 正式牌堆与注册 | `READY`（本地全量验证通过） | 真实 160 个唯一 `CardInstance`、38 个 card key、注册实体 160；没有测试小牌堆替代 |
+| 统一生产核心 | `READY`（本地全量验证通过） | formal 薄模式复用同一 `ProductionBasicCardBatch`、`GameState`、事件、动作枚举、响应、伤害、距离、阶段、濒死／死亡／胜负、重洗与 `DeterministicRNG`；无第二套引擎 |
+| 全局卡牌语义 | `PARTIAL` | 36 类／158 实体 `COMPLETE`；丈八蛇矛与方天画戟仍为 global `PARTIAL` |
+| 严格两人 duel 卡牌语义 | `BLOCKED` | 37 类／159 实体在 duel scope 充分；方天多人附加目标为 `NOT_APPLICABLE_TO_DUEL`，丈八仍为 `RULE_SOURCE_GAP` |
+| 雌雄双股剑 | 通用 `COMPLETE`；formal `MODE_GAP` | 通用状态机与 `CharacterMetadata`／`CharacterGender` 已实现；formal 参与者性别必须来自权威规则／配置，不能按座次猜测 |
+| 丈八蛇矛 | `RULE_SOURCE_GAP`；typed foundation `READY` | 待确认材料 A（进 `PROCESSING` 后结算完弃置）或 B（使用／打出开始即弃置且不进 `PROCESSING`）。通用 `VirtualCardReference` 已显式绑定 card key、conversion rule 与材料实体 ID，禁止和 physical ID 并存，并进入枚举校验、动作 ID 与 strict replay；`tests/test_sgs_engine_actions.py` 定向 18 passed，原独立 `DATA_MODEL_GAP` 已关闭。丈八 lifecycle integration 由 A／B 规则门禁控制 |
+| 方天画戟 | global `PARTIAL`；duel `N/A` | 两人 duel 无第三名目标；不得用 duel 测试把多人／多目标语义标为 global `COMPLETE` |
+| formal mode factory | `mode_runtime_reachable=true` | analysis-only factory 可到达同一生产核心；权威 profile 与参与者元数据来源未关闭，故 `mode_implemented=false` |
+| formal replay／隐私 | `reexecution_replay_supported=true`（本地全量验证通过） | mode-bound canonical factory 逐动作重执行；formal fixture 注入拒绝；player-visible 与 omniscient 分层 |
+| formal runner | 实现已接线；live gate `BLOCKED` | status 入口现场派生 readiness；run 分支会在门禁通过后复检 canonical seeds 0..99 的逐 seed 证据并原子写 JSON。当前 release guard 与上游规则／卡牌／100-seed 前置条件未关闭，门禁在接触输出路径前拒绝，不生成 formal result |
+| formal gate | 现场派生、保持关闭 | `all_cards_implemented=false`、`unsupported_rules=2`、`approximation_count=0`；调用方 payload／manifest 布尔值不能授予准入 |
+| analysis-only seeds 0..99 | 诊断完成；不是 acceptance | 100 条全保留、无排除／重采样、每局上限 2000；55 自然结束（p1=34、p2=21，actions 44..494），45 只因预期 `UnsupportedRuleError` 失败关闭（丈八23、雌雄元数据22）；cap／非法动作／生产异常／其他异常均为0，全部 deck=160，联合到达38类牌。未确认 profile 令总 unsupported=145、approximation=100，formal eligible／reexecution verified 均为0；证据见 `MILESTONE_B_ANALYSIS_SEED_DIAGNOSTIC.json` |
+| 正式 100 固定 seed | `TEST_GAP` | acceptance 记录仍为 0；正式 seeds 0..99 尚未运行，任何 timeout／cap／exception／unsupported／approximation 均须算失败；不得把上行 analysis-only 诊断计入 |
+| 本地回归／完整性 | `PASSED` | full pytest `2024 passed, 1 warning in 830.59s`（仅 `.pytest_cache` WinError5）；compileall exit0；source integrity扫描125文件、117项（formal56/test61）、defect0；manifest＋诊断JSON解析及seed IDs 0..99通过；Git-normalized SHA 47/47；diff-check exit0 |
+| 最终门禁 | `MILESTONE_B_BLOCKED` | runner status exit0并现场派生 `all_cards_implemented=false`、`unsupported_rules=2`、`approximation_count=0`、acceptance=0、ready=false；这是正确失败关闭，不是 gate PASSED 或 formal result |
+
+下方各节保留既有批次与封存审计的历史证据。凡旧的 35 类／157 实体、雌雄仍为 DATA_MODEL_GAP 或 formal `unsupported_rules=1` 快照与本节冲突，均按其原检查点时间解释；original whole-repo audit FAILED、R1–R5 FAILED、R6 PASSED 与 finalization correction verification PASSED 均不得改写，也不创建 remediation-7。
+
 > 更新日期：2026-08-07
 > 基准：当前正式仓库，不包含 `C:\Users\ASUS\Downloads` 中的外部旧近似器。  
 > 重要：本矩阵评价“能否接入统一完整对局并产生正式结果”，不是评价某个局部函数是否有单元测试。

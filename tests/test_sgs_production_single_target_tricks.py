@@ -988,7 +988,7 @@ def test_tampered_trick_replay_fails_closed() -> None:
     bogus = "act_" + sha256_value("tampered-wuxie-action")
     assert bogus not in legal_ids
     wuxie_decision["chosen_action_id"] = bogus
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     rebuilt = ProductionReexecutionReplay.from_dict(tampered)
     with pytest.raises(ProductionReplayDivergenceError):
         reexecute_production_replay(rebuilt)
@@ -1001,7 +1001,7 @@ def test_tampered_trick_replay_fails_closed() -> None:
         if event.get("event_type") == "card_effect_cancelled"
     )
     cancelled_event["card_key"] = "sgs_basic_sha"
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(ProductionReplayFormatError):
         ProductionReexecutionReplay.from_dict(tampered)
 
@@ -1010,7 +1010,7 @@ def test_tampered_trick_replay_fails_closed() -> None:
     tampered["outcome"]["final_game_state_hash"] = sha256_value(
         "tampered-final-state"
     )
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     rebuilt = ProductionReexecutionReplay.from_dict(tampered)
     with pytest.raises(ProductionReplayDivergenceError):
         reexecute_production_replay(rebuilt)

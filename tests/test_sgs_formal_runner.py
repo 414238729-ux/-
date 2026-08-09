@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 import subprocess
 import sys
@@ -7,7 +8,14 @@ from pathlib import Path
 
 import pytest
 
+import scripts.sgs_engine_gate as engine_gate
 import scripts.sgs_formal_runner as formal_runner
+from scripts.sgs_engine import duel as test_only_duel_module
+from scripts.sgs_engine.formal_duel import (
+    FormalDuelSeedResult,
+    inspect_formal_duel_readiness,
+)
+from scripts.sgs_engine.production_batch import FORMAL_NO_SKILL_DUEL_MODE
 from scripts.sgs_engine_gate import FormalSimulationBlockedError, GateIssueCode
 from scripts.sgs_engine.duel import TEST_ONLY_DUEL_MODE
 from scripts.sgs_formal_runner import (
@@ -18,6 +26,68 @@ from scripts.sgs_formal_runner import (
     inspect_authoritative_core_foundation,
     run_formal_simulation,
 )
+
+
+def _simulated_live_ready():
+    current = inspect_formal_duel_readiness()
+    complete_card_statuses = tuple(
+        replace(item, duel_status="COMPLETE", reason=None)
+        for item in current.card_semantic_statuses
+    )
+    seed_evidence = tuple(
+        FormalDuelSeedResult(
+            seed=seed,
+            deck_count=160,
+            winner="p1" if seed % 2 == 0 else "p2",
+            action_count=100 + seed,
+            turn_count=10 + seed,
+            draw_pile_count=20,
+            reshuffle_count=seed % 3,
+            unsupported_rules=0,
+            approximation_count=0,
+            safety_cap_triggered=False,
+            exception_type=None,
+            exception_message=None,
+            reached_card_keys=tuple(
+                item.card_key for item in complete_card_statuses
+            ),
+            natural_end=True,
+            formal_result_eligible=True,
+            reexecution_verified=True,
+        )
+        for seed in range(100)
+    )
+    return replace(
+        current,
+        duel_complete_card_key_count=current.registered_card_key_count,
+        duel_complete_instance_count=current.registered_instance_count,
+        all_cards_implemented=True,
+        mode_runtime_reachable=True,
+        mode_implemented=True,
+        deterministic_controller_implemented=True,
+        reexecution_replay_supported=True,
+        unsupported_rules=0,
+        approximation_count=0,
+        acceptance_seed_count=100,
+        acceptance_natural_end_count=100,
+        acceptance_failure_count=0,
+        fixed_seed_acceptance_passed=True,
+        formal_duel_no_skill_ready=True,
+        blockers=(),
+        card_semantic_statuses=complete_card_statuses,
+        acceptance_seed_results=seed_evidence,
+    )
+
+
+def _patch_live_ready(
+    monkeypatch: pytest.MonkeyPatch, readiness: object
+) -> None:
+    monkeypatch.setattr(
+        formal_runner, "inspect_formal_duel_readiness", lambda: readiness
+    )
+    monkeypatch.setattr(
+        engine_gate, "inspect_formal_duel_readiness", lambda: readiness
+    )
 
 
 def test_current_manifest_audits_real_entrypoint_and_fixed_160_card_deck() -> None:
@@ -48,6 +118,60 @@ def test_core_foundation_is_derived_by_real_import_and_minimum_self_check() -> N
     assert Path(foundation.module_path).is_file()
     assert foundation.source_sha256 is not None
     assert foundation.issues == ()
+
+
+def test_exact_formal_duel_status_is_derived_from_canonical_live_readiness() -> None:
+    readiness = inspect_formal_duel_readiness()
+    manifest = build_current_manifest(mode_name=FORMAL_NO_SKILL_DUEL_MODE)
+    status = build_current_status(mode_name=FORMAL_NO_SKILL_DUEL_MODE)
+
+    assert manifest.mode_name == FORMAL_NO_SKILL_DUEL_MODE
+    assert manifest.deck.card_count == readiness.deck_count == 160
+    assert manifest.unsupported_rules == readiness.unsupported_rules
+    assert manifest.approximation_count == readiness.approximation_count
+    assert manifest.mode_implemented is readiness.mode_implemented
+    assert manifest.ai_implemented is readiness.deterministic_controller_implemented
+    assert status["simulation_executed"] is False
+    assert status["formal_run_ready"] is readiness.formal_duel_no_skill_ready
+    assert status["formal_duel"] == readiness.to_dict()
+    capabilities = status["capabilities"]
+    assert capabilities["mode_runtime_reachable"] is readiness.mode_runtime_reachable
+    assert capabilities["all_cards_implemented"] is readiness.all_cards_implemented
+    assert (
+        capabilities["reexecution_replay_supported"]
+        is readiness.reexecution_replay_supported
+    )
+    assert (
+        capabilities["formal_duel_no_skill_ready"]
+        is readiness.formal_duel_no_skill_ready
+    )
+    # 当前真实 blocker 必须原样展示，不能因 runner 接通 factory 就伪装通过。
+    blocker_codes = {item["code"] for item in status["formal_duel"]["blockers"]}
+    assert "FORMAL_DUEL_RULE_PROFILE_NOT_CONFIRMED" in blocker_codes
+    assert "VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP" in blocker_codes
+    assert status["formal_run_ready"] is False
+
+
+def test_formal_duel_reaches_production_factory_without_test_only_engine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbidden_test_only_init(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("正式单挑不得构造TestOnlyDuelGame")
+
+    monkeypatch.setattr(
+        test_only_duel_module.TestOnlyDuelGame,
+        "__init__",
+        forbidden_test_only_init,
+    )
+    status = build_current_status(mode_name=FORMAL_NO_SKILL_DUEL_MODE)
+
+    assert status["capabilities"]["mode_runtime_reachable"] is True
+    imported = set(status["entrypoint"]["imported_core_modules"])
+    assert ".sgs_engine.formal_duel" in imported
+    assert ".sgs_engine.production_batch" in imported
+    assert ".sgs_engine.duel" not in imported
+    assert status["entrypoint"]["source_kind"] == "formal_rule_core"
 
 
 def test_core_foundation_import_failure_is_reported_not_hardcoded(
@@ -142,6 +266,123 @@ def test_programmatic_run_fails_closed_before_touching_output(tmp_path: Path) ->
     assert GateIssueCode.RULESET_VERSION_MISSING in codes
 
 
+def test_exact_formal_duel_run_uses_live_blockers_and_writes_nothing(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "formal-duel" / "result.json"
+
+    with pytest.raises(FormalSimulationBlockedError) as captured:
+        run_formal_simulation(
+            mode_name=FORMAL_NO_SKILL_DUEL_MODE,
+            output_path=output,
+        )
+
+    assert output.exists() is False
+    assert output.parent.exists() is False
+    codes = set(captured.value.result.issue_codes)
+    assert GateIssueCode.MODE_NOT_IMPLEMENTED in codes
+    assert GateIssueCode.ALL_CARDS_NOT_IMPLEMENTED in codes
+    assert GateIssueCode.UNSUPPORTED_RULES in codes
+    assert GateIssueCode.FULL_GAME_CORE_NOT_IMPLEMENTED in codes
+
+
+def test_ready_formal_duel_run_writes_canonical_100_seed_result_atomically(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    readiness = _simulated_live_ready()
+    _patch_live_ready(monkeypatch, readiness)
+    output = tmp_path / "nested" / "formal-result.json"
+
+    returned = run_formal_simulation(
+        mode_name=FORMAL_NO_SKILL_DUEL_MODE,
+        output_path=output,
+    )
+
+    assert returned == output
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["status"] == "passed"
+    assert payload["result_source"] == "canonical_live_readiness"
+    assert payload["formal_duel_no_skill_ready"] is True
+    assert payload["acceptance_seed_count"] == 100
+    assert payload["acceptance_failure_count"] == 0
+    assert [item["seed"] for item in payload["seed_results"]] == list(
+        range(100)
+    )
+    assert all(item["natural_end"] for item in payload["seed_results"])
+    assert all(
+        item["reexecution_verified"] for item in payload["seed_results"]
+    )
+    assert not tuple(output.parent.glob(f".{output.name}.*.tmp"))
+
+
+def test_ready_formal_duel_run_requires_output_only_after_live_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    readiness = _simulated_live_ready()
+    _patch_live_ready(monkeypatch, readiness)
+
+    with pytest.raises(ValueError, match="必须提供JSON结果输出路径"):
+        run_formal_simulation(
+            mode_name=FORMAL_NO_SKILL_DUEL_MODE,
+            output_path=None,
+        )
+
+
+def test_summary_only_formal_evidence_is_rejected_without_writing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    summary_only = replace(
+        _simulated_live_ready(), acceptance_seed_results=()
+    )
+    _patch_live_ready(monkeypatch, summary_only)
+    output = tmp_path / "summary-only" / "result.json"
+
+    with pytest.raises(FormalSimulationBlockedError):
+        run_formal_simulation(
+            mode_name=FORMAL_NO_SKILL_DUEL_MODE,
+            output_path=output,
+        )
+
+    assert output.exists() is False
+    assert output.parent.exists() is False
+
+
+def test_invalid_post_gate_seed_evidence_is_rejected_without_writing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gate_ready = _simulated_live_ready()
+    invalid_results = list(gate_ready.acceptance_seed_results)
+    invalid_results[37] = replace(
+        invalid_results[37], safety_cap_triggered=True
+    )
+    post_gate_invalid = replace(
+        gate_ready, acceptance_seed_results=tuple(invalid_results)
+    )
+    monkeypatch.setattr(
+        engine_gate,
+        "inspect_formal_duel_readiness",
+        lambda: gate_ready,
+    )
+    monkeypatch.setattr(
+        formal_runner,
+        "inspect_formal_duel_readiness",
+        lambda: post_gate_invalid,
+    )
+    output = tmp_path / "invalid-seed" / "result.json"
+
+    with pytest.raises(RuntimeError, match="seed 37.*不合格"):
+        run_formal_simulation(
+            mode_name=FORMAL_NO_SKILL_DUEL_MODE,
+            output_path=output,
+        )
+
+    assert output.exists() is False
+    assert output.parent.exists() is False
+
+
 def test_cli_status_outputs_stable_json_without_running_game() -> None:
     command = [
         sys.executable,
@@ -180,6 +421,33 @@ def test_cli_status_outputs_stable_json_without_running_game() -> None:
     assert payload["simulation_executed"] is False
     assert payload["formal_run_ready"] is False
     assert payload["deck"]["card_count"] == 160
+
+
+def test_cli_exact_formal_duel_status_reaches_live_factory_and_stays_blocked() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "scripts.sgs_formal_runner",
+            "status",
+            "--mode",
+            FORMAL_NO_SKILL_DUEL_MODE,
+        ],
+        cwd=REPOSITORY_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+    assert completed.returncode == 0
+    assert completed.stderr == ""
+    payload = json.loads(completed.stdout)
+    assert payload["formal_duel"]["mode_id"] == FORMAL_NO_SKILL_DUEL_MODE
+    assert payload["capabilities"]["mode_runtime_reachable"] is True
+    assert payload["capabilities"]["formal_duel_no_skill_ready"] is False
+    assert payload["formal_run_ready"] is False
+    assert payload["simulation_executed"] is False
 
 
 def test_cli_run_rejects_and_never_writes_requested_output(tmp_path: Path) -> None:

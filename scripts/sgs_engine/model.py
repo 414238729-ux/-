@@ -53,6 +53,45 @@ class ZoneKind(str, Enum):
         return self in PLAYER_ZONE_KINDS
 
 
+class CharacterGender(str, Enum):
+    """会影响卡牌规则的权威角色性别。
+
+    未装配角色由 ``PlayerState.character is None`` 表达；角色已装配但
+    性别资料未确认则由 ``CharacterMetadata.gender is None`` 表达。需要
+    性别的规则对两种未知状态都必须失败关闭。
+    """
+
+    MALE = "male"
+    FEMALE = "female"
+
+
+@dataclass(frozen=True, slots=True)
+class CharacterMetadata:
+    """可被未来武将系统复用的最小角色身份元数据。"""
+
+    character_key: str
+    gender: CharacterGender | str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "character_key",
+            _nonempty_text(self.character_key, "角色规则键"),
+        )
+        gender = self.gender
+        if gender is None:
+            return
+        if not isinstance(gender, CharacterGender):
+            try:
+                gender = CharacterGender(gender)
+            except (TypeError, ValueError) as exc:
+                allowed = "、".join(item.value for item in CharacterGender)
+                raise ModelValidationError(
+                    f"角色性别只能是：{allowed}"
+                ) from exc
+        object.__setattr__(self, "gender", gender)
+
+
 GLOBAL_ZONE_KINDS: frozenset[ZoneKind] = frozenset(
     {
         ZoneKind.DRAW_PILE,
@@ -280,6 +319,7 @@ class PlayerState:
     max_hp: int
     alive: bool = True
     chained: bool = False
+    character: CharacterMetadata | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "player_id", _nonempty_text(self.player_id, "玩家ID"))
@@ -299,6 +339,12 @@ class PlayerState:
             raise ModelValidationError("已确认死亡的角色当前体力不能大于0")
         if not isinstance(self.chained, bool):
             raise ModelValidationError("横置状态必须是布尔值")
+        if self.character is not None and not isinstance(
+            self.character, CharacterMetadata
+        ):
+            raise ModelValidationError(
+                "角色元数据必须是CharacterMetadata或None"
+            )
         object.__setattr__(self, "hp", hp)
         object.__setattr__(self, "max_hp", max_hp)
 
@@ -665,6 +711,8 @@ __all__ = [
     "REMOVED_FROM_GAME",
     "REVEALED_ZONE",
     "CardInstance",
+    "CharacterGender",
+    "CharacterMetadata",
     "GameState",
     "ModelValidationError",
     "PlayerState",

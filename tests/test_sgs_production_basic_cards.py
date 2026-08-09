@@ -934,7 +934,7 @@ def test_tampered_replay_action_fails_closed() -> None:
     assert bogus not in legal_ids
     decision["chosen_action_id"] = bogus
     # 即使攻击者重新计算记录哈希，动作偏差也会被真实重执行拦截
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     rebuilt = ProductionReexecutionReplay.from_dict(tampered)
     with pytest.raises(ProductionReplayDivergenceError):
         reexecute_production_replay(rebuilt)
@@ -945,7 +945,7 @@ def test_tampered_replay_event_fails_closed() -> None:
     tampered = copy.deepcopy(record.to_dict())
     assert tampered["events"]
     tampered["events"][0]["card_key"] = "sgs_basic_sha"
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(ProductionReplayFormatError):
         ProductionReexecutionReplay.from_dict(tampered)
 
@@ -957,7 +957,7 @@ def test_tampered_random_consumption_fails_closed() -> None:
     old_result = first["result"]
     first["result"] = "p2" if old_result == "p1" else "p1"
     # 即使攻击者重新计算记录哈希，随机消费偏差也会被真实重执行拦截
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     rebuilt = ProductionReexecutionReplay.from_dict(tampered)
     with pytest.raises(ProductionReplayDivergenceError):
         reexecute_production_replay(rebuilt)

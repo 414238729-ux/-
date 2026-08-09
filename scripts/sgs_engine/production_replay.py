@@ -18,6 +18,7 @@ from typing import Any, Mapping, Sequence
 from .actions import ActionContext, LegalAction
 from .engine import ENGINE_VERSION, canonical_state_snapshot
 from .production_batch import (
+    FORMAL_NO_SKILL_DUEL_MODE,
     PRODUCTION_BASIC_CARDS_MODE,
     BatchActionIdController,
     BatchReferenceController,
@@ -117,6 +118,11 @@ def _action_value(action: LegalAction) -> dict[str, object]:
             "action_type": action.action_type.value,
             "actor_id": action.actor_id,
             "card_instance_id": action.card_instance_id,
+            "virtual_card": (
+                None
+                if action.virtual_card is None
+                else action.virtual_card.to_dict()
+            ),
             "target_ids": action.target_ids,
             "skill_id": action.skill_id,
             "payload": action.payload,
@@ -181,11 +187,9 @@ def _deck_definition(records: Sequence[Any]) -> dict[str, object]:
 
 
 def _ruleset_value(game: ProductionBasicCardBatch) -> dict[str, str]:
-    binding = game.registry.binding_value(
-        PRODUCTION_BASIC_CARDS_MODE, game.phase.value
-    )
+    binding = game.registry.binding_value(game.mode_id, game.phase.value)
     value = {
-        "mode_id": PRODUCTION_BASIC_CARDS_MODE,
+        "mode_id": game.mode_id,
         "adapter_type": str(binding["adapter_type"]),
         "ruleset_version": str(binding["adapter_version"]),
         "registry_fingerprint": str(binding["registry_fingerprint"]),
@@ -254,6 +258,20 @@ _ROOT_FIELDS = {
     "authoritative_private",
     "player_visible",
     "record_sha256",
+}
+
+_PRODUCTION_INITIAL_CONFIGURATION_FIELDS = {
+    "deck_path",
+    "player_hp",
+    "player_max_hp",
+    "initial_hand_count",
+    "shuffle",
+    "max_steps",
+}
+_FORMAL_DUEL_INITIAL_CONFIGURATION_FIELDS = {
+    "formal_duel_configuration",
+    "analysis_only",
+    "max_steps",
 }
 
 _PRIVATE_FIELDS = {
@@ -405,6 +423,33 @@ def _redact_discard_selection_handle(
         new_payload["handle"] = None
     redacted["payload"] = new_payload
     return redacted
+
+
+def _project_public_context(
+    context: Mapping[str, object], viewer_id: str | None
+) -> dict[str, object]:
+    """投影单步公开上下文，防止运行时私有选择状态旁路泄露。
+
+    ``ActionContext`` 是权威重执行材料，不天然等于公开信息。弃牌阶段的
+    ``discard_phase_selected_ids`` 是行动者仍在手牌中的实体 ID；对手或
+    旁观者只能知道选择进度，不能看到这些 ID。投影同时递归移除绑定隐藏
+    状态的摘要，随后由调用方对公开 context 重新计算 ``context_sha256``。
+    """
+
+    projected = _redact_hidden_digests(context)
+    if not isinstance(projected, Mapping):  # pragma: no cover - context 契约防线
+        raise ProductionReplayFormatError("决策context必须是JSON对象")
+    result = dict(projected)
+    actor_id = str(result.get("actor_id", ""))
+    metadata = result.get("metadata")
+    if isinstance(metadata, Mapping):
+        public_metadata = dict(metadata)
+        selected = public_metadata.get("discard_phase_selected_ids")
+        if viewer_id != actor_id and isinstance(selected, (list, tuple)):
+            public_metadata.pop("discard_phase_selected_ids", None)
+            public_metadata["discard_phase_selected_count"] = len(selected)
+        result["metadata"] = public_metadata
+    return result
 
 
 def _project_public_events(
@@ -705,9 +750,12 @@ class ProductionReexecutionReplay:
 
         if header["schema_version"] != REEXECUTION_SCHEMA:
             raise ProductionReplayFormatError("不支持的规则重执行回放schema")
-        if header["mode_id"] != PRODUCTION_BASIC_CARDS_MODE:
+        if header["mode_id"] not in {
+            PRODUCTION_BASIC_CARDS_MODE,
+            FORMAL_NO_SKILL_DUEL_MODE,
+        }:
             raise ProductionReplayFormatError(
-                "规则重执行回放模式必须是生产基本牌批次"
+                "规则重执行回放模式不属于可信生产模式白名单"
             )
         if header["test_only"] is not False:
             raise ProductionReplayFormatError(
@@ -715,11 +763,54 @@ class ProductionReexecutionReplay:
             )
         if header["formal_result"] is not False:
             raise ProductionReplayFormatError(
-                "生产基本牌批次不是正式整局结果，formal_result必须为false"
+                "Milestone B门禁尚未开放，formal_result必须为false"
             )
         if header["production_basic_cards_batch"] is not True:
             raise ProductionReplayFormatError(
                 "生产基本牌批次回放必须标记production_basic_cards_batch=true"
+            )
+        initial_configuration = _require_mapping(
+            header["initial_configuration"], "header.initial_configuration"
+        )
+        if header["mode_id"] == FORMAL_NO_SKILL_DUEL_MODE:
+            _require_exact_fields(
+                initial_configuration,
+                _FORMAL_DUEL_INITIAL_CONFIGURATION_FIELDS,
+                "正式单挑initial_configuration",
+            )
+            if not isinstance(initial_configuration["analysis_only"], bool):
+                raise ProductionReplayFormatError(
+                    "正式单挑initial_configuration.analysis_only必须是布尔值"
+                )
+        else:
+            _require_exact_fields(
+                initial_configuration,
+                _PRODUCTION_INITIAL_CONFIGURATION_FIELDS,
+                "生产批次initial_configuration",
+            )
+        max_steps = initial_configuration["max_steps"]
+        if (
+            isinstance(max_steps, bool)
+            or not isinstance(max_steps, int)
+            or max_steps < 1
+        ):
+            raise ProductionReplayFormatError(
+                "initial_configuration.max_steps必须是正整数"
+            )
+        step_count = outcome["step_count"]
+        if (
+            isinstance(step_count, bool)
+            or not isinstance(step_count, int)
+            or step_count < 0
+        ):
+            raise ProductionReplayFormatError("终局step_count必须是非负整数")
+        if max_steps < step_count:
+            raise ProductionReplayFormatError(
+                "initial_configuration.max_steps不能小于终局step_count"
+            )
+        if outcome["finish_reason"] != "opponent_confirmed_dead":
+            raise ProductionReplayFormatError(
+                "终局finish_reason必须是opponent_confirmed_dead"
             )
         if outcome["decision_count"] != len(decisions):
             raise ProductionReplayFormatError(
@@ -861,9 +952,15 @@ class ProductionReexecutionReplay:
                 "legal_action_set_sha256",
             ):
                 redacted_decision.pop(key, None)
-            actor_id = str(
-                decision.get("context", {}).get("actor_id", "")
-            )
+            raw_context = decision.get("context", {})
+            if not isinstance(raw_context, Mapping):
+                raise ProductionReplayFormatError("决策context必须是JSON对象")
+            public_context = _project_public_context(raw_context, viewer_id)
+            redacted_decision["context"] = public_context
+            # 原 context_sha256 绑定权威 context（可能包含隐藏手牌实体ID），
+            # 不能保留；公开视图只发布脱敏 context 的独立哈希。
+            redacted_decision["context_sha256"] = sha256_value(public_context)
+            actor_id = str(raw_context.get("actor_id", ""))
             if viewer_id == actor_id:
                 # 行动者本人视图：保留本人当时的合法动作，但递归移除
                 # 全部权威状态摘要（B1-a）并稳定排序（不保留手牌区域
@@ -905,6 +1002,7 @@ class ProductionReexecutionReplay:
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "ProductionReexecutionReplay":
         mapping = _require_mapping(value, "回放记录")
+        _require_exact_fields(mapping, _ROOT_FIELDS, "回放记录")
         return cls(
             header=_require_mapping(mapping.get("header"), "header"),
             decisions=tuple(
@@ -990,19 +1088,42 @@ def record_reference_production_batch(
     controller: Any | None = None,
     max_steps: int = 500,
     fixture: Any | None = None,
+    _game: ProductionBasicCardBatch | None = None,
 ) -> ProductionReexecutionReplay:
     """运行确定性控制器并记录一局可严格重执行的生产基本牌批次。"""
 
     if isinstance(max_steps, bool) or not isinstance(max_steps, int) or max_steps < 1:
         raise ValueError("安全动作上限必须是正整数")
-    game = ProductionBasicCardBatch(
-        seed=seed,
-        deck_path=deck_path,
-        player_hp=player_hp,
-        player_max_hp=player_max_hp,
-        initial_hand_count=initial_hand_count,
-        shuffle=shuffle,
-    )
+    if _game is None:
+        game = ProductionBasicCardBatch(
+            seed=seed,
+            deck_path=deck_path,
+            player_hp=player_hp,
+            player_max_hp=player_max_hp,
+            initial_hand_count=initial_hand_count,
+            shuffle=shuffle,
+        )
+    else:
+        if not isinstance(_game, ProductionBasicCardBatch):
+            raise TypeError("内部生产回放工厂必须返回ProductionBasicCardBatch")
+        if _game.mode_id not in {
+            PRODUCTION_BASIC_CARDS_MODE,
+            FORMAL_NO_SKILL_DUEL_MODE,
+        }:
+            raise ProductionReplayFormatError("内部生产回放模式不在可信白名单")
+        game = _game
+    formal_game = game.mode_id == FORMAL_NO_SKILL_DUEL_MODE
+    if formal_game:
+        from .formal_duel import FormalNoSkillDuelSession
+
+        if type(game) is not FormalNoSkillDuelSession:
+            raise ProductionReplayFormatError(
+                "正式单挑回放必须来自canonical FormalNoSkillDuelSession"
+            )
+    if formal_game and fixture is not None:
+        raise ProductionReplayFormatError(
+            "正式单挑回放禁止夹具；必须从canonical配置自然初始化"
+        )
     if fixture is not None:
         # 测试与编排专用：在初始装配后、任何决策前应用确定性夹具；
         # 夹具必须只使用不可变 GameState 与正式牌区移动接口，且重执行
@@ -1016,20 +1137,37 @@ def record_reference_production_batch(
     selected_controller = controller or BatchReferenceController()
     ruleset = _ruleset_value(game)
     deck_definition = _deck_definition(game.formal_registry.records)
-    initial_configuration = {
-        "deck_path": str(deck_path),
-        "player_hp": list(player_hp),
-        "player_max_hp": list(player_max_hp),
-        "initial_hand_count": initial_hand_count,
-        "shuffle": shuffle,
-        "max_steps": max_steps,
-    }
+    initial_configuration: dict[str, object]
+    if formal_game:
+        formal_configuration = getattr(game, "formal_configuration", None)
+        if formal_configuration is None or not hasattr(
+            formal_configuration, "to_dict"
+        ):
+            raise ProductionReplayFormatError(
+                "正式单挑会话缺少可重建的FormalDuelConfiguration"
+            )
+        initial_configuration = {
+            "formal_duel_configuration": formal_configuration.to_dict(),
+            "analysis_only": bool(getattr(game, "analysis_only", True)),
+            "max_steps": max_steps,
+        }
+    else:
+        initial_configuration = {
+            "deck_path": str(deck_path),
+            "player_hp": list(player_hp),
+            "player_max_hp": list(player_max_hp),
+            "initial_hand_count": initial_hand_count,
+            "shuffle": shuffle,
+            "max_steps": max_steps,
+        }
     header = {
         "schema_version": REEXECUTION_SCHEMA,
         "engine_version": ENGINE_VERSION,
-        "mode_id": PRODUCTION_BASIC_CARDS_MODE,
+        "mode_id": game.mode_id,
         "test_only": False,
-        "formal_result": False,
+        "formal_result": (
+            game.formal_result_eligible if formal_game else False
+        ),
         "production_basic_cards_batch": True,
         "ruleset_version": ruleset["ruleset_version"],
         "ruleset_hash": ruleset["ruleset_hash"],
@@ -1113,6 +1251,44 @@ def record_reference_production_batch(
     )
 
 
+def record_reference_formal_duel(
+    seed: int,
+    *,
+    configuration: object,
+    analysis_only: bool = True,
+    controller: Any | None = None,
+    max_steps: int = 2000,
+) -> ProductionReexecutionReplay:
+    """从可信 formal factory 录制同一生产核心的严格规则重执行回放。
+
+    当前正式规则配置尚未关闭，因此默认且通常只能用于
+    ``analysis_only`` 诊断。这里不接受牌堆路径、洗牌开关或夹具，避免
+    调用方把测试配置包装成正式单挑记录。
+    """
+
+    from .formal_duel import (
+        FormalDuelConfiguration,
+        FormalDuelReferenceController,
+        FormalNoSkillDuelSession,
+    )
+
+    if not isinstance(configuration, FormalDuelConfiguration):
+        raise TypeError("正式单挑回放必须接收FormalDuelConfiguration")
+    if not isinstance(analysis_only, bool):
+        raise TypeError("analysis_only必须是布尔值")
+    game = FormalNoSkillDuelSession(
+        seed=seed,
+        configuration=configuration,
+        analysis_only=analysis_only,
+    )
+    return record_reference_production_batch(
+        seed,
+        controller=controller or FormalDuelReferenceController(),
+        max_steps=max_steps,
+        _game=game,
+    )
+
+
 def _expect_equal(
     kind: str,
     index: int | None,
@@ -1176,16 +1352,45 @@ def reexecute_production_replay(
         )
     session_id = private["session_id"]
     session_secret = bytes.fromhex(str(private["session_secret_hex"]))
-    game = ProductionBasicCardBatch(
-        seed=int(header["seed"]),
-        deck_path=str(config["deck_path"]),
-        player_hp=tuple(config["player_hp"]),  # type: ignore[arg-type]
-        player_max_hp=tuple(config["player_max_hp"]),  # type: ignore[arg-type]
-        initial_hand_count=int(config["initial_hand_count"]),
-        shuffle=config["shuffle"],  # type: ignore[arg-type]
-        session_id=session_id,
-        session_secret=session_secret,
-    )
+    mode_id = str(header["mode_id"])
+    if mode_id == PRODUCTION_BASIC_CARDS_MODE:
+        game = ProductionBasicCardBatch(
+            seed=int(header["seed"]),
+            deck_path=str(config["deck_path"]),
+            player_hp=tuple(config["player_hp"]),  # type: ignore[arg-type]
+            player_max_hp=tuple(config["player_max_hp"]),  # type: ignore[arg-type]
+            initial_hand_count=int(config["initial_hand_count"]),
+            shuffle=config["shuffle"],  # type: ignore[arg-type]
+            session_id=session_id,
+            session_secret=session_secret,
+        )
+    elif mode_id == FORMAL_NO_SKILL_DUEL_MODE:
+        from .formal_duel import FormalDuelConfiguration, FormalNoSkillDuelSession
+
+        if header.get("fixture_applied") is not False:
+            raise ProductionReplayFormatError("正式单挑回放不得包含初始化夹具")
+        formal_value = _require_mapping(
+            config.get("formal_duel_configuration"),
+            "initial_configuration.formal_duel_configuration",
+        )
+        analysis_only = config.get("analysis_only")
+        if not isinstance(analysis_only, bool):
+            raise ProductionReplayFormatError(
+                "正式单挑initial_configuration.analysis_only必须是布尔值"
+            )
+        formal_configuration = FormalDuelConfiguration.from_dict(formal_value)
+        game = FormalNoSkillDuelSession(
+            seed=int(header["seed"]),
+            configuration=formal_configuration,
+            analysis_only=analysis_only,
+            session_id=session_id,
+            session_secret=session_secret,
+        )
+    else:  # ProductionReexecutionReplay 格式校验本应先拒绝该路径
+        raise ProductionReplayFormatError("规则重执行模式不属于可信工厂白名单")
+    _expect_equal("mode", None, mode_id, game.mode_id, "重建会话模式不一致")
+    if mode_id == FORMAL_NO_SKILL_DUEL_MODE and fixture is not None:
+        raise ProductionReplayFormatError("正式单挑规则重执行不得注入夹具")
     if header.get("fixture_applied") is True:
         if fixture is None:
             raise ProductionReplayFormatError(
@@ -1333,6 +1538,13 @@ def reexecute_production_replay(
     )
     outcome = record.outcome
     _expect_equal("winner", None, outcome["winner_id"], game.winner_id, "胜者不一致")
+    _expect_equal(
+        "outcome",
+        None,
+        outcome["finish_reason"],
+        "opponent_confirmed_dead",
+        "终局原因不一致",
+    )
     _expect_equal("outcome", None, outcome["step_count"], game.step_count, "动作总数不一致")
     _expect_equal(
         "outcome", None, outcome["turn_count"], game._runtime.turn_number, "回合总数不一致"
@@ -1374,6 +1586,7 @@ __all__ = [
     "ProductionReplayFormatError",
     "ProductionReplayVerificationResult",
     "REEXECUTION_SCHEMA",
+    "record_reference_formal_duel",
     "record_reference_production_batch",
     "reexecute_production_replay",
 ]

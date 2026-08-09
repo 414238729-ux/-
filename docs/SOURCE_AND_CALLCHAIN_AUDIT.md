@@ -463,3 +463,56 @@ AI 审计脚本只调用本文件内 `CHECKERS`，不调用正式 AI。大量检
 - `scripts.sgs_formal_runner` 仍报告 `authoritative_core_foundation=true`、`authoritative_full_game_core=false`，并拒绝生成结果。
 
 因此阶段 1–3 保持通过，阶段 4 为进行中，阶段 5–9 未开始。本轮代码稳定后的最终验收为 `1094 passed`（失败0、跳过0），compileall 通过；源码防伪扫描覆盖99个 Python 文件且 `defect_count=0`。这证明当前 foundation 与既有组件保持可运行，不表示完整对局核心已经完成。
+
+## 11. Milestone B 当前 production formal 调用链（2026-08-09）
+
+本节是 `MILESTONE_B_FORMAL_160_CARD_NO_SKILL_DUEL_ADVANCEMENT` 的当前开发调用链记录，不改写第 1–10 节的历史时间点，也不是 whole-repo audit 的 remediation-7 或独立审计结论。固定基线为 `4c8c4466f1950740c69767a01a0b24cab723b310`，开发分支为 `sol-ultra-milestone-b-formal-duel`；当前工作树尚未提交，`commit=null`、`pending`。
+
+### 11.1 统一权威调用链
+
+```text
+scripts/sgs_formal_runner.py
+  -> _inspect_formal_duel_safely()
+     -> scripts/sgs_engine/formal_duel.py::inspect_formal_duel_readiness()
+        -> FormalCardRegistry.from_formal_csv()  # 160 CardInstance / 38 keys
+        -> WEAPON_SKILL_STATUS / _semantic_key_sets()  # 派生global与duel语义集合
+        -> FormalNoSkillDuelSession(..., analysis_only=True)  # factory probe
+           -> ProductionBasicCardBatch  # 同一生产核心，不是第二套引擎
+        -> callable(record_reference_formal_duel) and callable(reexecute_production_replay)
+           # 此处只检查能力存在，不录制或执行一局 replay
+  -> run_formal_simulation()
+     -> require_formal_simulation_ready()
+        -> evaluate_formal_run_gate()
+           -> 现场重新读取 canonical readiness 与仓库内正式 runner 源码
+     -> _validated_formal_seed_evidence()  # 复检精确0..99逐seed证据
+     -> _atomic_write_json()               # 仅门禁及复检均通过后原子输出
+     -> 当前因规则、模式、卡牌与100-seed门禁在接触输出路径前失败关闭
+```
+
+formal session 继续使用同一 `GameState`、唯一 `CardInstance`、统一事件队列、`LegalAction` 枚举／重验、响应窗口、伤害、距离、阶段、濒死／死亡／胜负、重洗事务及 `DeterministicRNG`。`test_only_duel_vertical_slice` 没有复制或提升为 formal mode。strict replay 通过 mode-bound canonical factory 重建初态并逐动作执行；formal record 拒绝 fixture 注入；player-visible 投影与 omniscient 审计材料分离。
+
+### 11.2 现场派生能力与失败关闭边界
+
+| 项目 | 当前值／状态 |
+|---|---|
+| 正式牌堆 | 160 实体、38 类、注册实体 160 |
+| global 完整语义 | 36 类／158 实体 |
+| duel-scope sufficient | 37 类／159 实体 |
+| formal factory | `mode_runtime_reachable=true`（analysis-only） |
+| mode | `mode_implemented=false` |
+| cards | `all_cards_implemented=false` |
+| replay | `reexecution_replay_supported=true` |
+| rules | `unsupported_rules=2` |
+| approximation | `approximation_count=0` |
+| fixed-seed acceptance | 0／100；未运行正式批次 |
+| final gate | `formal_duel_no_skill_ready=false` |
+
+两个规则计数项分别是 formal duel 权威 profile 与丈八蛇矛材料生命周期。雌雄双股剑通用状态机和通用性别 schema 已实现，但 formal 参与者的角色／性别来源仍为 MODE_GAP；方天画戟多人附加目标在严格两人 duel 中为 `NOT_APPLICABLE_TO_DUEL`，global 仍保持 `PARTIAL`。通用 `VirtualCardReference` 已进入 `LegalAction`，显式绑定 card key、conversion rule 与材料实体 ID，禁止 physical／virtual 引用并存，并参与公共枚举校验、动作 ID 和 strict production／duel replay；原独立 typed virtual-card `DATA_MODEL_GAP` 已关闭。丈八仍只保留 `VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP`，具体材料区域时序接线受 A／B 规则门禁控制。
+
+### 11.3 Analysis-only 固定 seed 诊断边界
+
+`docs/MILESTONE_B_ANALYSIS_SEED_DIAGNOSTIC.json` 保存了固定 seeds 0..99 的逐局诊断证据；没有排除或重采样，单局上限固定为2000。100条记录中55局自然结束（p1=34、p2=21，动作数最小44、最大494），45局非自然结束全部是既有失败关闭 `UnsupportedRuleError`：丈八生命周期23局、雌雄 formal 角色／性别元数据22局。所有记录均为160张牌，联合到达全部38个 card key；safety-cap、`InvalidActionError`、`ProductionBatchError` 及其他异常均为0。因此，本次可观察范围内的非规则 seed blocker 已清零。
+
+该文件明确标记 `diagnostic_only=true`、`formal_acceptance_evidence=false`。运行使用 `analysis_convention`，每个 seed 都因未确认 profile 至少增加1个 unsupported 与1个 approximation，汇总为 unsupported=145、approximation=100；`formal_result_eligible_count=0`、`reexecution_verified_count=0`、`formal_acceptance_passed=false`。这些是诊断运行计数，不覆盖现场 inspector 的 `unsupported_rules=2`、`approximation_count=0`，也不改变 readiness 的 `acceptance_seed_count=0`。
+
+本轮本地验证结果为：full pytest `2024 passed, 1 warning in 830.59s`（唯一 warning 是 `.pytest_cache` WinError5）；compileall exit0；source integrity exit0并扫描125个 Python 文件、117项 finding／audit item（formal source56、test code61）、`defect_count=0`；manifest与诊断JSON解析通过，诊断seed IDs严格为0..99；Git-normalized SHA-256表47个文件条目全部匹配；`git diff --check` exit0。runner status exit0并现场派生 deck160／registered38、global36/158、duel37/159、unsupported2、approximation0、runtime reachable true、mode/cards false、replay true、acceptance0、ready false。runner 的 future-ready 消费／复检／原子输出链已经实现；当前失败关闭来自 live prerequisites 与模块私有 release guard，而不是无条件拒绝占位。因此本节证明 production formal 薄层、现场门禁、诊断执行和 runner 结果路径已经接线并通过本地回归，不证明 Milestone B PASSED，也不是独立审计。旧审计链保持 original `WHOLE_REPO_AUDIT_FAILED`、R1–R5 各自 FAILED、R6 `REMEDIATION_6_REAUDIT_PASSED`、finalization correction verification PASSED；未创建 remediation-7，也未移动旧 audit branch 或 milestone tag。

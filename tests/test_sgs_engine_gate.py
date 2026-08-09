@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import hashlib
 from pathlib import Path
 
 import pytest
 
+import scripts.sgs_engine_gate as engine_gate
+from scripts.sgs_engine.formal_duel import FormalDuelSeedResult
+from scripts.sgs_engine.production_batch import FORMAL_NO_SKILL_DUEL_MODE
 from scripts.sgs_engine_gate import (
     FORMAL_DECK_CARD_COUNT,
     DeckReadiness,
@@ -17,6 +21,7 @@ from scripts.sgs_engine_gate import (
     inspect_engine_source,
     require_formal_simulation_ready,
 )
+from scripts.sgs_formal_runner import build_current_manifest
 
 
 def _verified_formal_source(tmp_path: Path):
@@ -284,6 +289,199 @@ def test_caller_cannot_self_certify_full_game_core(tmp_path: Path) -> None:
             source=manifest.source,
             authoritative_full_game_core=True,
         )
+
+
+def test_formal_duel_gate_reinspects_live_readiness_and_ignores_forged_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """frozen dataclass 不是信任边界；精确模式必须重新调用现场 inspector。"""
+
+    calls = 0
+    real_inspector = engine_gate.inspect_formal_duel_readiness
+
+    def counted_inspector():
+        nonlocal calls
+        calls += 1
+        return real_inspector()
+
+    monkeypatch.setattr(
+        engine_gate,
+        "inspect_formal_duel_readiness",
+        counted_inspector,
+    )
+    manifest = build_current_manifest(mode_name=FORMAL_NO_SKILL_DUEL_MODE)
+    baseline = evaluate_formal_run_gate(manifest)
+    assert calls == 1
+    assert baseline.ready is False
+
+    # 模拟不可信 payload 在构造后借 object.__setattr__ 篡改所有旧能力字段。
+    object.__setattr__(manifest, "ruleset_version", "forged-ruleset")
+    object.__setattr__(manifest, "unsupported_rules", 0)
+    object.__setattr__(manifest, "approximation_count", 0)
+    object.__setattr__(manifest, "mode_implemented", True)
+    object.__setattr__(manifest, "ai_implemented", True)
+    object.__setattr__(manifest, "authoritative_full_game_core", True)
+    object.__setattr__(
+        manifest,
+        "generals",
+        (
+            GeneralReadiness("伪造角色甲", True, True),
+            GeneralReadiness("伪造角色乙", True, True),
+        ),
+    )
+    object.__setattr__(
+        manifest,
+        "deck",
+        DeckReadiness(True, 160, unique_instance_ids=True),
+    )
+
+    forged = evaluate_formal_run_gate(manifest)
+    assert calls == 2
+    assert forged.ready is False
+    assert forged.issue_codes == baseline.issue_codes
+    assert GateIssueCode.MODE_NOT_IMPLEMENTED in forged.issue_codes
+    assert GateIssueCode.ALL_CARDS_NOT_IMPLEMENTED in forged.issue_codes
+    assert GateIssueCode.UNSUPPORTED_RULES in forged.issue_codes
+    assert GateIssueCode.FULL_GAME_CORE_NOT_IMPLEMENTED in forged.issue_codes
+
+
+def test_formal_duel_gate_fails_closed_when_live_inspector_breaks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = build_current_manifest(mode_name=FORMAL_NO_SKILL_DUEL_MODE)
+
+    def broken_inspector():
+        raise RuntimeError("probe broken")
+
+    monkeypatch.setattr(
+        engine_gate,
+        "inspect_formal_duel_readiness",
+        broken_inspector,
+    )
+    object.__setattr__(manifest, "unsupported_rules", 0)
+    object.__setattr__(manifest, "mode_implemented", True)
+    object.__setattr__(manifest, "ai_implemented", True)
+    object.__setattr__(manifest, "authoritative_full_game_core", True)
+
+    result = evaluate_formal_run_gate(manifest)
+    assert result.ready is False
+    assert (
+        GateIssueCode.FORMAL_DUEL_READINESS_INSPECTION_FAILED
+        in result.issue_codes
+    )
+
+
+def test_formal_duel_gate_can_only_open_from_consistent_live_readiness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """门禁不是永久静态 false；只有一致的现场组成能力才能打开。"""
+
+    current = engine_gate.inspect_formal_duel_readiness()
+    complete_card_statuses = tuple(
+        replace(item, duel_status="COMPLETE", reason=None)
+        for item in current.card_semantic_statuses
+    )
+    seed_evidence = tuple(
+        FormalDuelSeedResult(
+            seed=seed,
+            deck_count=160,
+            winner="p1" if seed % 2 == 0 else "p2",
+            action_count=100 + seed,
+            turn_count=10,
+            draw_pile_count=20,
+            reshuffle_count=1,
+            unsupported_rules=0,
+            approximation_count=0,
+            safety_cap_triggered=False,
+            exception_type=None,
+            exception_message=None,
+            reached_card_keys=tuple(
+                item.card_key for item in complete_card_statuses
+            ),
+            natural_end=True,
+            formal_result_eligible=True,
+            reexecution_verified=True,
+        )
+        for seed in range(100)
+    )
+    simulated_live_ready = replace(
+        current,
+        duel_complete_card_key_count=current.registered_card_key_count,
+        duel_complete_instance_count=current.registered_instance_count,
+        all_cards_implemented=True,
+        mode_runtime_reachable=True,
+        mode_implemented=True,
+        deterministic_controller_implemented=True,
+        reexecution_replay_supported=True,
+        unsupported_rules=0,
+        approximation_count=0,
+        acceptance_seed_count=100,
+        acceptance_natural_end_count=100,
+        acceptance_failure_count=0,
+        fixed_seed_acceptance_passed=True,
+        formal_duel_no_skill_ready=True,
+        blockers=(),
+        card_semantic_statuses=complete_card_statuses,
+        acceptance_seed_results=seed_evidence,
+    )
+    monkeypatch.setattr(
+        engine_gate,
+        "inspect_formal_duel_readiness",
+        lambda: simulated_live_ready,
+    )
+    # manifest 仍是当前真实 blocked 投影；准入只能由上面的现场结果决定。
+    manifest = build_current_manifest(mode_name=FORMAL_NO_SKILL_DUEL_MODE)
+    assert manifest.mode_implemented is False
+    assert manifest.unsupported_rules > 0
+
+    result = evaluate_formal_run_gate(manifest)
+    assert result.ready is True
+    assert result.issues == ()
+
+
+def test_formal_duel_gate_rejects_seed_summary_without_per_seed_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """100/100汇总不能代替逐seed自然结束与严格重执行记录。"""
+
+    current = engine_gate.inspect_formal_duel_readiness()
+    complete_card_statuses = tuple(
+        replace(item, duel_status="COMPLETE", reason=None)
+        for item in current.card_semantic_statuses
+    )
+    forged_summary = replace(
+        current,
+        duel_complete_card_key_count=current.registered_card_key_count,
+        duel_complete_instance_count=current.registered_instance_count,
+        all_cards_implemented=True,
+        mode_runtime_reachable=True,
+        mode_implemented=True,
+        deterministic_controller_implemented=True,
+        reexecution_replay_supported=True,
+        unsupported_rules=0,
+        approximation_count=0,
+        acceptance_seed_count=100,
+        acceptance_natural_end_count=100,
+        acceptance_failure_count=0,
+        fixed_seed_acceptance_passed=True,
+        formal_duel_no_skill_ready=True,
+        blockers=(),
+        card_semantic_statuses=complete_card_statuses,
+        acceptance_seed_results=(),
+    )
+    monkeypatch.setattr(
+        engine_gate,
+        "inspect_formal_duel_readiness",
+        lambda: forged_summary,
+    )
+    manifest = build_current_manifest(mode_name=FORMAL_NO_SKILL_DUEL_MODE)
+    result = evaluate_formal_run_gate(manifest)
+    assert result.ready is False
+    assert GateIssueCode.FIXED_SEED_ACCEPTANCE_NOT_PASSED in result.issue_codes
+    assert (
+        GateIssueCode.FORMAL_DUEL_READINESS_INSPECTION_FAILED
+        in result.issue_codes
+    )
 
 
 def test_invalid_counts_are_rejected_with_clear_chinese_error(tmp_path: Path) -> None:

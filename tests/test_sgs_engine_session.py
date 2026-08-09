@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from dataclasses import replace
 import hashlib
 from pathlib import Path
 import random
@@ -16,7 +17,13 @@ from scripts.sgs_engine.engine import (
     canonical_state_snapshot,
 )
 from scripts.sgs_engine.events import DamageEvent, EventType, GameEvent
-from scripts.sgs_engine.model import DRAW_PILE, PlayerState, ZoneRef
+from scripts.sgs_engine.model import (
+    DRAW_PILE,
+    CharacterGender,
+    CharacterMetadata,
+    PlayerState,
+    ZoneRef,
+)
 from scripts.sgs_engine.replay import NOT_LOADED_HASH
 from scripts.sgs_engine.replay import state_sha256
 from scripts.sgs_formal_runner import FORMAL_DECK_PATH
@@ -98,6 +105,57 @@ def test_same_seed_produces_identical_shuffle_snapshot_and_header_hash() -> None
     assert first.state_hash == second.state_hash
     assert first.replay.header_sha256 == second.replay.header_sha256
     assert first.state.card_ids_in(DRAW_PILE) != different.state.card_ids_in(DRAW_PILE)
+
+
+def test_character_metadata_is_bound_into_canonical_state_hash() -> None:
+    base_state = _session(seed=77).state
+    base_snapshot = canonical_state_snapshot(base_state)
+    assert base_snapshot["players"][0]["character"] is None
+
+    p1 = base_state.players_by_id["玩家甲"]
+    male_state = replace(
+        base_state,
+        players=tuple(
+            replace(
+                player,
+                character=CharacterMetadata(
+                    character_key="test_general_a",
+                    gender=CharacterGender.MALE,
+                ),
+            )
+            if player.player_id == p1.player_id
+            else player
+            for player in base_state.players
+        ),
+    )
+    unknown_gender_state = replace(
+        male_state,
+        players=tuple(
+            replace(
+                player,
+                character=CharacterMetadata(
+                    character_key="test_general_a",
+                    gender=None,
+                ),
+            )
+            if player.player_id == p1.player_id
+            else player
+            for player in male_state.players
+        ),
+    )
+    male_snapshot = canonical_state_snapshot(male_state)
+    unknown_snapshot = canonical_state_snapshot(unknown_gender_state)
+
+    assert male_snapshot["players"][0]["character"] == {
+        "character_key": "test_general_a",
+        "gender": "male",
+    }
+    assert unknown_snapshot["players"][0]["character"] == {
+        "character_key": "test_general_a",
+        "gender": None,
+    }
+    assert state_sha256(base_snapshot) != state_sha256(male_snapshot)
+    assert state_sha256(unknown_snapshot) != state_sha256(male_snapshot)
 
 
 def test_deck_hash_matches_formal_runner_raw_csv_bytes() -> None:

@@ -284,9 +284,9 @@ def test_implemented_and_remaining_card_counts_updated() -> None:
     assert JIEDAO in registry.implemented_card_keys
     assert len(registry.implemented_card_keys) == 38
     assert len(registry.unimplemented_card_keys) == 0
-    # 完整实现口径：35种／157张（CP-04P：诸葛连弩、青釭剑、寒冰剑、
-    # 古锭刀、青龙偃月刀、贯石斧、朱雀羽扇、麒麟弓共8种／9张武器为
-    # COMPLETE，计入完整实现；雌雄双股剑、丈八蛇矛、方天画戟保持PARTIAL
+    # 完整实现口径：36种／158张（CP-04P：诸葛连弩、青釭剑、寒冰剑、
+    # 雌雄双股剑、古锭刀、青龙偃月刀、贯石斧、朱雀羽扇、麒麟弓共9种／
+    # 10张武器为COMPLETE，计入完整实现；丈八蛇矛、方天画戟保持PARTIAL
     # ——丈八因 VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP 暂不计COMPLETE）
     complete_keys = (
         set(PRODUCTION_BASIC_CARD_KEYS)
@@ -300,8 +300,8 @@ def test_implemented_and_remaining_card_counts_updated() -> None:
             if status == "COMPLETE"
         }
     )
-    assert len(complete_keys) == 35
-    assert sum(len(registry.instances_of(key)) for key in complete_keys) == 157
+    assert len(complete_keys) == 36
+    assert sum(len(registry.instances_of(key)) for key in complete_keys) == 158
     # 注册表口径：38种适配器／160张实体
     assert sum(len(registry.instances_of(key)) for key in registry.implemented_card_keys) == 160
     assert set(registry.unimplemented_card_keys) == set()
@@ -1629,6 +1629,53 @@ def test_gate_failure_leaves_state_events_rng_pending_hash_unchanged() -> None:
     assert game.execution_hash == before_hash
 
 
+def test_zhangba_borrowed_without_entity_slash_fails_closed_atomically() -> None:
+    game = _fresh(seed=3)
+    jiedao_id, weapon_id, slash_ids = _jiedao_fixture(
+        game,
+        weapon_key="sgs_weapon_zhangbashemao",
+        slash_keys=(),
+    )
+    assert slash_ids == []
+    p2_hand = tuple(game.state.card_ids_in(ZoneRef.hand("p2")))
+    assert len(p2_hand) >= 2
+    assert not any(
+        game.state.cards_by_id[instance_id].card_key in SLASH_CARD_KEYS
+        for instance_id in p2_hand
+    )
+
+    _step(game, _action(game, "use_jiedao", card_key=JIEDAO))
+    _step(game, _action(game, "pass_trick_response"))
+    before_state = game.state
+    before_runtime = game.runtime
+    before_events = game.events
+    before_rng = game.rng_calls
+    before_step_count = game.step_count
+    before_hash = game.execution_hash
+
+    with pytest.raises(
+        UnsupportedRuleError,
+        match="VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP",
+    ):
+        final_pass = _action(game, "pass_trick_response")
+        assert final_pass is not None
+        _step(game, final_pass)
+
+    assert game.state == before_state
+    assert game.runtime == before_runtime
+    assert game.events == before_events
+    assert game.rng_calls == before_rng
+    assert game.step_count == before_step_count
+    assert game.execution_hash == before_hash
+    assert game.state.location_of(jiedao_id) == PROCESSING_ZONE
+    assert game.state.location_of(weapon_id) == ZoneRef.equipment("p2", "weapon")
+    assert weapon_id not in game.state.card_ids_in(ZoneRef.hand("p1"))
+    assert not any(
+        event.payload.get("reason") == "borrowed_sword_gain"
+        for event in game.events
+    )
+
+
 def test_weapon_gates_never_approximate_unknown_weapons() -> None:
     # 未知武器键（理论上不可能出现在正式牌堆，但防御性断言）必须失败关闭，
     # 不得静默当作白板；approximation_count 始终为0（由源码审计与门禁覆盖）。
@@ -1856,7 +1903,7 @@ def test_tampered_no_weapon_to_transfer_flag_fails_closed() -> None:
         and event.get("payload", {}).get("no_weapon_to_transfer") is not None
     )
     target["payload"]["no_weapon_to_transfer"] = True
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(ProductionReplayFormatError):
         ProductionReexecutionReplay.from_dict(tampered)
 
@@ -1900,7 +1947,7 @@ def test_second_target_never_gets_independent_wuxie_window_in_replay() -> None:
         == JIEDAO
     )
     target_decision["context"]["metadata"]["pending_trick"]["target_id"] = "p1"
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     rebuilt = ProductionReexecutionReplay.from_dict(tampered)
     with pytest.raises(ProductionReplayDivergenceError):
         reexecute_production_replay(rebuilt, fixture=_jiedao_replay_fixture)
@@ -1990,7 +2037,7 @@ def test_tampered_first_or_second_target_fails_closed() -> None:
         )
         assert decision["chosen_action"]["payload"][field] != forged_value
         decision["chosen_action"]["payload"][field] = forged_value
-        del tampered["record_sha256"]
+        tampered["record_sha256"] = ""
         rebuilt = ProductionReexecutionReplay.from_dict(tampered)
         with pytest.raises(ProductionReplayDivergenceError):
             reexecute_production_replay(rebuilt, fixture=_jiedao_replay_fixture)
@@ -2024,7 +2071,7 @@ def test_tampered_wuxie_result_fails_closed() -> None:
         for event in tampered["events"]
         if event.get("event_type") != "card_effect_cancelled"
     ]
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(ProductionReplayFormatError):
         ProductionReexecutionReplay.from_dict(tampered)
 
@@ -2041,7 +2088,7 @@ def test_tampered_use_refuse_decision_fails_closed() -> None:
     decision["chosen_action"]["payload"]["operation"] = (
         "refuse_borrowed_sword_slash"
     )
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     rebuilt = ProductionReexecutionReplay.from_dict(tampered)
     with pytest.raises(ProductionReplayDivergenceError):
         reexecute_production_replay(rebuilt, fixture=_jiedao_replay_fixture)
@@ -2057,7 +2104,7 @@ def test_tampered_slash_handle_fails_closed() -> None:
         == "choose_borrowed_sword_slash"
     )
     decision["chosen_action"]["payload"]["handle"] = "bs_" + "0" * 32
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     rebuilt = ProductionReexecutionReplay.from_dict(tampered)
     with pytest.raises(ProductionReplayDivergenceError):
         reexecute_production_replay(rebuilt, fixture=_jiedao_replay_fixture)
@@ -2073,7 +2120,7 @@ def test_tampered_slash_entity_fails_closed() -> None:
         and event.get("payload", {}).get("forced_use_context") == "borrowed_sword"
     )
     forced["card_instance_id"] = "sgs-mobile-forged-slash"
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(ProductionReplayFormatError):
         ProductionReexecutionReplay.from_dict(tampered)
 
@@ -2088,7 +2135,7 @@ def test_tampered_limit_bypass_flag_fails_closed() -> None:
         and event.get("payload", {}).get("forced_use_context") == "borrowed_sword"
     )
     forced["payload"]["ignore_slash_use_limit"] = False
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(ProductionReplayFormatError):
         ProductionReexecutionReplay.from_dict(tampered)
 
@@ -2103,7 +2150,7 @@ def test_tampered_counted_role_fails_closed() -> None:
         == "choose_borrowed_sword_slash"
     )
     decision["context"]["metadata"]["slash_used_counts"]["p2"] = 5
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     rebuilt = ProductionReexecutionReplay.from_dict(tampered)
     with pytest.raises(ProductionReplayDivergenceError):
         reexecute_production_replay(rebuilt, fixture=_jiedao_replay_fixture)
@@ -2119,7 +2166,7 @@ def test_tampered_weapon_entity_and_destination_fail_closed() -> None:
         and event.get("payload", {}).get("reason") == "jiedaosharen_weapon_gain"
     )
     gained["card_instance_id"] = "sgs-mobile-forged-weapon"
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(ProductionReplayFormatError):
         ProductionReexecutionReplay.from_dict(tampered)
 
@@ -2132,7 +2179,7 @@ def test_tampered_weapon_entity_and_destination_fail_closed() -> None:
         and event.get("payload", {}).get("reason") == "jiedaosharen_weapon_gain"
     )
     moved["payload"]["destination"]["owner_id"] = "p2"
-    del tampered2["record_sha256"]
+    tampered2["record_sha256"] = ""
     with pytest.raises(ProductionReplayFormatError):
         ProductionReexecutionReplay.from_dict(tampered2)
 
@@ -2163,7 +2210,7 @@ def test_tampered_equipment_events_fail_closed() -> None:
         if event.get("event_type") == "equipment_equipped"
     )
     equipped["equipment_owner"] = "p2"
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(ProductionReplayFormatError):
         ProductionReexecutionReplay.from_dict(tampered)
 
@@ -2179,7 +2226,7 @@ def test_deleted_root_cleanup_event_fails_closed() -> None:
             and event.get("payload", {}).get("reason") == "jiedaosharen_fulfilled"
         )
     ]
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(ProductionReplayFormatError):
         ProductionReexecutionReplay.from_dict(tampered)
 
@@ -2497,7 +2544,7 @@ def test_borrowed_sword_zhuque_conversion_replay_reexecutes() -> None:
         and event.get("payload", {}).get("converted_to_fire") is True
     )
     used["payload"]["converted_to_fire"] = False
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(
         (ProductionReplayFormatError, ProductionReplayDivergenceError)
     ):

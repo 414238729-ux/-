@@ -88,6 +88,7 @@ from .production_cards import (
     equipped_weapon_key,
     hand_limit_of,
     has_target_zone_cards,
+    is_cixiong_opposite_gender_target,
     is_valid_shunshou_target,
     is_valid_slash_target,
     normalize_target_order,
@@ -98,6 +99,7 @@ from .rng import DeterministicRNG, RNGCall
 
 
 PRODUCTION_BASIC_CARDS_MODE = "production_basic_cards_batch"
+FORMAL_NO_SKILL_DUEL_MODE = "formal_160_card_no_skill_duel"
 
 
 class ProductionPhase(str, Enum):
@@ -106,6 +108,8 @@ class ProductionPhase(str, Enum):
     JUDGMENT_WUXIE = "judgment_wuxie"
     DRAW = "draw"
     PLAY = "play"
+    CIXIONG_ACTIVATE = "cixiong_activate"
+    CIXIONG_TARGET_CHOICE = "cixiong_target_choice"
     SLASH_RESPONSE = "slash_response"
     TRICK_RESPONSE = "trick_response"
     ZONE_CHOICE = "zone_choice"
@@ -132,6 +136,8 @@ BATCH_PHASES: tuple[ProductionPhase, ...] = (
     ProductionPhase.JUDGMENT_WUXIE,
     ProductionPhase.DRAW,
     ProductionPhase.PLAY,
+    ProductionPhase.CIXIONG_ACTIVATE,
+    ProductionPhase.CIXIONG_TARGET_CHOICE,
     ProductionPhase.SLASH_RESPONSE,
     ProductionPhase.TRICK_RESPONSE,
     ProductionPhase.ZONE_CHOICE,
@@ -197,6 +203,25 @@ class _PendingSlash:
     # player_visible 正确表示。
     virtual: bool = False
     material_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingCixiongChoice:
+    """雌雄双股剑指定异性目标后的两段式选择窗口。
+
+    ``pending_slash`` 始终保留在 ``_BatchRuntime``，本结构只绑定武器来源、
+    根【杀】与当前选择阶段。目标手牌候选使用服务端HMAC句柄快照；装备区
+    实体保持公开。窗口结束后恢复同一 pending Slash，再按最新状态评估防具。
+    """
+
+    attacker_id: str
+    target_id: str
+    slash_instance_id: str
+    weapon_instance_id: str
+    window_id: str
+    stage: str  # awaiting_activation | awaiting_target_choice
+    handles: Mapping[str, str] = MappingProxyType({})
+    snapshot_digest: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -522,6 +547,7 @@ class _BatchRuntime:
     discard_phase_selected_ids: tuple[str, ...] = ()
     discard_phase_handles: Mapping[str, str] = MappingProxyType({})
     discard_phase_snapshot_digest: str | None = None
+    pending_cixiong_choice: _PendingCixiongChoice | None = None
     pending_weapon_choice: _PendingWeaponChoice | None = None
     pending_slash_choice: _PendingSlashChoice | None = None
     pending_discard_two: _PendingDiscardTwo | None = None
@@ -535,6 +561,10 @@ class _BatchRuntime:
                 "target_id": self.pending_slash.target_id,
                 "slash_instance_id": self.pending_slash.slash_instance_id,
                 "boosted": self.pending_slash.boosted,
+                "ignore_armor": self.pending_slash.ignore_armor,
+                "fire_converted": self.pending_slash.fire_converted,
+                "virtual": self.pending_slash.virtual,
+                "material_ids": list(self.pending_slash.material_ids),
             }
         pending_trick = None
         if self.pending_trick is not None:
@@ -648,6 +678,7 @@ class _BatchRuntime:
             "discard_phase_snapshot_digest": (
                 self.discard_phase_snapshot_digest
             ),
+            "pending_cixiong_choice": self._pending_cixiong_choice_value(),
             "pending_weapon_choice": (
                 None
                 if self.pending_weapon_choice is None
@@ -665,6 +696,21 @@ class _BatchRuntime:
                     "window_id": self.pending_weapon_choice.window_id,
                 }
             ),
+        }
+
+    def _pending_cixiong_choice_value(self) -> dict[str, object] | None:
+        pending = self.pending_cixiong_choice
+        if pending is None:
+            return None
+        return {
+            "attacker_id": pending.attacker_id,
+            "target_id": pending.target_id,
+            "slash_instance_id": pending.slash_instance_id,
+            "weapon_instance_id": pending.weapon_instance_id,
+            "window_id": pending.window_id,
+            "stage": pending.stage,
+            "handles": dict(pending.handles),
+            "snapshot_digest": pending.snapshot_digest,
         }
 
     def _pending_borrowed_sword_value(
@@ -1804,7 +1850,7 @@ class BatchReferenceController:
         if any(action.action_id is None for action in legal_actions):
             raise ProductionBatchError("控制器只能接收已经签发ID的合法动作")
 
-        def priority(action: LegalAction) -> tuple[int, str, str]:
+        def priority(action: LegalAction) -> tuple[int, str]:
             operation = str(action.payload.get("operation", ""))
             if context.phase == ProductionPhase.SLASH_RESPONSE.value:
                 rank = 0 if operation == "play_dodge" else 9
@@ -1851,11 +1897,30 @@ class BatchReferenceController:
                     rank = 2
                 else:
                     rank = 9
+            elif context.phase == ProductionPhase.WEAPON_DISCARD_TWO.value:
+                # 贯石斧代价窗口与弃牌阶段一样是“选满后提交”的状态机。
+                # 若把选择/取消选择按实体ID同级排序，选中最小ID后会立即
+                # 取消同一张牌，形成不改变牌区的无限振荡。
+                if operation == "discard_two_submit":
+                    rank = 0
+                elif operation == "select_discard_two":
+                    rank = 1
+                elif operation == "unselect_discard_two":
+                    rank = 2
+                else:
+                    rank = 9
             else:
                 rank = 0 if action.action_type is not ActionType.PASS else 1
-            return rank, action.card_instance_id or "", action.action_id or ""
+            # ``action_id`` 与隐藏牌句柄都绑定会话秘密，不能参与策略语义。
+            # 同级且没有公开实体ID的动作按权威枚举顺序决胜；该顺序来自
+            # GameState 区域顺序，不会让固定 seed 因随机 session_secret 改变
+            # 选择。公开实体仍以稳定 instance_id 排序，保持既有可解释性。
+            return rank, action.card_instance_id or ""
 
-        return min(legal_actions, key=priority)
+        return min(
+            enumerate(legal_actions),
+            key=lambda indexed: (*priority(indexed[1]), indexed[0]),
+        )[1]
 
 
 class ScriptedBatchController:
@@ -1880,7 +1945,9 @@ class ScriptedBatchController:
             ]
             if candidates:
                 del self._specs[index]
-                return min(candidates, key=lambda action: action.action_id or "")
+                # specs 命中多个隐藏候选时同样不得用会话绑定 action_id 决胜。
+                # candidates 保留权威合法动作枚举顺序，直接选择第一项。
+                return candidates[0]
         return self._reference.choose(legal_actions, context)
 
     @staticmethod
@@ -1917,7 +1984,9 @@ class _BatchRuleAdapter(RuleAdapter):
 
     @property
     def adapter_version(self) -> str:
-        return "production-basic-cards-batch-rules.v1"
+        # Milestone B 新增 formal 模式绑定、雌雄状态机、统一重洗事务与
+        # 确定性控制器修复；旧阶段契约的动作／回放不得与新行为共用规则ID。
+        return "production-basic-cards-batch-rules.v2"
 
     def audit_state(self) -> Mapping[str, object]:
         return MappingProxyType(self._session.runtime.audit_value())
@@ -1956,6 +2025,16 @@ class ProductionBasicCardBatch:
     """
 
     __test__ = False
+    MODE_ID = PRODUCTION_BASIC_CARDS_MODE
+
+    @property
+    def mode_id(self) -> str:
+        """当前会话绑定的生产模式ID；子类只能替换类级常量。"""
+
+        mode = self.MODE_ID
+        if not isinstance(mode, str) or not mode:
+            raise ProductionBatchError("生产会话模式ID必须是非空字符串")
+        return mode
 
     def __init__(
         self,
@@ -2088,11 +2167,11 @@ class ProductionBasicCardBatch:
         self._registry = RuleRegistry()
         for phase in BATCH_PHASES:
             self._registry.register(
-                PRODUCTION_BASIC_CARDS_MODE, phase.value, _BatchRuleAdapter(self)
+                self.mode_id, phase.value, _BatchRuleAdapter(self)
             )
         for key, adapter in self._formal_registry.adapters.items():
             self._registry.register(
-                PRODUCTION_BASIC_CARDS_MODE, f"card:{key}", adapter
+                self.mode_id, f"card:{key}", adapter
             )
 
     @property
@@ -2158,6 +2237,20 @@ class ProductionBasicCardBatch:
     @property
     def current_actor_id(self) -> str:
         runtime = self._runtime
+        if runtime.phase in (
+            ProductionPhase.CIXIONG_ACTIVATE,
+            ProductionPhase.CIXIONG_TARGET_CHOICE,
+        ):
+            choice = runtime.pending_cixiong_choice
+            if choice is None:
+                raise ProductionBatchError("雌雄双股剑选择阶段缺少挂起状态")
+            if runtime.phase is ProductionPhase.CIXIONG_ACTIVATE:
+                if choice.stage != "awaiting_activation":
+                    raise ProductionBatchError("雌雄双股剑发动阶段状态不一致")
+                return choice.attacker_id
+            if choice.stage != "awaiting_target_choice":
+                raise ProductionBatchError("雌雄双股剑目标选择阶段状态不一致")
+            return choice.target_id
         if runtime.phase is ProductionPhase.SLASH_RESPONSE:
             if runtime.pending_slash is None:
                 raise ProductionBatchError("响应阶段缺少待响应的【杀】")
@@ -2272,7 +2365,7 @@ class ProductionBasicCardBatch:
             )
         runtime = self._runtime
         return ActionContext(
-            mode=PRODUCTION_BASIC_CARDS_MODE,
+            mode=self.mode_id,
             phase=runtime.phase.value,
             actor_id=self.current_actor_id,
             turn_player_id=runtime.current_player_id,
@@ -2375,6 +2468,24 @@ class ProductionBasicCardBatch:
                 ),
                 "discard_phase_selected_ids": list(
                     runtime.discard_phase_selected_ids
+                ),
+                "pending_cixiong_choice": (
+                    None
+                    if runtime.pending_cixiong_choice is None
+                    else {
+                        "attacker_id": (
+                            runtime.pending_cixiong_choice.attacker_id
+                        ),
+                        "target_id": runtime.pending_cixiong_choice.target_id,
+                        "slash_instance_id": (
+                            runtime.pending_cixiong_choice.slash_instance_id
+                        ),
+                        "weapon_instance_id": (
+                            runtime.pending_cixiong_choice.weapon_instance_id
+                        ),
+                        "window_id": runtime.pending_cixiong_choice.window_id,
+                        "stage": runtime.pending_cixiong_choice.stage,
+                    }
                 ),
                 "pending_weapon_choice": (
                     None
@@ -2487,7 +2598,7 @@ class ProductionBasicCardBatch:
 
         snapshot = {
             "schema": "production-basic-batch-execution-v1",
-            "mode": PRODUCTION_BASIC_CARDS_MODE,
+            "mode": self.mode_id,
             "runtime": self._runtime.audit_value(),
             "first_player_id": self.first_player_id,
             "current_actor_id": (
@@ -2520,7 +2631,7 @@ class ProductionBasicCardBatch:
         self, state: GameState, context: ActionContext
     ) -> tuple[LegalAction, ...]:
         if (
-            context.mode != PRODUCTION_BASIC_CARDS_MODE
+            context.mode != self.mode_id
             or context.phase != self.phase.value
         ):
             raise ProductionBatchError(
@@ -2727,6 +2838,114 @@ class ProductionBasicCardBatch:
                                 **base,
                                 "operation": "discard_phase_submit",
                                 "selected_count": len(selected_set),
+                            },
+                        )
+                    )
+        elif self.phase is ProductionPhase.CIXIONG_ACTIVATE:
+            choice = self._runtime.pending_cixiong_choice
+            pending = self._runtime.pending_slash
+            if choice is None or pending is None:
+                raise ProductionBatchError("雌雄双股剑发动阶段缺少挂起【杀】")
+            if choice.stage != "awaiting_activation":
+                raise ProductionBatchError("雌雄双股剑发动阶段状态不一致")
+            if (
+                context.actor_id != choice.attacker_id
+                or pending.attacker_id != choice.attacker_id
+                or pending.target_id != choice.target_id
+                or pending.slash_instance_id != choice.slash_instance_id
+            ):
+                return ()
+            if not self._cixiong_window_is_current(state, choice, pending):
+                return ()
+            base = {
+                "window_id": choice.window_id,
+                "slash_instance_id": choice.slash_instance_id,
+                "weapon_instance_id": choice.weapon_instance_id,
+                "state_hash": state_sha256(canonical_state_snapshot(state)),
+            }
+            actions.extend(
+                (
+                    LegalAction(
+                        action_type=ActionType.ACTIVATE_SKILL,
+                        actor_id=context.actor_id,
+                        target_ids=(choice.target_id,),
+                        payload={**base, "operation": "activate_cixiong"},
+                    ),
+                    LegalAction(
+                        action_type=ActionType.PASS,
+                        actor_id=context.actor_id,
+                        target_ids=(choice.target_id,),
+                        payload={**base, "operation": "pass_cixiong"},
+                    ),
+                )
+            )
+        elif self.phase is ProductionPhase.CIXIONG_TARGET_CHOICE:
+            choice = self._runtime.pending_cixiong_choice
+            pending = self._runtime.pending_slash
+            if choice is None or pending is None:
+                raise ProductionBatchError("雌雄双股剑目标选择阶段缺少挂起【杀】")
+            if choice.stage != "awaiting_target_choice":
+                raise ProductionBatchError("雌雄双股剑目标选择阶段状态不一致")
+            if (
+                context.actor_id != choice.target_id
+                or pending.attacker_id != choice.attacker_id
+                or pending.target_id != choice.target_id
+                or pending.slash_instance_id != choice.slash_instance_id
+            ):
+                return ()
+            if not self._cixiong_window_is_current(state, choice, pending):
+                return ()
+            hand_ids = tuple(state.card_ids_in(ZoneRef.hand(choice.target_id)))
+            if (
+                choice.snapshot_digest is None
+                or sha256_value(hand_ids) != choice.snapshot_digest
+            ):
+                # 选择窗口打开后手牌发生任何变化，旧句柄整体失效。
+                return ()
+            state_hash = state_sha256(canonical_state_snapshot(state))
+            base = {
+                "window_id": choice.window_id,
+                "slash_instance_id": choice.slash_instance_id,
+                "weapon_instance_id": choice.weapon_instance_id,
+                "state_hash": state_hash,
+            }
+            # “令攻击者摸1”始终合法；目标没有手牌或装备时它是唯一动作。
+            actions.append(
+                LegalAction(
+                    action_type=ActionType.CHOOSE_OPTION,
+                    actor_id=context.actor_id,
+                    target_ids=(choice.attacker_id,),
+                    payload={**base, "operation": "cixiong_allow_draw"},
+                )
+            )
+            for handle in choice.handles:
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.CHOOSE_OPTION,
+                        actor_id=context.actor_id,
+                        target_ids=(choice.target_id,),
+                        payload={
+                            **base,
+                            "operation": "cixiong_discard_card",
+                            "zone": "hand",
+                            "handle": handle,
+                        },
+                    )
+                )
+            for slot in sorted(EQUIPMENT_SLOTS):
+                zone = ZoneRef.equipment(choice.target_id, slot)
+                for instance_id in state.card_ids_in(zone):
+                    actions.append(
+                        LegalAction(
+                            action_type=ActionType.CHOOSE_OPTION,
+                            actor_id=context.actor_id,
+                            card_instance_id=instance_id,
+                            target_ids=(choice.target_id,),
+                            payload={
+                                **base,
+                                "operation": "cixiong_discard_card",
+                                "zone": f"equipment:{slot}",
+                                "card_key": _card_key(state, instance_id),
                             },
                         )
                     )
@@ -3130,7 +3349,7 @@ class ProductionBasicCardBatch:
         self, state: GameState, context: ActionContext, action: LegalAction
     ) -> GameState:
         if (
-            context.mode != PRODUCTION_BASIC_CARDS_MODE
+            context.mode != self.mode_id
             or context.phase != self.phase.value
         ):
             raise ProductionBatchError(
@@ -3271,6 +3490,24 @@ class ProductionBasicCardBatch:
             if operation == "discard_phase_submit":
                 return self.apply_discard_phase_submit(state, context, action)
             raise InvalidActionError("弃牌阶段只支持选择与提交批量弃牌动作")
+
+        if self.phase is ProductionPhase.CIXIONG_ACTIVATE:
+            if operation == "activate_cixiong":
+                return self.apply_cixiong_activate(state, context, action)
+            if action.action_type is ActionType.PASS and operation == (
+                "pass_cixiong"
+            ):
+                return self.apply_cixiong_pass(state, context, action)
+            raise InvalidActionError("雌雄双股剑发动阶段只支持发动或放弃")
+
+        if self.phase is ProductionPhase.CIXIONG_TARGET_CHOICE:
+            if operation == "cixiong_allow_draw":
+                return self.apply_cixiong_allow_draw(state, context, action)
+            if operation == "cixiong_discard_card":
+                return self.apply_cixiong_discard_card(state, context, action)
+            raise InvalidActionError(
+                "雌雄双股剑目标选择阶段只支持令攻击者摸牌或自己弃牌"
+            )
 
         if self.phase is ProductionPhase.WEAPON_AFTER_DAMAGE:
             if operation == "weapon_discard_mount":
@@ -3542,6 +3779,7 @@ class ProductionBasicCardBatch:
             discard_phase_selected_ids=(),
             discard_phase_handles=MappingProxyType({}),
             discard_phase_snapshot_digest=None,
+            pending_cixiong_choice=None,
             pending_weapon_choice=None,
             pending_slash_choice=None,
             pending_discard_two=None,
@@ -4648,6 +4886,37 @@ class ProductionBasicCardBatch:
                            context.actor_id, 0
                        ) + 1}
         ignore_armor = equipped_weapon == "sgs_weapon_qinggangjian"
+        pending_slash = _PendingSlash(
+            context.actor_id,
+            target,
+            action.card_instance_id,
+            boosted,
+            ignore_armor=ignore_armor,
+            fire_converted=fire_converted,
+            virtual=zhangba_virtual,
+            material_ids=(zhangba_materials if zhangba_virtual else ()),
+        )
+        if (
+            equipped_weapon == "sgs_weapon_cixiongshuanggujian"
+            and is_cixiong_opposite_gender_target(
+                state, actor_id=context.actor_id, target_id=target
+            )
+        ):
+            # 指定异性目标后先打开雌雄双股剑发动窗口；被动防具无效化与
+            # 【闪】／八卦响应都必须等目标选择完成后按最新状态评估。
+            base_runtime = replace(
+                runtime,
+                slash_used_counts=MappingProxyType(next_counts),
+                wine_buff_owner_id=None,
+                pending_slash=pending_slash,
+                response_window_source_sequence=used_sequence,
+                bagua_attempted=False,
+            )
+            next_runtime = self._enter_cixiong_activation(
+                next_state, base_runtime
+            )
+            self._commit_runtime(runtime, next_runtime)
+            return next_state
         if fire_converted:
             # 朱雀羽扇转火杀（7.10＋基础术语20.6）：转化后的【杀】不再被
             # 藤甲普通杀免疫；转化未提供颜色（记为“无”），不触发仁王盾
@@ -4712,18 +4981,7 @@ class ProductionBasicCardBatch:
             phase=ProductionPhase.SLASH_RESPONSE,
             slash_used_counts=MappingProxyType(next_counts),
             wine_buff_owner_id=None,
-            pending_slash=_PendingSlash(
-                context.actor_id,
-                target,
-                action.card_instance_id,
-                boosted,
-                ignore_armor=ignore_armor,
-                fire_converted=fire_converted,
-                virtual=zhangba_virtual,
-                material_ids=(
-                    zhangba_materials if zhangba_virtual else ()
-                ),
-            ),
+            pending_slash=pending_slash,
             response_window_id=(
                 f"slash:{runtime.turn_number}:{action.card_instance_id}"
             ),
@@ -4733,6 +4991,417 @@ class ProductionBasicCardBatch:
         )
         self._commit_runtime(runtime, next_runtime)
         return next_state
+
+    # ------------------------------------------------------------------
+    # 雌雄双股剑：指定异性目标后、闪／防具响应前的两段选择窗口
+    # ------------------------------------------------------------------
+
+    def _enter_cixiong_activation(
+        self, state: GameState, runtime: _BatchRuntime
+    ) -> _BatchRuntime:
+        pending = runtime.pending_slash
+        if pending is None:
+            raise ProductionBatchError("雌雄双股剑触发缺少待结算【杀】")
+        if pending.virtual:
+            raise ProductionBatchError("雌雄双股剑不能以丈八虚拟【杀】触发")
+        if state.location_of(pending.slash_instance_id) != PROCESSING_ZONE:
+            raise ProductionBatchError("雌雄双股剑触发时根【杀】必须仍在处理区")
+        weapon_ids = state.card_ids_in(
+            ZoneRef.equipment(pending.attacker_id, "weapon")
+        )
+        if len(weapon_ids) != 1 or _card_key(
+            state, weapon_ids[0]
+        ) != "sgs_weapon_cixiongshuanggujian":
+            raise ProductionBatchError("雌雄双股剑触发时武器来源不唯一或已失效")
+        if not is_cixiong_opposite_gender_target(
+            state,
+            actor_id=pending.attacker_id,
+            target_id=pending.target_id,
+        ):
+            raise ProductionBatchError("雌雄双股剑只能为异性目标建立发动窗口")
+        if runtime.response_window_source_sequence is None:
+            raise ProductionBatchError("雌雄双股剑窗口缺少根【杀】使用事件")
+        window_id = (
+            f"cixiong:{runtime.turn_number}:{pending.slash_instance_id}"
+        )
+        return replace(
+            runtime,
+            phase=ProductionPhase.CIXIONG_ACTIVATE,
+            pending_cixiong_choice=_PendingCixiongChoice(
+                attacker_id=pending.attacker_id,
+                target_id=pending.target_id,
+                slash_instance_id=pending.slash_instance_id,
+                weapon_instance_id=weapon_ids[0],
+                window_id=window_id,
+                stage="awaiting_activation",
+            ),
+            response_window_id=window_id,
+            response_window_order=(pending.attacker_id,),
+            bagua_attempted=False,
+        )
+
+    def _require_cixiong_action_state(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+        *,
+        phase: ProductionPhase,
+        stage: str,
+    ) -> tuple[_PendingCixiongChoice, _PendingSlash]:
+        runtime = self._runtime
+        if runtime.phase is not phase:
+            raise InvalidActionError("雌雄双股剑动作不属于当前选择阶段")
+        choice = runtime.pending_cixiong_choice
+        pending = runtime.pending_slash
+        if choice is None or pending is None:
+            raise InvalidActionError("当前没有完整的雌雄双股剑挂起状态")
+        expected_actor = (
+            choice.attacker_id
+            if phase is ProductionPhase.CIXIONG_ACTIVATE
+            else choice.target_id
+        )
+        if choice.stage != stage or context.actor_id != expected_actor:
+            raise InvalidActionError("雌雄双股剑阶段或行动角色不一致")
+        if (
+            pending.attacker_id != choice.attacker_id
+            or pending.target_id != choice.target_id
+            or pending.slash_instance_id != choice.slash_instance_id
+        ):
+            raise InvalidActionError("雌雄双股剑窗口与挂起【杀】根不一致")
+        payload = action.payload
+        if (
+            payload.get("window_id") != choice.window_id
+            or payload.get("slash_instance_id") != choice.slash_instance_id
+            or payload.get("weapon_instance_id") != choice.weapon_instance_id
+        ):
+            raise InvalidActionError("雌雄双股剑动作不属于当前根或窗口")
+        if str(payload.get("state_hash", "")) != state_sha256(
+            canonical_state_snapshot(state)
+        ):
+            raise InvalidActionError("雌雄双股剑动作绑定的状态哈希已过期")
+        if state.location_of(choice.slash_instance_id) != PROCESSING_ZONE:
+            raise InvalidActionError("雌雄双股剑窗口中的根【杀】已不在处理区")
+        weapon_zone = ZoneRef.equipment(choice.attacker_id, "weapon")
+        if (
+            state.location_of(choice.weapon_instance_id) != weapon_zone
+            or _card_key(state, choice.weapon_instance_id)
+            != "sgs_weapon_cixiongshuanggujian"
+        ):
+            raise InvalidActionError("雌雄双股剑来源实体已离开攻击者武器槽")
+        if not (
+            state.players_by_id[choice.attacker_id].alive
+            and state.players_by_id[choice.target_id].alive
+        ):
+            raise InvalidActionError("雌雄双股剑选择期间参与角色已死亡")
+        if not is_cixiong_opposite_gender_target(
+            state, actor_id=choice.attacker_id, target_id=choice.target_id
+        ):
+            raise InvalidActionError("雌雄双股剑选择期间角色性别条件已不成立")
+        return choice, pending
+
+    @staticmethod
+    def _cixiong_window_is_current(
+        state: GameState,
+        choice: _PendingCixiongChoice,
+        pending: _PendingSlash,
+    ) -> bool:
+        """枚举前确认触发来源、根【杀】和参与者仍然有效。"""
+
+        if (
+            pending.attacker_id != choice.attacker_id
+            or pending.target_id != choice.target_id
+            or pending.slash_instance_id != choice.slash_instance_id
+            or state.location_of(choice.slash_instance_id) != PROCESSING_ZONE
+        ):
+            return False
+        weapon_zone = ZoneRef.equipment(choice.attacker_id, "weapon")
+        if (
+            state.location_of(choice.weapon_instance_id) != weapon_zone
+            or _card_key(state, choice.weapon_instance_id)
+            != "sgs_weapon_cixiongshuanggujian"
+        ):
+            return False
+        if not (
+            state.players_by_id[choice.attacker_id].alive
+            and state.players_by_id[choice.target_id].alive
+        ):
+            return False
+        return is_cixiong_opposite_gender_target(
+            state,
+            actor_id=choice.attacker_id,
+            target_id=choice.target_id,
+        )
+
+    def apply_cixiong_activate(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        choice, _ = self._require_cixiong_action_state(
+            state,
+            context,
+            action,
+            phase=ProductionPhase.CIXIONG_ACTIVATE,
+            stage="awaiting_activation",
+        )
+        if (
+            action.action_type is not ActionType.ACTIVATE_SKILL
+            or action.payload.get("operation") != "activate_cixiong"
+            or action.target_ids != (choice.target_id,)
+            or action.card_instance_id is not None
+        ):
+            raise InvalidActionError("雌雄双股剑发动动作的类型或目标无效")
+        hand_ids = tuple(state.card_ids_in(ZoneRef.hand(choice.target_id)))
+        digest = sha256_value(hand_ids)
+        handles = _zone_choice_handle_snapshot(
+            self._session_id,
+            self._session_secret,
+            state,
+            choice.target_id,
+            choice.window_id,
+            digest,
+        )
+        runtime = self._runtime
+        next_runtime = replace(
+            runtime,
+            phase=ProductionPhase.CIXIONG_TARGET_CHOICE,
+            pending_cixiong_choice=replace(
+                choice,
+                stage="awaiting_target_choice",
+                handles=handles,
+                snapshot_digest=digest,
+            ),
+            response_window_order=(choice.target_id,),
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return state
+
+    def apply_cixiong_pass(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        choice, _ = self._require_cixiong_action_state(
+            state,
+            context,
+            action,
+            phase=ProductionPhase.CIXIONG_ACTIVATE,
+            stage="awaiting_activation",
+        )
+        if (
+            action.action_type is not ActionType.PASS
+            or action.payload.get("operation") != "pass_cixiong"
+            or action.target_ids != (choice.target_id,)
+            or action.card_instance_id is not None
+        ):
+            raise InvalidActionError("雌雄双股剑放弃动作的类型或目标无效")
+        runtime = self._runtime
+        next_state, next_runtime = self._resume_slash_after_cixiong(
+            state, replace(runtime, pending_cixiong_choice=None)
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def apply_cixiong_allow_draw(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        choice, _ = self._require_cixiong_action_state(
+            state,
+            context,
+            action,
+            phase=ProductionPhase.CIXIONG_TARGET_CHOICE,
+            stage="awaiting_target_choice",
+        )
+        if (
+            action.action_type is not ActionType.CHOOSE_OPTION
+            or action.payload.get("operation") != "cixiong_allow_draw"
+            or action.target_ids != (choice.attacker_id,)
+            or action.card_instance_id is not None
+            or action.payload.get("handle") is not None
+        ):
+            raise InvalidActionError("雌雄双股剑令攻击者摸牌动作无效")
+        next_state, draw_events = self._draw_cards(
+            state,
+            choice.attacker_id,
+            1,
+            reason="cixiong_target_allow_draw",
+        )
+        self._events.extend(draw_events)
+        runtime = self._runtime
+        next_state, next_runtime = self._resume_slash_after_cixiong(
+            next_state, replace(runtime, pending_cixiong_choice=None)
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def apply_cixiong_discard_card(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        choice, _ = self._require_cixiong_action_state(
+            state,
+            context,
+            action,
+            phase=ProductionPhase.CIXIONG_TARGET_CHOICE,
+            stage="awaiting_target_choice",
+        )
+        if (
+            action.action_type is not ActionType.CHOOSE_OPTION
+            or action.payload.get("operation") != "cixiong_discard_card"
+            or action.target_ids != (choice.target_id,)
+        ):
+            raise InvalidActionError("雌雄双股剑弃牌动作的类型或目标无效")
+        zone_id = str(action.payload.get("zone", ""))
+        if zone_id == "hand":
+            if action.card_instance_id is not None:
+                raise InvalidActionError("雌雄双股剑隐藏手牌不得提交裸实体ID")
+            instance_id = _resolve_hand_choice_handle(
+                self._session_id,
+                self._session_secret,
+                state,
+                choice.window_id,
+                choice.target_id,
+                "hand",
+                choice.snapshot_digest,
+                choice.handles,
+                action.payload.get("handle"),
+            )
+            if instance_id is None:
+                raise InvalidActionError(
+                    "雌雄双股剑手牌句柄无效：伪造、跨窗口、跨会话或手牌已变化"
+                )
+            source = ZoneRef.hand(choice.target_id)
+        else:
+            if action.payload.get("handle") is not None:
+                raise InvalidActionError("雌雄双股剑公开装备选择不得携带隐藏句柄")
+            instance_id = action.card_instance_id
+            if instance_id is None:
+                raise InvalidActionError("雌雄双股剑弃装备必须指定公开实体")
+            source = _zone_from_id(zone_id, choice.target_id)
+            if source.kind is not ZoneKind.EQUIPMENT:
+                raise InvalidActionError("雌雄双股剑只能弃置目标的手牌或装备")
+            if state.location_of(instance_id) != source:
+                raise InvalidActionError("雌雄双股剑所选装备已离开指定槽位")
+            if action.payload.get("card_key") != _card_key(state, instance_id):
+                raise InvalidActionError("雌雄双股剑所选装备卡牌键不一致")
+        next_state = state.move_card(instance_id, DISCARD_PILE)
+        card_key = _card_key(state, instance_id)
+        reason = "cixiong_target_discard"
+        events: list[GameEvent] = [
+            GameEvent(
+                event_type=EventType.CARD_MOVED,
+                card_instance_id=instance_id,
+                card_key=card_key,
+                card_user=choice.target_id,
+                target_ids=(choice.target_id,),
+                payload={
+                    "source": _zone_payload(source),
+                    "destination": _zone_payload(DISCARD_PILE),
+                    "reason": reason,
+                    "window_id": choice.window_id,
+                    "root_slash_instance_id": choice.slash_instance_id,
+                },
+            ),
+            GameEvent(
+                event_type=EventType.CARD_LOST,
+                card_instance_id=instance_id,
+                card_key=card_key,
+                target_ids=(choice.target_id,),
+                payload={
+                    "reason": reason,
+                    "source_zone": _zone_id(source),
+                    "window_id": choice.window_id,
+                },
+            ),
+            GameEvent(
+                event_type=EventType.CARD_DISCARDED,
+                card_instance_id=instance_id,
+                card_key=card_key,
+                card_user=choice.target_id,
+                target_ids=(choice.target_id,),
+                payload={
+                    "reason": reason,
+                    "source_zone": _zone_id(source),
+                    "window_id": choice.window_id,
+                },
+            ),
+        ]
+        if source.kind is ZoneKind.EQUIPMENT:
+            if source.equipment_slot == "armor":
+                next_state, recovery_events = self._apply_armor_leave_recovery(
+                    next_state,
+                    instance_id=instance_id,
+                    owner_id=choice.target_id,
+                    reason=reason,
+                )
+                events.extend(recovery_events)
+        self._events.extend(tuple(events))
+        runtime = self._runtime
+        next_state, next_runtime = self._resume_slash_after_cixiong(
+            next_state, replace(runtime, pending_cixiong_choice=None)
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def _resume_slash_after_cixiong(
+        self, state: GameState, runtime: _BatchRuntime
+    ) -> tuple[GameState, _BatchRuntime]:
+        """关闭雌雄窗口后，以最新状态进入既有防具／【杀】响应核心。"""
+
+        pending = runtime.pending_slash
+        if pending is None:
+            raise ProductionBatchError("关闭雌雄双股剑窗口时缺少挂起【杀】")
+        if runtime.pending_cixiong_choice is not None:
+            raise ProductionBatchError("雌雄双股剑窗口尚未清理，不能恢复【杀】")
+        slash = self._slash_card(state, runtime, pending.slash_instance_id)
+        adapter = self._formal_registry.adapter_for(slash.card_key)
+        if not isinstance(adapter, SlashAdapter):
+            raise ProductionBatchError("雌雄双股剑根必须由【杀】生产适配器结算")
+        invalidation = None
+        if not pending.fire_converted:
+            invalidation = armor_invalidates_effect(
+                state,
+                victim_id=pending.target_id,
+                card_instance_id=pending.slash_instance_id,
+                card_key=slash.card_key,
+                ignore_armor=pending.ignore_armor,
+                card_color=slash.color if pending.virtual else None,
+            )
+        if invalidation is not None:
+            invalid_reason, armor_id = invalidation
+            next_state, finish_event = self._finish_slash_processing(
+                state,
+                runtime,
+                pending.slash_instance_id,
+                f"slash_invalidated_by_{invalid_reason}",
+            )
+            payload: dict[str, object] = {
+                "reason": invalid_reason,
+                "armor_instance_id": armor_id,
+                "armor_key": _card_key(state, armor_id),
+                "invalidated_by_armor": True,
+                "after_cixiong_choice": True,
+            }
+            if runtime.pending_borrowed_sword is not None:
+                payload["forced_use_context"] = "borrowed_sword"
+            cancelled_event = GameEvent(
+                event_type=EventType.CARD_EFFECT_CANCELLED,
+                card_instance_id=pending.slash_instance_id,
+                card_key=slash.card_key,
+                card_user=pending.attacker_id,
+                target_ids=(pending.target_id,),
+                payload=payload,
+            )
+            if finish_event is None:
+                self._events.extend((cancelled_event,))
+            else:
+                self._events.extend((cancelled_event, finish_event))
+            return self._complete_root_resolution(next_state, runtime)
+        return state, replace(
+            runtime,
+            phase=ProductionPhase.SLASH_RESPONSE,
+            response_window_id=(
+                f"slash:{runtime.turn_number}:{pending.slash_instance_id}"
+            ),
+            response_window_order=(pending.target_id,),
+            bagua_attempted=False,
+        )
 
     def apply_dodge(
         self,
@@ -6821,7 +7490,18 @@ class ProductionBasicCardBatch:
             raise InvalidActionError(
                 f"卡牌{choice.trick_key!r}尚未实现目标区域选牌结算"
             )
-        self._commit_runtime(runtime, self._return_to_play(runtime))
+        next_runtime = self._return_to_play(runtime)
+        if zone.kind is ZoneKind.JUDGMENT:
+            # 区域锦囊已经把该实体移出判定区；同步移除延时锦囊的
+            # 服务器判定顺序元数据，避免下一次判定阶段把合法的区域
+            # 移动误报为残留索引。实体移动与元数据提交保持原子。
+            next_runtime = replace(
+                next_runtime,
+                judgment_entry_indices=self._without_judgment_index(
+                    runtime, instance_id
+                ),
+            )
+        self._commit_runtime(runtime, next_runtime)
         return next_state
 
     def _discard_target_zone_card(
@@ -8302,26 +8982,10 @@ class ProductionBasicCardBatch:
         next_state = state
         events: list[GameEvent] = []
         if not next_state.card_ids_in(DRAW_PILE):
-            discard_ids = list(next_state.card_ids_in(DISCARD_PILE))
-            self._rng.shuffle(discard_ids)
-            sources = {
-                instance_id: next_state.location_of(instance_id)
-                for instance_id in discard_ids
-            }
-            next_state = next_state.reorder_zone(DRAW_PILE, tuple(discard_ids))
-            events.extend(
-                GameEvent(
-                    event_type=EventType.CARD_MOVED,
-                    card_instance_id=instance_id,
-                    card_key=_card_key(next_state, instance_id),
-                    payload={
-                        "source": _zone_payload(sources[instance_id]),
-                        "destination": _zone_payload(DRAW_PILE),
-                        "reason": "reshuffle",
-                    },
-                )
-                for instance_id in discard_ids
+            next_state, reshuffle_events = self._reshuffle_discard_into_draw(
+                next_state
             )
+            events.extend(reshuffle_events)
         judge_id = next_state.card_ids_in(DRAW_PILE)[0]
         if judge_id == armor_id:
             raise ProductionBatchError(
@@ -8369,6 +9033,7 @@ class ProductionBasicCardBatch:
         )
         next_state = next_state.move_card(judge_id, DISCARD_PILE)
         return next_state, (
+            *events,
             take_event,
             reveal_event,
             resolve_event,
@@ -8517,6 +9182,22 @@ class ProductionBasicCardBatch:
             for instance_id in hand_ids
             if state.cards_by_id[instance_id].card_key in SLASH_CARD_KEYS
         ]
+        # 丈八蛇矛能够在“要求使用【杀】”的借刀窗口把两张手牌转化为杀。
+        # 即使当前没有实体【杀】，只要材料数量足够，就不能错误走“无合法
+        # 杀→交出武器”。在 subcard 生命周期规则缺口关闭并接入 typed
+        # virtual-card 动作前，这一可扩展状态必须与其他丈八入口一致失败关闭。
+        if (
+            not slash_candidates
+            and equipped_weapon_key(state, first_target)
+            == "sgs_weapon_zhangbashemao"
+            and len(hand_ids) >= 2
+        ):
+            check_weapon_skill_gate(
+                state,
+                actor_id=first_target,
+                decision="forced_slash",
+                target_id=second_target,
+            )
         if not slash_candidates:
             return self._borrowed_sword_weapon_gain(
                 state, runtime, decision="no_legal_slash"
@@ -8823,6 +9504,43 @@ class ProductionBasicCardBatch:
         # 第二目标距离口径一致）。
         equipped_weapon = equipped_weapon_key(state, attacker_id)
         ignore_armor = equipped_weapon == "sgs_weapon_qinggangjian"
+        pending_slash = _PendingSlash(
+            attacker_id,
+            target_id,
+            slash_instance_id,
+            boosted,
+            ignore_armor=ignore_armor,
+            fire_converted=fire_converted,
+        )
+        borrowed_resolving = replace(
+            pending,
+            stage="slash_resolving",
+            chosen_slash_instance_id=slash_instance_id,
+            decision="use_slash",
+            requirement_fulfilled=True,
+        )
+        if (
+            equipped_weapon == "sgs_weapon_cixiongshuanggujian"
+            and is_cixiong_opposite_gender_target(
+                state, actor_id=attacker_id, target_id=target_id
+            )
+        ):
+            # 借刀只是外层根；雌雄双股剑仍接入同一强制【杀】子结算。
+            # 根状态保持 slash_resolving，窗口关闭后由统一根出口恢复。
+            base_runtime = replace(
+                runtime,
+                slash_used_counts=MappingProxyType(next_counts),
+                wine_buff_owner_id=None,
+                pending_slash=pending_slash,
+                pending_borrowed_sword=borrowed_resolving,
+                borrowed_sword_slash_handles=MappingProxyType({}),
+                borrowed_sword_slash_snapshot_digest=None,
+                response_window_source_sequence=used_sequence,
+                bagua_attempted=False,
+            )
+            return next_state, self._enter_cixiong_activation(
+                next_state, base_runtime
+            )
         # CP-04P 朱雀羽扇×借刀：转火杀按火【杀】身份结算——从使用入口
         # 开始，藤甲普通杀免疫等无效化检查按转化后的身份处理（转换后
         # 不再被藤甲免疫；未转换的普通杀仍按普通杀身份接受无效化检查）。
@@ -8861,13 +9579,7 @@ class ProductionBasicCardBatch:
                     slash_used_counts=MappingProxyType(next_counts),
                     wine_buff_owner_id=None,
                     pending_slash=None,
-                    pending_borrowed_sword=replace(
-                        pending,
-                        stage="slash_resolving",
-                        chosen_slash_instance_id=slash_instance_id,
-                        decision="use_slash",
-                        requirement_fulfilled=True,
-                    ),
+                    pending_borrowed_sword=borrowed_resolving,
                     borrowed_sword_slash_handles=MappingProxyType({}),
                     borrowed_sword_slash_snapshot_digest=None,
                 )
@@ -8880,21 +9592,8 @@ class ProductionBasicCardBatch:
             phase=ProductionPhase.SLASH_RESPONSE,
             slash_used_counts=MappingProxyType(next_counts),
             wine_buff_owner_id=None,
-            pending_slash=_PendingSlash(
-                attacker_id,
-                target_id,
-                slash_instance_id,
-                boosted,
-                ignore_armor=ignore_armor,
-                fire_converted=fire_converted,
-            ),
-            pending_borrowed_sword=replace(
-                pending,
-                stage="slash_resolving",
-                chosen_slash_instance_id=slash_instance_id,
-                decision="use_slash",
-                requirement_fulfilled=True,
-            ),
+            pending_slash=pending_slash,
+            pending_borrowed_sword=borrowed_resolving,
             borrowed_sword_slash_handles=MappingProxyType({}),
             borrowed_sword_slash_snapshot_digest=None,
             response_window_id=(
@@ -9615,28 +10314,10 @@ class ProductionBasicCardBatch:
         events: list[GameEvent] = []
         for pool_index in range(count):
             if not next_state.card_ids_in(DRAW_PILE):
-                discard_ids = list(next_state.card_ids_in(DISCARD_PILE))
-                self._rng.shuffle(discard_ids)
-                sources = {
-                    instance_id: next_state.location_of(instance_id)
-                    for instance_id in discard_ids
-                }
-                next_state = next_state.move_cards(
-                    {instance_id: DRAW_PILE for instance_id in discard_ids}
+                next_state, reshuffle_events = self._reshuffle_discard_into_draw(
+                    next_state
                 )
-                events.extend(
-                    GameEvent(
-                        event_type=EventType.CARD_MOVED,
-                        card_instance_id=instance_id,
-                        card_key=_card_key(next_state, instance_id),
-                        payload={
-                            "source": _zone_payload(sources[instance_id]),
-                            "destination": _zone_payload(DRAW_PILE),
-                            "reason": "reshuffle",
-                        },
-                    )
-                    for instance_id in discard_ids
-                )
+                events.extend(reshuffle_events)
             instance_id = next_state.card_ids_in(DRAW_PILE)[0]
             source = next_state.location_of(instance_id)
             next_state = next_state.move_card(instance_id, REVEALED_ZONE)
@@ -11273,6 +11954,7 @@ class ProductionBasicCardBatch:
             discard_phase_selected_ids=(),
             discard_phase_handles=MappingProxyType({}),
             discard_phase_snapshot_digest=None,
+            pending_cixiong_choice=None,
             pending_weapon_choice=None,
             pending_slash_choice=None,
             pending_discard_two=None,
@@ -11723,26 +12405,10 @@ class ProductionBasicCardBatch:
         _assert_deck_available(state, 1, "判定需要1张牌")
         next_state = state
         if not next_state.card_ids_in(DRAW_PILE):
-            discard_ids = list(next_state.card_ids_in(DISCARD_PILE))
-            self._rng.shuffle(discard_ids)
-            sources = {
-                instance_id: next_state.location_of(instance_id)
-                for instance_id in discard_ids
-            }
-            next_state = next_state.reorder_zone(DRAW_PILE, tuple(discard_ids))
-            self._events.extend(
-                GameEvent(
-                    event_type=EventType.CARD_MOVED,
-                    card_instance_id=instance_id,
-                    card_key=_card_key(next_state, instance_id),
-                    payload={
-                        "source": _zone_payload(sources[instance_id]),
-                        "destination": _zone_payload(DRAW_PILE),
-                        "reason": "reshuffle",
-                    },
-                )
-                for instance_id in discard_ids
+            next_state, reshuffle_events = self._reshuffle_discard_into_draw(
+                next_state
             )
+            self._events.extend(reshuffle_events)
         judge_id = next_state.card_ids_in(DRAW_PILE)[0]
         judge_card = next_state.cards_by_id[judge_id]
         take_event = GameEvent(
@@ -12432,6 +13098,7 @@ class ProductionBasicCardBatch:
             discard_phase_selected_ids=(),
             discard_phase_handles=MappingProxyType({}),
             discard_phase_snapshot_digest=None,
+            pending_cixiong_choice=None,
             pending_weapon_choice=None,
         )
         self._commit_runtime(runtime, next_runtime)
@@ -12492,6 +13159,7 @@ class ProductionBasicCardBatch:
             discard_phase_selected_ids=(),
             discard_phase_handles=MappingProxyType({}),
             discard_phase_snapshot_digest=None,
+            pending_cixiong_choice=None,
             pending_weapon_choice=None,
         )
         self._commit_runtime(runtime, next_runtime)
@@ -12567,6 +13235,47 @@ class ProductionBasicCardBatch:
         )
         return finished_state, (enter_event, leave_event)
 
+    def _reshuffle_discard_into_draw(
+        self, state: GameState
+    ) -> tuple[GameState, tuple[GameEvent, ...]]:
+        """把整个弃牌堆以同一确定性随机流洗入空牌堆。
+
+        摸牌、展示、普通判定与八卦判定必须复用这一事务。它先随机化实体
+        顺序，再用 ``move_cards`` 真正改变每张牌的位置归属；仅调用
+        ``reorder_zone`` 不能把弃牌堆实体移入牌堆，会违反 GameState 的
+        位置／顺序一致性。调用方应先完成牌量原子预检。
+        """
+
+        if state.card_ids_in(DRAW_PILE):
+            raise ProductionBatchError("只有牌堆为空时才能把弃牌堆重洗入牌堆")
+        discard_ids = list(state.card_ids_in(DISCARD_PILE))
+        if not discard_ids:
+            raise ProductionBatchDeckExhaustedError(
+                "牌堆与弃牌堆均为空，无法执行重洗"
+            )
+        self._rng.shuffle(discard_ids)
+        sources = {
+            instance_id: state.location_of(instance_id)
+            for instance_id in discard_ids
+        }
+        next_state = state.move_cards(
+            {instance_id: DRAW_PILE for instance_id in discard_ids}
+        )
+        events = tuple(
+            GameEvent(
+                event_type=EventType.CARD_MOVED,
+                card_instance_id=instance_id,
+                card_key=_card_key(next_state, instance_id),
+                payload={
+                    "source": _zone_payload(sources[instance_id]),
+                    "destination": _zone_payload(DRAW_PILE),
+                    "reason": "reshuffle",
+                },
+            )
+            for instance_id in discard_ids
+        )
+        return next_state, events
+
     def _draw_cards(
         self,
         state: GameState,
@@ -12580,28 +13289,10 @@ class ProductionBasicCardBatch:
         events: list[GameEvent] = []
         for _ in range(count):
             if not next_state.card_ids_in(DRAW_PILE):
-                discard_ids = list(next_state.card_ids_in(DISCARD_PILE))
-                self._rng.shuffle(discard_ids)
-                sources = {
-                    instance_id: next_state.location_of(instance_id)
-                    for instance_id in discard_ids
-                }
-                next_state = next_state.move_cards(
-                    {instance_id: DRAW_PILE for instance_id in discard_ids}
+                next_state, reshuffle_events = self._reshuffle_discard_into_draw(
+                    next_state
                 )
-                events.extend(
-                    GameEvent(
-                        event_type=EventType.CARD_MOVED,
-                        card_instance_id=instance_id,
-                        card_key=_card_key(next_state, instance_id),
-                        payload={
-                            "source": _zone_payload(sources[instance_id]),
-                            "destination": _zone_payload(DRAW_PILE),
-                            "reason": "reshuffle",
-                        },
-                    )
-                    for instance_id in discard_ids
-                )
+                events.extend(reshuffle_events)
             instance_id = next_state.card_ids_in(DRAW_PILE)[0]
             source = next_state.location_of(instance_id)
             next_state = next_state.move_card(
@@ -12635,6 +13326,7 @@ class ProductionBasicCardBatch:
 
 __all__ = [
     "BATCH_PHASES",
+    "FORMAL_NO_SKILL_DUEL_MODE",
     "PRODUCTION_BASIC_CARDS_MODE",
     "BatchActionIdController",
     "BatchPhaseEntry",

@@ -833,7 +833,7 @@ def test_mount_replay_tamper_fails_closed(
             == "equipment"
         )
     ]
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(
         (ProductionReplayFormatError, ProductionReplayDivergenceError)
     ):

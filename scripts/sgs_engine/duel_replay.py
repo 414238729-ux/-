@@ -114,6 +114,11 @@ def _action_value(action: LegalAction) -> dict[str, object]:
             "action_type": action.action_type.value,
             "actor_id": action.actor_id,
             "card_instance_id": action.card_instance_id,
+            "virtual_card": (
+                None
+                if action.virtual_card is None
+                else action.virtual_card.to_dict()
+            ),
             "target_ids": action.target_ids,
             "skill_id": action.skill_id,
             "payload": action.payload,

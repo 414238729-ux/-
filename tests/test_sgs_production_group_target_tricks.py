@@ -1362,11 +1362,10 @@ def test_taoyuan_cannot_be_used_without_any_wounded_target() -> None:
     )
     _move_to_hand(game, trick_id, "p1")
     action = _action(game, "use_taoyuan", card_key=TAOYUAN)
-    assert action is not None
+    assert action is None
     context = game._context()
     adapter = game.formal_registry.adapter_for(TAOYUAN)
-    with pytest.raises(InvalidActionError):
-        adapter.apply_action(game.state, context, action)
+    assert adapter.enumerate_legal_actions(game.state, context) == ()
 
 
 def test_taoyuan_each_wounded_target_recovers_one() -> None:
@@ -1662,7 +1661,7 @@ def test_taoyuan_replay_reexecutes(taoyuan_replay_record: ProductionReexecutionR
 
 def _load_tampered(record: ProductionReexecutionReplay) -> dict[str, object]:
     tampered = copy.deepcopy(record.to_dict())
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     return tampered
 
 

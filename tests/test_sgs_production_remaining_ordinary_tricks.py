@@ -320,7 +320,7 @@ class _TrickReplayController(ScriptedBatchController):
 
 def _load_tampered(record: ProductionReexecutionReplay) -> dict[str, object]:
     tampered = copy.deepcopy(record.to_dict())
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     return tampered
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 
 import pytest
 
@@ -13,6 +14,7 @@ from scripts.sgs_engine.actions import (
     RuleRegistrationError,
     RuleRegistry,
     UnsupportedRuleError,
+    VirtualCardReference,
     apply_action,
     enumerate_legal_actions,
     validate_action,
@@ -20,6 +22,8 @@ from scripts.sgs_engine.actions import (
 from scripts.sgs_engine.model import (
     DISCARD_PILE,
     CardInstance,
+    CharacterGender,
+    CharacterMetadata,
     GameState,
     PlayerState,
     ZoneRef,
@@ -126,6 +130,65 @@ class InvalidAuditStateAdapter(DiscardAdapter):
         return ["not", "a", "mapping"]
 
 
+class SecretHandleOrderedAdapter(DiscardAdapter):
+    """模拟生产隐藏区句柄，但proposal语义顺序固定。"""
+
+    def __init__(self, session_secret: bytes):
+        self.session_secret = session_secret
+
+    @property
+    def adapter_version(self):
+        return "tests.secret-handle-order.v1"
+
+    def enumerate_legal_actions(self, state, context):
+        del state
+        return tuple(
+            LegalAction(
+                action_type=ActionType.CHOOSE_OPTION,
+                actor_id=context.actor_id,
+                payload={
+                    "operation": f"choose_{index}",
+                    "handle": hashlib.sha256(
+                        self.session_secret + bytes((index,))
+                    ).hexdigest(),
+                },
+            )
+            for index in range(4)
+        )
+
+    def apply_action(self, state, context, action):
+        del context, action
+        return state
+
+
+class VirtualCardAdapter(DiscardAdapter):
+    def __init__(self, material_id="c1"):
+        self.material_id = material_id
+
+    @property
+    def adapter_version(self):
+        return "tests.virtual-card-reference.v1"
+
+    def enumerate_legal_actions(self, state, context):
+        del state
+        return (
+            LegalAction(
+                action_type=ActionType.USE_CARD,
+                actor_id=context.actor_id,
+                virtual_card=VirtualCardReference(
+                    card_key="slash",
+                    conversion_rule_id="tests.virtual-slash.v1",
+                    material_card_instance_ids=(self.material_id,),
+                ),
+                target_ids=("p2",),
+            ),
+        )
+
+    def apply_action(self, state, context, action):
+        del context, action
+        return state
+
+
 def _registry(adapter=None):
     registry = RuleRegistry()
     registry.register("duel", "play", adapter or DiscardAdapter())
@@ -156,6 +219,116 @@ def test_real_game_state_action_moves_card_and_is_stable():
 
     with pytest.raises(InvalidActionError, match="最新合法动作集合"):
         apply_action(updated, _context(), first[0], registry)
+
+
+def test_bound_actions_preserve_adapter_order_across_many_session_secrets():
+    state = _state()
+    expected = tuple(f"choose_{index}" for index in range(4))
+    issued_id_orders: set[tuple[str | None, ...]] = set()
+
+    for secret_index in range(32):
+        secret = hashlib.sha256(
+            f"session-secret-{secret_index}".encode("ascii")
+        ).digest()
+        actions = enumerate_legal_actions(
+            state,
+            _context(),
+            _registry(SecretHandleOrderedAdapter(secret)),
+        )
+        assert tuple(
+            action.payload.get("operation") for action in actions
+        ) == expected
+        issued_id_orders.add(tuple(action.action_id for action in actions))
+
+    # 句柄与签发ID确实随秘密变化，但不得再改变adapter权威proposal顺序。
+    assert len(issued_id_orders) == 32
+
+
+def test_virtual_card_reference_is_typed_bound_and_material_validated():
+    state = _state()
+    registry = _registry(VirtualCardAdapter())
+
+    issued = enumerate_legal_actions(state, _context(), registry)[0]
+
+    assert issued.card_instance_id is None
+    assert issued.virtual_card == VirtualCardReference(
+        card_key="slash",
+        conversion_rule_id="tests.virtual-slash.v1",
+        material_card_instance_ids=("c1",),
+    )
+    assert issued.virtual_card.to_dict() == {
+        "card_key": "slash",
+        "conversion_rule_id": "tests.virtual-slash.v1",
+        "material_card_instance_ids": ["c1"],
+    }
+    assert apply_action(state, _context(), issued, registry) == state
+
+    forged = replace(
+        issued,
+        virtual_card=VirtualCardReference(
+            card_key="slash",
+            conversion_rule_id="tests.forged-conversion.v1",
+            material_card_instance_ids=("c1",),
+        ),
+    )
+    with pytest.raises(InvalidActionError, match="伪造动作"):
+        validate_action(state, _context(), forged, registry)
+
+    with pytest.raises(InvalidActionError, match="不存在的材料实体牌"):
+        enumerate_legal_actions(
+            state,
+            _context(),
+            _registry(VirtualCardAdapter("missing")),
+        )
+
+
+def test_virtual_card_reference_cannot_masquerade_as_physical_instance():
+    reference = VirtualCardReference(
+        card_key="slash",
+        conversion_rule_id="tests.virtual-slash.v1",
+        material_card_instance_ids=("c1",),
+    )
+    with pytest.raises(ValueError, match="同时引用实体牌和虚拟牌"):
+        LegalAction(
+            action_type=ActionType.USE_CARD,
+            actor_id="p1",
+            card_instance_id="virtual:forged",
+            virtual_card=reference,
+        )
+    with pytest.raises(ValueError, match="不能重复"):
+        VirtualCardReference(
+            card_key="slash",
+            conversion_rule_id="tests.virtual-slash.v1",
+            material_card_instance_ids=("c1", "c1"),
+        )
+
+
+def test_action_id_binds_character_and_gender_metadata():
+    state = _state()
+    player = state.players_by_id["p1"]
+    with_character = replace(
+        state,
+        players=tuple(
+            replace(
+                item,
+                character=CharacterMetadata(
+                    character_key="general_test",
+                    gender=CharacterGender.MALE,
+                ),
+            )
+            if item.player_id == player.player_id
+            else item
+            for item in state.players
+        ),
+    )
+    registry = _registry()
+
+    before = enumerate_legal_actions(state, _context(), registry)[0]
+    after = enumerate_legal_actions(with_character, _context(), registry)[0]
+
+    assert before.action_id != after.action_id
+    with pytest.raises(InvalidActionError, match="最新合法动作集合"):
+        validate_action(with_character, _context(), before, registry)
 
 
 def test_validate_action_is_explicit_and_has_no_side_effects():

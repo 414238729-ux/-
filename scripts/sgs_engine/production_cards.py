@@ -143,7 +143,9 @@ WEAPON_SKILL_STATUS: Mapping[str, str] = MappingProxyType(
         # 寒冰剑：区域通则已由基础术语第12节（当前确认）给出（“牌”=手牌区+
         # 装备区，不含判定区）；伤害前防止与弃目标2张牌的状态机已在本批实现。
         "sgs_weapon_hanbingjian": "COMPLETE",
-        "sgs_weapon_cixiongshuanggujian": "PARTIAL",
+        # 雌雄双股剑：通用角色性别元数据与“发动／放弃→目标摸牌或弃置”
+        # 生产状态机均已接入；模式仍须显式装配权威性别，缺失时失败关闭。
+        "sgs_weapon_cixiongshuanggujian": "COMPLETE",
         "sgs_weapon_gudingdao": "COMPLETE",
         # 青龙偃月刀：被【闪】响应后可继续对该目标使用【杀】（7.6），
         # 生产语义已实现。
@@ -433,6 +435,34 @@ _WEAPON_GATE_DECISIONS: frozenset[str] = frozenset(
 )
 
 
+def is_cixiong_opposite_gender_target(
+    state: GameState, *, actor_id: str, target_id: str
+) -> bool:
+    """返回雌雄双股剑目标是否与持有者异性；未知资料严格失败关闭。
+
+    性别只能来自 ``PlayerState.character.gender`` 的权威角色元数据。此函数
+    不从玩家ID、座次、身份或模式名称推断，也不把缺失资料静默当作同性。
+    """
+
+    actor = state.players_by_id.get(actor_id)
+    target = state.players_by_id.get(target_id)
+    if actor is None or target is None:
+        raise UnsupportedRuleError(
+            "雌雄双股剑性别判定引用了不存在的角色，失败关闭"
+        )
+    if (
+        actor.character is None
+        or target.character is None
+        or actor.character.gender is None
+        or target.character.gender is None
+    ):
+        raise UnsupportedRuleError(
+            "雌雄双股剑技能需要性别判定；正式模式尚未装配权威角色性别"
+            "元数据（CHARACTER_GENDER_METADATA_NOT_AVAILABLE），失败关闭"
+        )
+    return actor.character.gender != target.character.gender
+
+
 def check_weapon_skill_gate(
     state: GameState,
     *,
@@ -444,10 +474,10 @@ def check_weapon_skill_gate(
 ) -> None:
     """集中式武器技能影响门禁（CP-04K）。
 
-    11种武器中8种（诸葛连弩、青釭剑、寒冰剑、古锭刀、青龙偃月刀、贯石斧、
-    朱雀羽扇、麒麟弓）已在双人生产入口实现完整生产语义并计入 COMPLETE；
-    3种保持 PARTIAL（雌雄双股剑：CHARACTER_GENDER_METADATA_NOT_AVAILABLE；
-    丈八蛇矛：VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP；方天画戟：
+    11种武器中9种（诸葛连弩、青釭剑、寒冰剑、雌雄双股剑、古锭刀、
+    青龙偃月刀、贯石斧、朱雀羽扇、麒麟弓）已在双人生产入口实现完整生产
+    语义并计入 COMPLETE；2种保持 PARTIAL（丈八蛇矛：
+    VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP；方天画戟：
     MULTIPLAYER/MULTI_TARGET_INFRASTRUCTURE_GAP），本函数在首次需要作出
     相关判断前检查：若能以当前完整公开状态证明专属技能不可能影响本次
     合法性、可选动作或结算结果则直接返回；否则抛出 ``UnsupportedRuleError``
@@ -471,13 +501,26 @@ def check_weapon_skill_gate(
         raise UnsupportedRuleError(
             f"武器{weapon_key}未在武器技能影响矩阵中登记；失败关闭"
         )
+    if weapon_key == "sgs_weapon_cixiongshuanggujian":
+        # COMPLETE 不等于可以猜测触发条件。模式必须显式装配权威角色性别；
+        # 只有“使用杀指定目标”的触发点需要性别真值，后续闪／伤害阶段沿用
+        # 已建立的同一 pending Slash，不再从座次或当前装备反推。
+        if decision in ("use_slash", "forced_slash"):
+            if target_id is None:
+                raise UnsupportedRuleError(
+                    "雌雄双股剑触发判定缺少【杀】目标，失败关闭"
+                )
+            is_cixiong_opposite_gender_target(
+                state, actor_id=actor_id, target_id=target_id
+            )
+        return
     if weapon_key in _WEAPON_SKILL_COMPLETE_KEYS:
         # CP-04P：该武器技能已在双人生产入口实现完整生产语义，
         # 不再因技能未实现而失败关闭；技能效果由生产引擎在对应
         # 触发点真实结算：诸葛连弩次数豁免、青釭剑 ignore_armor 生命周期
         # （QINGGANG_LIFECYCLE_CONFIRMED）、寒冰剑防止伤害并弃目标2张、
-        # 古锭刀伤害+1、青龙偃月刀被闪后继续使用杀、贯石斧弃2张强制命中、
-        # 朱雀羽扇转火杀、麒麟弓弃坐骑；方天画戟双人目标集合不变。
+            # 雌雄双股剑异性目标选择、古锭刀伤害+1、青龙偃月刀被闪后继续
+            # 使用杀、贯石斧弃2张强制命中、朱雀羽扇转火杀、麒麟弓弃坐骑。
         return
 
     if weapon_key == "sgs_weapon_zhugeliannu":
@@ -500,20 +543,6 @@ def check_weapon_skill_gate(
     if weapon_key == "sgs_weapon_hanbingjian":
         # 寒冰剑已计入 _WEAPON_SKILL_COMPLETE_KEYS，本分支不可达；
         # 防止伤害＋弃目标手牌/装备至多2张由生产引擎在伤害前窗口真实结算。
-        return
-
-    if weapon_key == "sgs_weapon_cixiongshuanggujian":
-        # 技能：使用【杀】指定异性角色为目标时可令其选择。规则本身已知
-        # （异性=性别不同的两名角色），不是规则缺口；当前生产数据模型
-        # 没有权威武将性别来源（DATA_MODEL_GAP:
-        # CHARACTER_GENDER_METADATA_NOT_AVAILABLE）。PlayerState 没有性别
-        # 字段，缺少性别数据不能证明目标非异性，因此对另一角色使用
-        # 【杀】时一律失败关闭，不得当作白板武器。
-        if decision in ("use_slash", "forced_slash") and target_id is not None:
-            raise UnsupportedRuleError(
-                "雌雄双股剑技能需要性别判定；生产数据模型缺少权威武将性别元数据"
-                "（CHARACTER_GENDER_METADATA_NOT_AVAILABLE），无法证明目标非异性，失败关闭"
-            )
         return
 
     if weapon_key == "sgs_weapon_gudingdao":
@@ -2095,6 +2124,13 @@ class GroupTargetTrickAdapter(TrickCardAdapter):
         if session.phase.value == "play":
             if context.actor_id != session.current_player_id:
                 return ()
+            # 与 apply_group_trick_use 的服务器目标快照保持同一前置条件：
+            # 桃园结义在无人受伤时（以及其他群体锦囊确无合法目标时）
+            # 不能先签发一个随后必然被 apply 拒绝的“合法”动作。
+            if not session._group_target_sequence(
+                state, context.actor_id, self
+            ):
+                return ()
             actions: list[LegalAction] = []
             for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
                 card = state.cards_by_id[instance_id]
@@ -2408,9 +2444,10 @@ class WeaponCardAdapter(BasicCardAdapter):
 
     只实现牌本体：出牌阶段主动使用、武器进入weapon槽、同槽替换把旧武器
     原子移入弃牌堆、攻击范围按正式结构化CSV登记值动态计算、装备区公开。
-    武器专属技能状态以 ``WEAPON_SKILL_STATUS`` 为准：8种COMPLETE在双人生
-    产入口真实结算，3种PARTIAL（雌雄双股剑／丈八蛇矛／方天画戟）由
-    ``check_weapon_skill_gate`` 集中失败关闭，不近似为无效果。
+    武器专属技能状态以 ``WEAPON_SKILL_STATUS`` 为准：9种COMPLETE在双人生
+    产入口真实结算，2种PARTIAL（丈八蛇矛／方天画戟）由
+    ``check_weapon_skill_gate`` 集中失败关闭，不近似为无效果；雌雄双股剑
+    即使已COMPLETE，模式缺少权威性别元数据时仍失败关闭。
     """
 
     def __init__(
@@ -3136,6 +3173,7 @@ __all__ = [
     "effective_distance",
     "is_target_within_distance",
     "check_weapon_skill_gate",
+    "is_cixiong_opposite_gender_target",
     "weapon_attack_ranges",
     "has_target_zone_cards",
     "is_valid_shunshou_target",

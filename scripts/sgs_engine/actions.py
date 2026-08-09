@@ -123,6 +123,47 @@ class ActionContext:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class VirtualCardReference:
+    """服务器权威枚举的虚拟牌描述，不冒充实体 ``CardInstance``。
+
+    本类型只绑定转化后的卡牌键、稳定规则来源与真实材料实体集合；材料应
+    在何时离开原区域、是否进入处理区等生命周期由具体规则适配器决定，
+    不能从该数据结构反推。公共枚举器只验证材料实体存在且不重复。
+    """
+
+    card_key: str
+    conversion_rule_id: str
+    material_card_instance_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "card_key", _text(self.card_key, "虚拟牌卡牌键"))
+        object.__setattr__(
+            self,
+            "conversion_rule_id",
+            _text(self.conversion_rule_id, "虚拟牌转化规则ID"),
+        )
+        if isinstance(self.material_card_instance_ids, str):
+            raise TypeError("虚拟牌材料必须是实体牌ID序列")
+        try:
+            materials = tuple(self.material_card_instance_ids)
+        except TypeError as exc:
+            raise TypeError("虚拟牌材料必须是实体牌ID序列") from exc
+        normalized = tuple(_text(item, "虚拟牌材料实体ID") for item in materials)
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("虚拟牌材料实体ID不能重复")
+        object.__setattr__(self, "material_card_instance_ids", normalized)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "card_key": self.card_key,
+            "conversion_rule_id": self.conversion_rule_id,
+            "material_card_instance_ids": list(
+                self.material_card_instance_ids
+            ),
+        }
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class LegalAction:
     """A proposed or enumerated legal action.
 
@@ -133,6 +174,7 @@ class LegalAction:
     action_type: ActionType
     actor_id: str
     card_instance_id: str | None = None
+    virtual_card: VirtualCardReference | None = None
     target_ids: tuple[str, ...] = ()
     skill_id: str | None = None
     payload: Mapping[str, object] = field(default_factory=dict)
@@ -148,6 +190,12 @@ class LegalAction:
                 "card_instance_id",
                 _text(self.card_instance_id, "实体牌ID"),
             )
+        if self.virtual_card is not None and not isinstance(
+            self.virtual_card, VirtualCardReference
+        ):
+            raise TypeError("virtual_card必须是VirtualCardReference或None")
+        if self.card_instance_id is not None and self.virtual_card is not None:
+            raise ValueError("动作不能同时引用实体牌和虚拟牌")
         if self.skill_id is not None:
             object.__setattr__(self, "skill_id", _text(self.skill_id, "技能ID"))
         if isinstance(self.target_ids, str):
@@ -336,6 +384,19 @@ def _state_fingerprint(state: GameState) -> str:
                 "hp": player.hp,
                 "max_hp": player.max_hp,
                 "alive": player.alive,
+                "chained": player.chained,
+                "character": (
+                    None
+                    if player.character is None
+                    else {
+                        "character_key": player.character.character_key,
+                        "gender": (
+                            None
+                            if player.character.gender is None
+                            else player.character.gender.value
+                        ),
+                    }
+                ),
             }
             for player in sorted(state.players, key=lambda item: item.player_id)
         ],
@@ -387,6 +448,11 @@ def _action_value(action: LegalAction) -> dict[str, object]:
         "action_type": action.action_type.value,
         "actor_id": action.actor_id,
         "card_instance_id": action.card_instance_id,
+        "virtual_card": (
+            None
+            if action.virtual_card is None
+            else action.virtual_card.to_dict()
+        ),
         "target_ids": list(action.target_ids),
         "skill_id": action.skill_id,
         "payload": _jsonable(action.payload),
@@ -463,15 +529,21 @@ def enumerate_legal_actions(
             raise InvalidActionError("规则处理器不得自行签发action_id")
         if candidate.actor_id != context.actor_id:
             raise InvalidActionError("规则处理器返回了不属于当前行动角色的动作")
-        # CP-04P 丈八蛇矛的虚拟杀已因 VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP
-        # 保持 PARTIAL/fail-closed：撤回“virtual:”前缀的全局实体牌验证放行，
-        # 避免扩大其他已证明生产路径的安全面。待丈八规则缺口解决并与丈八
-        # 正式实现一起启用后再恢复（届时只放行服务器权威枚举的合法虚拟动作，
-        # 客户端不能仅通过构造任意 virtual:* 字符串绕过实体牌验证）。
         if candidate.card_instance_id is not None and candidate.card_instance_id not in cards:
             raise InvalidActionError(
                 f"规则处理器引用了不存在的实体牌{candidate.card_instance_id!r}"
             )
+        if candidate.virtual_card is not None:
+            unknown_materials = tuple(
+                instance_id
+                for instance_id in candidate.virtual_card.material_card_instance_ids
+                if instance_id not in cards
+            )
+            if unknown_materials:
+                raise InvalidActionError(
+                    "规则处理器的虚拟牌引用了不存在的材料实体牌："
+                    + "、".join(repr(item) for item in unknown_materials)
+                )
         unknown_targets = [target for target in candidate.target_ids if target not in players]
         if unknown_targets:
             raise InvalidActionError(f"规则处理器引用了不存在的目标{unknown_targets!r}")
@@ -488,7 +560,12 @@ def enumerate_legal_actions(
             raise InvalidActionError("规则处理器返回了语义重复的合法动作")
         seen_ids.add(action_id)
         bound.append(replace(candidate, action_id=action_id))
-    return tuple(sorted(bound, key=lambda item: item.action_id or ""))
+    # ``action_id``用于状态/上下文/规则绑定与防伪，不是规则或控制器的排序键。
+    # 隐藏区动作的payload含会话秘密派生句柄；若按action_id重排，同一状态的
+    # 语义候选顺序会随session_secret改变，继而让“按权威枚举顺序”决胜的
+    # 确定性控制器选择不同动作。保留adapter proposal顺序，同时仍为每项签发
+    # 完整绑定的action_id，并由validate_action重新枚举验证。
+    return tuple(bound)
 
 
 def apply_action(
@@ -550,6 +627,7 @@ __all__ = [
     "RuleRegistrationError",
     "RuleRegistry",
     "UnsupportedRuleError",
+    "VirtualCardReference",
     "apply_action",
     "enumerate_legal_actions",
     "validate_action",

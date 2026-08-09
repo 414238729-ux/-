@@ -521,6 +521,57 @@ def test_bagua_judgment_has_no_wuxie_window() -> None:
     assert not _events_of(game, EventType.PHASE_SKIPPED)
 
 
+def test_bagua_empty_draw_reshuffles_discard_and_continues_judgment() -> None:
+    game = _fresh(seed=3)
+    _equip_armor_fixture(game, BAGUA, _other(game))
+    _use_slash_on(game, BLACK_SHA_140, _other(game))
+    assert game.phase is ProductionPhase.SLASH_RESPONSE
+
+    # 构造牌堆为空、弃牌堆仍有真实实体的边界；与紧邻的彻底耗尽测试
+    # 共用同一生产响应路径，但本例必须统一重洗并继续完成判定。
+    _swap(game, RED_HEART_098, DISCARD_PILE)
+    draw_ids = tuple(game.state.card_ids_in(DRAW_PILE))
+    game._state = game.state.move_cards(
+        {instance_id: ZoneRef.hand(_me(game)) for instance_id in draw_ids}
+    )
+    discard_before = tuple(game.state.card_ids_in(DISCARD_PILE))
+    assert not game.state.card_ids_in(DRAW_PILE)
+    assert discard_before
+    event_count_before = len(game.events)
+
+    _step(game, _action(game, "activate_bagua"))
+
+    new_events = game.events[event_count_before:]
+    reshuffled = [
+        event
+        for event in new_events
+        if event.event_type is EventType.CARD_MOVED
+        and event.payload.get("reason") == "reshuffle"
+    ]
+    assert {event.card_instance_id for event in reshuffled} == set(
+        discard_before
+    )
+    assert all(
+        event.payload["source"]["kind"] == "discard_pile"
+        and event.payload["destination"]["kind"] == "draw_pile"
+        for event in reshuffled
+    )
+    take = [
+        event
+        for event in new_events
+        if event.event_type is EventType.CARD_MOVED
+        and event.payload.get("reason") == "bagua_judgment_take"
+    ]
+    assert len(take) == 1
+    assert take[0].card_instance_id in discard_before
+    assert any(
+        event.event_type is EventType.ARMOR_JUDGMENT_RESULT
+        for event in new_events
+    )
+    assert not game.state.card_ids_in(REVEALED_ZONE)
+    _assert_conservation(game)
+
+
 def test_bagua_deck_exhausted_atomic_failure() -> None:
     game = _fresh(seed=3)
     _equip_armor_fixture(game, BAGUA, _other(game))
@@ -1340,7 +1391,7 @@ def test_bagua_replay_tamper_fails_closed(
     result_event["payload"]["judgment_color"] = "黑"
     result_event["payload"]["success"] = False
     result_event["payload"]["virtual_response_kind"] = None
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(
         (ProductionReplayFormatError, ProductionReplayDivergenceError)
     ):

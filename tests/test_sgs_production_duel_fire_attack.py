@@ -1447,7 +1447,7 @@ def test_duel_replay_reexecutes_and_tampering_fails_closed() -> None:
         if event.get("event_type") == "damage"
     )
     damage_event["damage_source"] = "p2"
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(ProductionReplayFormatError):
         ProductionReexecutionReplay.from_dict(tampered)
 
@@ -1459,7 +1459,7 @@ def test_duel_replay_reexecutes_and_tampering_fails_closed() -> None:
         if event.get("event_type") == "damage"
     )
     damage_event["damage_type"] = "火属性"
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(ProductionReplayFormatError):
         ProductionReexecutionReplay.from_dict(tampered)
 
@@ -1473,7 +1473,7 @@ def test_duel_replay_reexecutes_and_tampering_fails_closed() -> None:
             and event.get("payload", {}).get("purpose") == "duel_slash_response"
         )
     ]
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(ProductionReplayFormatError):
         ProductionReexecutionReplay.from_dict(tampered)
 
@@ -1486,7 +1486,7 @@ def test_duel_replay_reexecutes_and_tampering_fails_closed() -> None:
         == "play_slash_for_duel"
     )
     slash_decision["chosen_action"]["payload"]["duel_round"] = 99
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     rebuilt = ProductionReexecutionReplay.from_dict(tampered)
     with pytest.raises(ProductionReplayDivergenceError):
         reexecute_production_replay(rebuilt)
@@ -1500,7 +1500,7 @@ def test_duel_replay_reexecutes_and_tampering_fails_closed() -> None:
         == "play_slash_for_duel"
     )
     slash_decision["chosen_action"]["payload"]["duel_response_index"] = 7
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     rebuilt = ProductionReexecutionReplay.from_dict(tampered)
     with pytest.raises(ProductionReplayDivergenceError):
         reexecute_production_replay(rebuilt)
@@ -1538,7 +1538,7 @@ def test_fire_attack_replay_reexecutes_and_tampering_fails_closed() -> None:
         if event.get("event_type") == "card_revealed"
     )
     reveal_event["card_instance_id"] = "sgs-mobile-forged"
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(ProductionReplayFormatError):
         ProductionReexecutionReplay.from_dict(tampered)
 
@@ -1549,7 +1549,7 @@ def test_fire_attack_replay_reexecutes_and_tampering_fails_closed() -> None:
         if event.get("event_type") == "card_revealed"
     )
     reveal_event["payload"]["suit"] = "♠"
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(ProductionReplayFormatError):
         ProductionReexecutionReplay.from_dict(tampered)
 
@@ -1561,7 +1561,7 @@ def test_fire_attack_replay_reexecutes_and_tampering_fails_closed() -> None:
         if event.get("event_type") == "card_revealed"
     )
     reveal_event["payload"]["revealed_by"] = "p1"
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(ProductionReplayFormatError):
         ProductionReexecutionReplay.from_dict(tampered)
 
@@ -1574,7 +1574,7 @@ def test_fire_attack_replay_reexecutes_and_tampering_fails_closed() -> None:
         == "reveal_card_for_fire_attack"
     )
     reveal_decision["chosen_action"]["payload"]["handle"] = "h_" + "0" * 32
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     rebuilt = ProductionReexecutionReplay.from_dict(tampered)
     with pytest.raises(ProductionReplayDivergenceError):
         reexecute_production_replay(rebuilt)
@@ -1588,7 +1588,7 @@ def test_fire_attack_replay_reexecutes_and_tampering_fails_closed() -> None:
         == "discard_same_suit_for_fire_attack"
     )
     discard_decision["chosen_action"]["payload"]["revealed_suit"] = "♠"
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     rebuilt = ProductionReexecutionReplay.from_dict(tampered)
     with pytest.raises(ProductionReplayDivergenceError):
         reexecute_production_replay(rebuilt)
@@ -1602,7 +1602,7 @@ def test_fire_attack_replay_reexecutes_and_tampering_fails_closed() -> None:
         == "discard_same_suit_for_fire_attack"
     )
     discard_decision["chosen_action"]["card_instance_id"] = "sgs-mobile-forged"
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     rebuilt = ProductionReexecutionReplay.from_dict(tampered)
     with pytest.raises(ProductionReplayDivergenceError):
         reexecute_production_replay(rebuilt)
@@ -1614,7 +1614,7 @@ def test_fire_attack_replay_reexecutes_and_tampering_fails_closed() -> None:
         for event in tampered["events"]
         if event.get("event_type") != "damage"
     ]
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(ProductionReplayFormatError):
         ProductionReexecutionReplay.from_dict(tampered)
 
@@ -1625,7 +1625,7 @@ def test_fire_attack_replay_reexecutes_and_tampering_fails_closed() -> None:
         if event.get("event_type") == "damage"
     )
     tampered["events"].append(copy.deepcopy(damage_event))
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(ProductionReplayFormatError):
         ProductionReexecutionReplay.from_dict(tampered)
 

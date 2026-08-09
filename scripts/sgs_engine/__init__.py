@@ -13,12 +13,14 @@ DISCARD／END）、正式弃牌阶段（手牌上限默认等于当前体力值�
 阶段）、判定牌生命周期、判定前无懈链和动态LIFO判定
 队列，以及四种防具（【八卦阵】、【仁王盾】、【藤甲】、【白银狮子】）与统一
 伤害修正／防止基础设施、两种坐骑与统一有效距离模型已接入生产注册表与权威
-核心调用路径；11种武器中8种完成正式生产语义（诸葛连弩、青釭剑、寒冰剑、
-古锭刀、青龙偃月刀、贯石斧、朱雀羽扇、麒麟弓），3种保持PARTIAL并按集中式
-门禁失败关闭（雌雄双股剑：CHARACTER_GENDER_METADATA_NOT_AVAILABLE；
-丈八蛇矛：VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP；方天画戟：
-MULTIPLAYER/MULTI_TARGET_INFRASTRUCTURE_GAP）；武将技能、改判、多人模式、
-AI 和正式整局仍未完成；调用
+核心调用路径；11种武器中9种完成通用生产语义（诸葛连弩、青釭剑、寒冰剑、
+古锭刀、青龙偃月刀、贯石斧、朱雀羽扇、麒麟弓、雌雄双股剑），2种保持
+全局PARTIAL并按集中式门禁失败关闭（丈八蛇矛：
+VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP；方天画戟：
+MULTIPLAYER/MULTI_TARGET_INFRASTRUCTURE_GAP）。通用 ``CharacterMetadata`` 与
+类型化 ``VirtualCardReference`` 已进入权威数据／动作模型；formal duel 的
+权威角色性别来源、丈八材料生命周期、武将技能、改判、多人模式、AI 和正式
+整局验收仍未完成；调用
 ``AuthoritativeCoreSession.run_game`` 会明确抛出 ``UnsupportedRuleError``。
 """
 
@@ -32,6 +34,7 @@ from .actions import (
     RuleRegistrationError,
     RuleRegistry,
     UnsupportedRuleError,
+    VirtualCardReference,
     apply_action,
     enumerate_legal_actions,
     validate_action,
@@ -85,6 +88,8 @@ from .model import (
     PROCESSING_ZONE,
     REMOVED_FROM_GAME,
     CardInstance,
+    CharacterGender,
+    CharacterMetadata,
     GameState,
     ModelValidationError,
     PlayerState,
@@ -106,6 +111,7 @@ from .replay import (
 from .rng import DeterministicRNG, RNGCall
 from .production_batch import (
     BATCH_PHASES,
+    FORMAL_NO_SKILL_DUEL_MODE,
     PRODUCTION_BASIC_CARDS_MODE,
     BatchActionIdController,
     BatchPhaseEntry,
@@ -166,8 +172,22 @@ from .production_replay import (
     ProductionReplayDivergenceError,
     ProductionReplayFormatError,
     ProductionReplayVerificationResult,
+    record_reference_formal_duel,
     record_reference_production_batch,
     reexecute_production_replay,
+)
+from .formal_duel import (
+    ALLOWED_RULE_STATUS,
+    FormalDuelBlocker,
+    FormalDuelCardStatus,
+    FormalDuelConfiguration,
+    FormalDuelConfigurationError,
+    FormalDuelReadiness,
+    FormalDuelReferenceController,
+    FormalDuelSeedResult,
+    FormalNoSkillDuelSession,
+    inspect_formal_duel_readiness,
+    run_formal_duel_seed_sweep,
 )
 
 
@@ -186,6 +206,8 @@ __all__ = [
     "ActionType",
     "AuthoritativeCoreSession",
     "CardInstance",
+    "CharacterGender",
+    "CharacterMetadata",
     "CoreSessionError",
     "DamageEvent",
     "DeckInitializationError",
@@ -202,6 +224,14 @@ __all__ = [
     "EventQueue",
     "EventType",
     "EventValidationError",
+    "FormalDuelBlocker",
+    "FormalDuelCardStatus",
+    "FormalDuelConfiguration",
+    "FormalDuelConfigurationError",
+    "FormalDuelReadiness",
+    "FormalDuelReferenceController",
+    "FormalDuelSeedResult",
+    "FormalNoSkillDuelSession",
     "GameEvent",
     "GameState",
     "InvalidActionError",
@@ -209,6 +239,7 @@ __all__ = [
     "ModelValidationError",
     "NOT_LOADED_HASH",
     "BATCH_PHASES",
+    "FORMAL_NO_SKILL_DUEL_MODE",
     "BasicCardAdapter",
     "BatchActionIdController",
     "BatchPhaseEntry",
@@ -268,6 +299,7 @@ __all__ = [
     "weapon_attack_ranges",
     "is_valid_slash_target",
     "record_reference_production_batch",
+    "record_reference_formal_duel",
     "reexecute_production_replay",
     "RNGCall",
     "REEXECUTION_SCHEMA",
@@ -287,6 +319,7 @@ __all__ = [
     "RuleRegistrationError",
     "RuleRegistry",
     "UnsupportedRuleError",
+    "VirtualCardReference",
     "TestOnlyDuelGame",
     "ZoneKind",
     "ZoneRef",
@@ -300,4 +333,7 @@ __all__ = [
     "state_sha256",
     "validate_action",
     "validate_event_contract",
+    "inspect_formal_duel_readiness",
+    "run_formal_duel_seed_sweep",
+    "ALLOWED_RULE_STATUS",
 ]

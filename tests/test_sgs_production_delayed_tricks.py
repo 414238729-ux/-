@@ -1133,6 +1133,62 @@ def test_lightning_death_cleanup_and_victory() -> None:
 # ----------------------------------------------------------------------
 
 
+def test_judgment_empty_draw_reshuffles_discard_and_continues() -> None:
+    game = _fresh(seed=3)
+    _swap(game, LEBUSI_098, ZoneRef.hand("p1"))
+    _use_delayed(game, "use_lebusi", LEBUSI, "p2")
+    _end_turn(game)
+    _to_judgment(game)
+    assert game.phase is ProductionPhase.JUDGMENT_WUXIE
+
+    # 牌堆为空但弃牌堆仍有真实实体时，不属于“彻底不足”：判定应经统一
+    # 重洗事务继续，而不是触发紧邻测试覆盖的原子失败分支。
+    _swap(game, SPADE_7_SHA, DISCARD_PILE)
+    draw_ids = tuple(game.state.card_ids_in(DRAW_PILE))
+    game._state = game.state.move_cards(
+        {instance_id: ZoneRef.hand("p1") for instance_id in draw_ids}
+    )
+    discard_before = tuple(game.state.card_ids_in(DISCARD_PILE))
+    assert not game.state.card_ids_in(DRAW_PILE)
+    assert discard_before
+    event_count_before = len(game.events)
+
+    _close_judgment_wuxie(game)
+
+    new_events = game.events[event_count_before:]
+    reshuffled = [
+        event
+        for event in new_events
+        if event.event_type is EventType.CARD_MOVED
+        and event.payload.get("reason") == "reshuffle"
+    ]
+    assert {event.card_instance_id for event in reshuffled} == set(
+        discard_before
+    )
+    assert all(
+        event.payload["source"]["kind"] == "discard_pile"
+        and event.payload["destination"]["kind"] == "draw_pile"
+        for event in reshuffled
+    )
+    take = [
+        event
+        for event in new_events
+        if event.event_type is EventType.CARD_MOVED
+        and event.payload.get("reason") == "judgment_take"
+    ]
+    assert len(take) == 1
+    assert take[0].card_instance_id in discard_before
+    results = [
+        event
+        for event in new_events
+        if event.event_type is EventType.JUDGMENT_RESULT
+    ]
+    assert len(results) == 1
+    assert results[0].payload["judgment_card_instance_id"] in discard_before
+    assert not game.state.card_ids_in(REVEALED_ZONE)
+    _assert_conservation(game)
+
+
 def test_judgment_deck_exhausted_fails_atomically() -> None:
     game = _fresh(seed=3)
     _swap(game, SHANDIAN_117, ZoneRef.hand("p1"))
@@ -1247,7 +1303,7 @@ def test_replay_tamper_delayed_fields_fail_closed() -> None:
         if event.get("event_type") == "judgment_result"
     )
     result_event["payload"]["suit"] = "♥"
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(
         (ProductionReplayFormatError, ProductionReplayDivergenceError)
     ):
@@ -1264,7 +1320,7 @@ def test_replay_tamper_delayed_fields_fail_closed() -> None:
     )
     damage_event["damage_source"] = "p1"
     damage_event["damage_type"] = "火属性"
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(
         (ProductionReplayFormatError, ProductionReplayDivergenceError)
     ):
@@ -1280,7 +1336,7 @@ def test_replay_tamper_delayed_fields_fail_closed() -> None:
         if event.get("event_type") == "judgment_result"
     )
     tampered["events"].remove(target_event)
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(
         (ProductionReplayFormatError, ProductionReplayDivergenceError)
     ):
@@ -2172,7 +2228,7 @@ def test_replay_tamper_format_layer_rejected_at_from_dict() -> None:
         mutator: object,
     ) -> None:
         tampered = copy.deepcopy(source_record.to_dict())
-        del tampered["record_sha256"]
+        tampered["record_sha256"] = ""
         event = next(
             event
             for event in tampered["events"]
@@ -2238,7 +2294,7 @@ def test_replay_tamper_semantic_layer_reaches_reexecute() -> None:
         fixture: object,
     ) -> None:
         tampered = copy.deepcopy(source_record.to_dict())
-        del tampered["record_sha256"]
+        tampered["record_sha256"] = ""
         event = next(
             event
             for event in tampered["events"]
@@ -2261,7 +2317,7 @@ def test_replay_tamper_semantic_layer_reaches_reexecute() -> None:
         fixture: object,
     ) -> None:
         tampered = copy.deepcopy(source_record.to_dict())
-        del tampered["record_sha256"]
+        tampered["record_sha256"] = ""
         decision = next(
             decision
             for decision in tampered["decisions"]

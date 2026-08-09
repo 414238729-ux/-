@@ -79,6 +79,18 @@ def canonical_state_snapshot(state: GameState) -> dict[str, object]:
                 "max_hp": player.max_hp,
                 "alive": player.alive,
                 "chained": player.chained,
+                "character": (
+                    None
+                    if player.character is None
+                    else {
+                        "character_key": player.character.character_key,
+                        "gender": (
+                            None
+                            if player.character.gender is None
+                            else player.character.gender.value
+                        ),
+                    }
+                ),
             }
             for player in sorted(state.players, key=lambda item: item.seat)
         ],

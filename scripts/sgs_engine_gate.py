@@ -12,7 +12,14 @@ import hashlib
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
+
+from .sgs_engine.formal_duel import (
+    FormalDuelReadiness,
+    FormalDuelSeedResult,
+    inspect_formal_duel_readiness,
+)
+from .sgs_engine.production_batch import FORMAL_NO_SKILL_DUEL_MODE
 
 
 FORMAL_DECK_CARD_COUNT = 160
@@ -320,6 +327,15 @@ class GateIssueCode(Enum):
     NON_FORMAL_SOURCE = "non_formal_source"
     AUTHORITATIVE_CORE_NOT_USED = "authoritative_core_not_used"
     SOURCE_INSPECTION_FAILED = "source_inspection_failed"
+    FORMAL_DUEL_READINESS_INSPECTION_FAILED = (
+        "formal_duel_readiness_inspection_failed"
+    )
+    FORMAL_DUEL_MODE_ID_MISMATCH = "formal_duel_mode_id_mismatch"
+    FORMAL_DUEL_FACTORY_UNREACHABLE = "formal_duel_factory_unreachable"
+    ALL_CARDS_NOT_IMPLEMENTED = "all_cards_not_implemented"
+    REEXECUTION_REPLAY_NOT_SUPPORTED = "reexecution_replay_not_supported"
+    FIXED_SEED_ACCEPTANCE_NOT_PASSED = "fixed_seed_acceptance_not_passed"
+    FORMAL_DUEL_READINESS_BLOCKER = "formal_duel_readiness_blocker"
 
 
 @dataclass(frozen=True)
@@ -345,11 +361,298 @@ def _names(items: Iterable[GeneralReadiness]) -> str:
     return "、".join(item.general_name for item in items)
 
 
+def _canonical_formal_runner_source() -> EngineSourceReadiness:
+    """现场检查固定正式入口；精确正式单挑不信任 manifest 中的路径声明。"""
+
+    scripts_root = Path(__file__).resolve().parent
+    return inspect_engine_source(
+        repository_root=scripts_root.parent,
+        entrypoint_path=scripts_root / "sgs_formal_runner.py",
+    )
+
+
+def _add_source_issues(
+    source: EngineSourceReadiness,
+    add: Callable[[GateIssueCode, str], None],
+) -> None:
+    """把真实源码检查转换成门禁问题。"""
+
+    if not source.repository_root_exists:
+        add(
+            GateIssueCode.REPOSITORY_NOT_FOUND,
+            f"正式仓库根目录不存在：{source.repository_root}",
+        )
+    if not source.entrypoint_exists:
+        add(
+            GateIssueCode.ENTRYPOINT_NOT_FOUND,
+            f"模拟入口文件不存在：{source.entrypoint_path}",
+        )
+    if not source.entrypoint_inside_repository:
+        add(
+            GateIssueCode.ENTRYPOINT_OUTSIDE_REPOSITORY,
+            f"模拟入口位于正式仓库之外：{source.entrypoint_path}",
+        )
+    if source.source_kind is EngineSourceKind.LEGACY_APPROXIMATOR:
+        add(GateIssueCode.LEGACY_SOURCE, "legacy近似器不能生成正式胜率")
+    elif source.source_kind is not EngineSourceKind.FORMAL_RULE_CORE:
+        add(
+            GateIssueCode.NON_FORMAL_SOURCE,
+            "入口不是经源码核验的正式权威核心入口："
+            f"{source.source_kind.value}",
+        )
+    if not source.uses_authoritative_rule_core:
+        add(
+            GateIssueCode.AUTHORITATIVE_CORE_NOT_USED,
+            "入口源码未真实导入项目权威规则核心",
+        )
+    if source.inspection_issues:
+        add(
+            GateIssueCode.SOURCE_INSPECTION_FAILED,
+            "入口源码审计未通过：" + "；".join(source.inspection_issues),
+        )
+
+
+def _evaluate_live_formal_duel_gate(
+    manifest: FormalSimulationManifest,
+) -> FormalRunGateResult:
+    """精确正式单挑门禁：全部能力由 canonical inspector 现场派生。
+
+    ``manifest`` 只保留请求模式与来源快照的兼容载体。其 capability 布尔值、
+    数量、牌堆、武将和规则版本都不能授予正式准入资格。
+    """
+
+    issues: list[GateIssue] = []
+
+    def add(code: GateIssueCode, message: str) -> None:
+        issues.append(GateIssue(code, message))
+
+    try:
+        readiness = inspect_formal_duel_readiness()
+    except Exception as exc:
+        add(
+            GateIssueCode.FORMAL_DUEL_READINESS_INSPECTION_FAILED,
+            "正式单挑canonical readiness现场检查失败："
+            f"{type(exc).__name__}:{exc}",
+        )
+        readiness = None
+
+    if readiness is not None and not isinstance(readiness, FormalDuelReadiness):
+        add(
+            GateIssueCode.FORMAL_DUEL_READINESS_INSPECTION_FAILED,
+            "正式单挑canonical inspector返回了错误的结果类型",
+        )
+        readiness = None
+
+    if readiness is not None:
+        card_statuses = tuple(readiness.card_semantic_statuses)
+        duel_complete_statuses = tuple(
+            item
+            for item in card_statuses
+            if item.duel_status in {"COMPLETE", "NOT_APPLICABLE_TO_DUEL"}
+        )
+        derived_duel_complete_key_count = len(duel_complete_statuses)
+        derived_duel_complete_instance_count = sum(
+            item.instance_count for item in duel_complete_statuses
+        )
+        derived_all_cards = (
+            len(card_statuses) == readiness.registered_card_key_count
+            and len({item.card_key for item in card_statuses})
+            == readiness.registered_card_key_count
+            and sum(item.instance_count for item in card_statuses)
+            == readiness.registered_instance_count
+            and derived_duel_complete_key_count
+            == readiness.registered_card_key_count
+            and derived_duel_complete_instance_count
+            == readiness.registered_instance_count
+        )
+        derived_unsupported_rules = sum(
+            blocker.category == "RULE_SOURCE_GAP"
+            for blocker in readiness.blockers
+        )
+        if readiness.mode_id != FORMAL_NO_SKILL_DUEL_MODE:
+            add(
+                GateIssueCode.FORMAL_DUEL_MODE_ID_MISMATCH,
+                "现场就绪结果的模式ID不匹配："
+                f"{readiness.mode_id!r}",
+            )
+        if (
+            readiness.deck_count != FORMAL_DECK_CARD_COUNT
+            or readiness.registered_instance_count != FORMAL_DECK_CARD_COUNT
+        ):
+            add(
+                GateIssueCode.DECK_INCOMPLETE,
+                "现场正式牌堆或注册实例数不完整："
+                f"deck={readiness.deck_count}，"
+                f"registered={readiness.registered_instance_count}，"
+                f"固定预期={FORMAL_DECK_CARD_COUNT}",
+            )
+        if not readiness.mode_runtime_reachable:
+            add(
+                GateIssueCode.FORMAL_DUEL_FACTORY_UNREACHABLE,
+                "正式单挑不能从canonical factory到达统一生产核心",
+            )
+        if not readiness.mode_implemented:
+            add(
+                GateIssueCode.MODE_NOT_IMPLEMENTED,
+                f"模式“{FORMAL_NO_SKILL_DUEL_MODE}”尚未完整实现",
+            )
+        if not readiness.deterministic_controller_implemented:
+            add(
+                GateIssueCode.AI_NOT_IMPLEMENTED,
+                "正式单挑确定性验收控制器尚未实现",
+            )
+        if readiness.all_cards_implemented != derived_all_cards:
+            add(
+                GateIssueCode.FORMAL_DUEL_READINESS_INSPECTION_FAILED,
+                "all_cards_implemented与38类卡牌现场语义明细不一致",
+            )
+        if (
+            readiness.duel_complete_card_key_count
+            != derived_duel_complete_key_count
+            or readiness.duel_complete_instance_count
+            != derived_duel_complete_instance_count
+        ):
+            add(
+                GateIssueCode.FORMAL_DUEL_READINESS_INSPECTION_FAILED,
+                "duel complete卡牌／实例计数与现场语义明细不一致",
+            )
+        if not derived_all_cards:
+            add(
+                GateIssueCode.ALL_CARDS_NOT_IMPLEMENTED,
+                "正式单挑所需卡牌语义尚未全部实现",
+            )
+        if not readiness.reexecution_replay_supported:
+            add(
+                GateIssueCode.REEXECUTION_REPLAY_NOT_SUPPORTED,
+                "正式单挑严格规则重执行回放尚未通过现场门禁",
+            )
+        if readiness.unsupported_rules != derived_unsupported_rules:
+            add(
+                GateIssueCode.FORMAL_DUEL_READINESS_INSPECTION_FAILED,
+                "unsupported_rules与现场RULE_SOURCE_GAP blocker数量不一致",
+            )
+        if derived_unsupported_rules:
+            add(
+                GateIssueCode.UNSUPPORTED_RULES,
+                f"现场检测到{derived_unsupported_rules}项未支持规则，禁止正式模拟",
+            )
+        if readiness.approximation_count:
+            add(
+                GateIssueCode.APPROXIMATION_USED,
+                "现场检测到"
+                f"{readiness.approximation_count}项近似替代，禁止标记为正式结果",
+            )
+        seed_results = tuple(readiness.acceptance_seed_results)
+        seed_result_types_valid = all(
+            isinstance(item, FormalDuelSeedResult) for item in seed_results
+        )
+        derived_seed_count = len(seed_results)
+        if seed_result_types_valid:
+            derived_natural_end_count = sum(
+                bool(item.natural_end) for item in seed_results
+            )
+            derived_seed_failure_count = sum(
+                not (
+                    item.natural_end
+                    and item.formal_result_eligible
+                    and item.reexecution_verified
+                    and item.winner in {"p1", "p2"}
+                    and item.deck_count == FORMAL_DECK_CARD_COUNT
+                    and item.action_count > 0
+                    and item.turn_count > 0
+                    and item.draw_pile_count >= 0
+                    and item.unsupported_rules == 0
+                    and item.approximation_count == 0
+                    and not item.safety_cap_triggered
+                    and item.exception_type is None
+                    and item.exception_message is None
+                )
+                for item in seed_results
+            )
+            derived_seed_ids = tuple(item.seed for item in seed_results)
+        else:
+            derived_natural_end_count = 0
+            derived_seed_failure_count = max(1, derived_seed_count)
+            derived_seed_ids = ()
+        seed_evidence_complete = (
+            seed_result_types_valid
+            and derived_seed_ids == tuple(range(100))
+            and derived_seed_count == 100
+            and derived_natural_end_count == 100
+            and derived_seed_failure_count == 0
+        )
+        seed_summaries_consistent = (
+            readiness.acceptance_seed_count == derived_seed_count
+            and readiness.acceptance_natural_end_count
+            == derived_natural_end_count
+            and readiness.acceptance_failure_count
+            == derived_seed_failure_count
+            and readiness.fixed_seed_acceptance_passed
+            == seed_evidence_complete
+        )
+        if not seed_summaries_consistent:
+            add(
+                GateIssueCode.FORMAL_DUEL_READINESS_INSPECTION_FAILED,
+                "100-seed汇总与逐seed canonical验收记录不一致",
+            )
+        seed_acceptance_consistent = (
+            seed_evidence_complete and seed_summaries_consistent
+        )
+        if not seed_acceptance_consistent:
+            add(
+                GateIssueCode.FIXED_SEED_ACCEPTANCE_NOT_PASSED,
+                "正式单挑尚无至少100个固定seed全部自然结束、逐seed保留且"
+                "零异常/零上限/零unsupported/零approximation的现场验收",
+            )
+        for blocker in readiness.blockers:
+            add(
+                GateIssueCode.FORMAL_DUEL_READINESS_BLOCKER,
+                f"[{blocker.category}/{blocker.code}] {blocker.message}",
+            )
+
+        derived_ready = (
+            readiness.mode_id == FORMAL_NO_SKILL_DUEL_MODE
+            and readiness.deck_count == FORMAL_DECK_CARD_COUNT
+            and readiness.registered_instance_count == FORMAL_DECK_CARD_COUNT
+            and readiness.mode_runtime_reachable
+            and readiness.mode_implemented
+            and readiness.deterministic_controller_implemented
+            and derived_all_cards
+            and readiness.reexecution_replay_supported
+            and derived_unsupported_rules == 0
+            and readiness.approximation_count == 0
+            and seed_acceptance_consistent
+            and not readiness.blockers
+        )
+        if readiness.formal_duel_no_skill_ready != derived_ready:
+            add(
+                GateIssueCode.FORMAL_DUEL_READINESS_INSPECTION_FAILED,
+                "formal_duel_no_skill_ready与现场组成能力不一致，拒绝静态布尔自证",
+            )
+        if not derived_ready:
+            add(
+                GateIssueCode.FULL_GAME_CORE_NOT_IMPLEMENTED,
+                "正式单挑现场能力尚不能从开局运行至可严格重执行的自然胜负",
+            )
+
+    canonical_source = _canonical_formal_runner_source()
+    if manifest.source != canonical_source:
+        add(
+            GateIssueCode.SOURCE_INSPECTION_FAILED,
+            "正式单挑入口来源必须是仓库内固定sgs_formal_runner.py；"
+            "拒绝调用方替换来源快照",
+        )
+    _add_source_issues(canonical_source, add)
+    return FormalRunGateResult(tuple(issues))
+
+
 def evaluate_formal_run_gate(manifest: FormalSimulationManifest) -> FormalRunGateResult:
     """纯函数：评估正式模拟准入条件，不运行或降级到近似器。"""
 
     if not isinstance(manifest, FormalSimulationManifest):
         raise TypeError("正式模拟清单必须是FormalSimulationManifest")
+    if manifest.mode_name == FORMAL_NO_SKILL_DUEL_MODE:
+        return _evaluate_live_formal_duel_gate(manifest)
     issues: list[GateIssue] = []
 
     def add(code: GateIssueCode, message: str) -> None:

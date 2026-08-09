@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import replace
+import json
 
 import pytest
 
@@ -1254,7 +1255,7 @@ def test_replay_phase_tamper_rejected(
         == "discard_phase_submit"
     )
     discard_decision["context"]["phase"] = "end"
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(
         (ProductionReplayFormatError, ProductionReplayDivergenceError)
     ):
@@ -1277,7 +1278,7 @@ def test_replay_active_player_tamper_rejected(
     discard_decision["context"]["actor_id"] = (
         "p2" if discard_decision["context"]["actor_id"] == "p1" else "p1"
     )
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(
         (ProductionReplayFormatError, ProductionReplayDivergenceError)
     ):
@@ -1298,7 +1299,7 @@ def test_replay_discard_semantics_tamper_rejected(
         and event.get("payload", {}).get("reason") == "discard_phase"
     )
     discard_event["card_instance_id"] = "sgs-mobile-20260725-001"
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(
         (ProductionReplayFormatError, ProductionReplayDivergenceError)
     ):
@@ -1327,7 +1328,7 @@ def test_replay_batch_selection_set_tamper_rejected(
         and event["card_instance_id"] != original
     )
     select_decision["chosen_action"]["card_instance_id"] = replacement
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(
         (ProductionReplayFormatError, ProductionReplayDivergenceError)
     ):
@@ -1380,6 +1381,39 @@ def test_player_visible_hidden_hand_not_leaked(
         ):
             assert event.get("card_instance_id") is None
             assert event.get("card_key") is None
+
+
+def test_player_visible_canonical_json_redacts_opponent_discard_selection_ids(
+    turn_cycle_record: ProductionReexecutionReplay,
+) -> None:
+    authoritative = turn_cycle_record.to_dict()
+    private_p1_selections = [
+        decision["context"]["metadata"]["discard_phase_selected_ids"]
+        for decision in authoritative["decisions"]
+        if decision["context"].get("actor_id") == "p1"
+        and decision["context"].get("metadata", {}).get(
+            "discard_phase_selected_ids"
+        )
+    ]
+    assert private_p1_selections, "权威记录必须真实包含p1弃牌选择进度"
+
+    opponent_view = turn_cycle_record.player_visible_payload(viewer_id="p2")
+    opponent_p1_decisions = [
+        decision
+        for decision in opponent_view["decisions"]
+        if decision.get("context", {}).get("actor_id") == "p1"
+    ]
+    canonical_opponent_json = json.dumps(
+        opponent_p1_decisions,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    assert '"discard_phase_selected_ids"' not in canonical_opponent_json
+    assert '"discard_phase_selected_count"' in canonical_opponent_json
+    for selection in private_p1_selections:
+        for hidden_instance_id in selection:
+            assert hidden_instance_id not in canonical_opponent_json
 
 
 # ----------------------------------------------------------------------

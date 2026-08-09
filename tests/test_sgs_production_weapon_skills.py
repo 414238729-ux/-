@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """CP-04P：正式武器技能完整化（已验证部分）生产验收测试。
 
-本批完成并证明 8 种 COMPLETE 武器：诸葛连弩（无限出杀）、青釭剑（真实
+本批完成并证明 9 种 COMPLETE 武器：雌雄双股剑（异性目标两段选择窗口）、
+诸葛连弩（无限出杀）、青釭剑（真实
 防具无效生命周期，代码历史字段 ignore_armor）、寒冰剑（逐张顺序弃置）、
 古锭刀（伤害时动态判定+1）、青龙偃月刀（追杀不消耗普通PLAY额度）、
 贯石斧（批量弃2张且自身不能作为代价）、朱雀羽扇（含借刀强制杀转火杀）、
@@ -9,8 +10,7 @@
 规则来源：knowledge/三国杀卡牌效果.md 7.1–7.11 与
 knowledge/三国杀卡牌结构化数据.csv（攻击范围），并按基础术语20.12
 【杀】牌名/子类型通则处理。
-PARTIAL 仍为 3 种：雌雄双股剑（DATA_MODEL_GAP: CHARACTER_GENDER_METADATA_NOT_AVAILABLE）、
-丈八蛇矛（VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP，正式入口 fail-closed）、
+PARTIAL 仍为 2 种：丈八蛇矛（VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP，正式入口 fail-closed）、
 方天画戟（MULTIPLAYER/MULTI_TARGET_INFRASTRUCTURE_GAP），如实记录在
 WEAPON_SKILL_STATUS。
 所有正向路径都经过真实生产注册表与 enumerate→validate→apply。
@@ -19,6 +19,7 @@ WEAPON_SKILL_STATUS。
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 
 import pytest
 
@@ -33,6 +34,9 @@ from scripts.sgs_engine.events import EventType
 from scripts.sgs_engine.model import (
     DISCARD_PILE,
     PROCESSING_ZONE,
+    CharacterGender,
+    CharacterMetadata,
+    PlayerState,
     ZoneRef,
 )
 from scripts.sgs_engine.production_batch import (
@@ -49,6 +53,7 @@ from scripts.sgs_engine.production_cards import (
     WEAPON_SKILL_STATUS,
     FormalCardRegistry,
     attack_range_of,
+    check_weapon_skill_gate,
     equipped_weapon_key,
     weapon_attack_ranges,
 )
@@ -186,6 +191,23 @@ def _set_hp(game: ProductionBasicCardBatch, player_id: str, hp: int) -> None:
     game._state = _replace_player(game.state, player_id, hp=hp)
 
 
+def _set_character(
+    game: ProductionBasicCardBatch,
+    player_id: str,
+    character: CharacterMetadata | None,
+) -> None:
+    game._state = replace(
+        game.state,
+        players=tuple(
+            replace(player, character=character)
+            if player.player_id == player_id
+            else player
+            for player in game.state.players
+        ),
+        revision=game.state.revision + 1,
+    )
+
+
 # ----------------------------------------------------------------------
 # A. 武器清单
 # ----------------------------------------------------------------------
@@ -225,11 +247,18 @@ def test_all_weapon_entities_present_with_ranges_and_status() -> None:
         "sgs_weapon_zhugeliannu",
         "sgs_weapon_qinggangjian",
         "sgs_weapon_hanbingjian",
+        "sgs_weapon_cixiongshuanggujian",
         "sgs_weapon_gudingdao",
         "sgs_weapon_qinglongyanyuedao",
         "sgs_weapon_guanshifu",
         "sgs_weapon_zhuqueyushan",
         "sgs_weapon_qilingong",
+    }
+    assert {
+        key for key, status in WEAPON_SKILL_STATUS.items() if status == "PARTIAL"
+    } == {
+        "sgs_weapon_zhangbashemao",
+        "sgs_weapon_fangtianhuaji",
     }
 
 
@@ -467,6 +496,31 @@ def test_guanshifu_force_hit_after_dodge() -> None:
     assert damages[0].payload["weapon_effect"] == "guanshifu_force_hit"
     assert game.state.players_by_id["p2"].hp == 3
     assert game.phase is ProductionPhase.PLAY
+    _assert_conservation(game)
+
+
+def test_reference_controller_completes_guanshifu_discard_two_window() -> None:
+    """验收控制器必须选满两张后提交，不能在选择与取消间振荡。"""
+
+    game = _fresh(seed=3)
+    _equip(game, "sgs_weapon_guanshifu")
+    _put_hand(game, "sgs_basic_sha")
+    _dodge_and_open_weapon_window(game)
+    _step(game, _action(game, "weapon_force_hit"))
+    assert game.phase is ProductionPhase.WEAPON_DISCARD_TWO
+
+    controller = BatchReferenceController()
+    operations = tuple(
+        game.step(controller).payload.get("operation") for _ in range(3)
+    )
+
+    assert operations == (
+        "select_discard_two",
+        "select_discard_two",
+        "discard_two_submit",
+    )
+    assert game.phase is ProductionPhase.PLAY
+    assert len(_damages(game)) == 1
     _assert_conservation(game)
 
 
@@ -931,6 +985,53 @@ def test_fangtian_two_player_slice_normal_slash() -> None:
     _assert_conservation(game)
 
 
+@pytest.mark.parametrize("extra_hand_key", [None, "sgs_basic_shan"])
+def test_fangtian_two_player_last_or_nonlast_slash_has_only_one_target(
+    extra_hand_key: str | None,
+) -> None:
+    game = _fresh(seed=3)
+    _equip(game, "sgs_weapon_fangtianhuaji")
+    for instance_id in tuple(game.state.card_ids_in(ZoneRef.hand("p1"))):
+        game._state = game.state.move_card(instance_id, DISCARD_PILE)
+    slash_id = _put_hand(game, "sgs_basic_sha")
+    if extra_hand_key is not None:
+        _put_hand(game, extra_hand_key)
+
+    slash_actions = [
+        action
+        for action in game.legal_actions()
+        if action.payload.get("operation") == "use_slash"
+        and action.card_instance_id == slash_id
+    ]
+    assert len(slash_actions) == 1
+    assert slash_actions[0].target_ids == ("p2",)
+    assert WEAPON_SKILL_STATUS["sgs_weapon_fangtianhuaji"] == "PARTIAL"
+    _step(game, slash_actions[0])
+    _step(game, _action(game, "pass_slash_response"))
+    assert _damages(game)
+    _assert_conservation(game)
+
+
+def test_fangtian_three_player_state_stays_fail_closed_and_globally_partial() -> None:
+    game = _fresh(seed=3)
+    _equip(game, "sgs_weapon_fangtianhuaji")
+    three_player_state = replace(
+        game.state,
+        players=(*game.state.players, PlayerState("p3", 3, 4, 4)),
+        revision=game.state.revision + 1,
+    )
+
+    assert WEAPON_SKILL_STATUS["sgs_weapon_fangtianhuaji"] == "PARTIAL"
+    with pytest.raises(UnsupportedRuleError, match="方天画戟多目标技能未实现"):
+        check_weapon_skill_gate(
+            three_player_state,
+            actor_id="p1",
+            decision="use_slash",
+            target_id="p2",
+            slash_card_key="sgs_basic_sha",
+        )
+
+
 # ----------------------------------------------------------------------
 # F. 跨系统：距离、动作安全、守恒、回放、隐私
 # ----------------------------------------------------------------------
@@ -982,8 +1083,6 @@ def test_weapon_forged_slash_damage_payload_rejected() -> None:
 
 
 def test_partial_weapons_stay_fail_closed() -> None:
-    from scripts.sgs_engine.production_cards import check_weapon_skill_gate
-
     # 雌雄双股剑（PARTIAL）：性别数据缺失，对另一角色使用杀失败关闭
     game1 = _fresh(seed=3)
     _equip(game1, "sgs_weapon_cixiongshuanggujian")
@@ -998,6 +1097,67 @@ def test_partial_weapons_stay_fail_closed() -> None:
     with pytest.raises(UnsupportedRuleError):
         check_weapon_skill_gate(
             game2.state, actor_id="p1", decision="use_slash", target_id="p2"
+        )
+
+
+def test_cixiong_gender_gate_distinguishes_missing_same_and_opposite() -> None:
+    game = _fresh(seed=3)
+    _equip(game, "sgs_weapon_cixiongshuanggujian")
+
+    with pytest.raises(
+        UnsupportedRuleError,
+        match="CHARACTER_GENDER_METADATA_NOT_AVAILABLE",
+    ):
+        check_weapon_skill_gate(
+            game.state,
+            actor_id="p1",
+            decision="use_slash",
+            target_id="p2",
+        )
+
+    _set_character(
+        game,
+        "p1",
+        CharacterMetadata("test_general_a", CharacterGender.MALE),
+    )
+    _set_character(
+        game,
+        "p2",
+        CharacterMetadata("test_general_b", CharacterGender.MALE),
+    )
+    check_weapon_skill_gate(
+        game.state,
+        actor_id="p1",
+        decision="use_slash",
+        target_id="p2",
+    )
+
+    _set_character(
+        game,
+        "p2",
+        CharacterMetadata("test_general_b", CharacterGender.FEMALE),
+    )
+    check_weapon_skill_gate(
+        game.state,
+        actor_id="p1",
+        decision="use_slash",
+        target_id="p2",
+    )
+    _put_hand(game, "sgs_basic_sha")
+    _step(game, _action(game, "use_slash", card_key="sgs_basic_sha"))
+    assert game.phase is ProductionPhase.CIXIONG_ACTIVATE
+    assert game.runtime.pending_cixiong_choice is not None
+
+    _set_character(game, "p2", CharacterMetadata("test_general_b", None))
+    with pytest.raises(
+        UnsupportedRuleError,
+        match="CHARACTER_GENDER_METADATA_NOT_AVAILABLE",
+    ):
+        check_weapon_skill_gate(
+            game.state,
+            actor_id="p1",
+            decision="forced_slash",
+            target_id="p2",
         )
 
 
@@ -1020,7 +1180,7 @@ def test_replay_weapon_damage_tamper_rejected() -> None:
     damage_event["payload"]["armor_ignored"] = not damage_event["payload"].get(
         "armor_ignored", False
     )
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(
         (ProductionReplayFormatError, ProductionReplayDivergenceError)
     ):
@@ -1431,7 +1591,7 @@ def test_gudingdao_replay_weapon_bonus_matches_damage_time_state() -> None:
         if event.get("event_type") == "damage"
     )
     tampered_damage["payload"]["weapon_damage_bonus"] = 99
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(
         (ProductionReplayFormatError, ProductionReplayDivergenceError)
     ):
@@ -1916,7 +2076,7 @@ def test_qilingong_timing_replay_reexecutes() -> None:
         and e.get("event_type") == "card_moved"
     )
     dmg["sequence"], mount["sequence"] = mount["sequence"], dmg["sequence"]
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(
         (ProductionReplayFormatError, ProductionReplayDivergenceError)
     ):
@@ -2130,7 +2290,7 @@ def test_qilin_resolved_damage_replay_value() -> None:
     tampered = copy.deepcopy(record.to_dict())
     dmg = next(e for e in tampered["events"] if e.get("event_type") == "damage")
     dmg["payload"]["final_amount"] = 2
-    del tampered["record_sha256"]
+    tampered["record_sha256"] = ""
     with pytest.raises(
         (ProductionReplayFormatError, ProductionReplayDivergenceError)
     ):
