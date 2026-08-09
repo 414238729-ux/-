@@ -70,7 +70,9 @@
     "wr_audit_remediation_4_worktree_branch": "deepseek-whole-repo-audit-remediation-4",
     "wr_audit_remediation_4_worktree_branch_note": "本批（整仓敌对式总审计定向修复第四轮/docs-only 治理收尾，WHOLE_REPO_AUDIT_REMEDIATION_4）实现所在分支；基线/R3文档收口提交 6bef086eae51d48e7f12c3e2f2a40d97bef1d651（docs: record third whole-repo audit remediation checkpoint）；实现提交 5eb367599e9d7deb26220cfff8b81144d0d88eff（docs: close remaining whole-repo audit governance findings，父提交 6bef086...）已由用户在外部PowerShell创建；checkpoint 文档提交尚未产生，不得虚构提交哈希；独立 re-audit 尚未进行（NOT_AUDITED_YET）。",
     "wr_audit_remediation_5_worktree_branch": "deepseek-whole-repo-audit-remediation-5",
-    "wr_audit_remediation_5_worktree_branch_note": "本批（整仓敌对式总审计定向修复第五轮/单点最终收尾，WHOLE_REPO_AUDIT_REMEDIATION_5）实现所在分支；基线/R4文档收口提交 bf5d83c4b1fa0cecb1994d918f66eb82387b4f99（docs: record fourth whole-repo audit remediation checkpoint）；实现提交 2c28cf0404f4b7bbc0752fa75594580fafef1256（docs: resolve final audit status contradiction，父提交 bf5d83c...）已由用户在外部PowerShell创建；checkpoint 文档提交尚未产生，不得虚构提交哈希；独立 re-audit 尚未进行（NOT_AUDITED_YET）。"
+    "wr_audit_remediation_5_worktree_branch_note": "本批（整仓敌对式总审计定向修复第五轮/单点最终收尾，WHOLE_REPO_AUDIT_REMEDIATION_5）实现所在分支；基线/R4文档收口提交 bf5d83c4b1fa0cecb1994d918f66eb82387b4f99（docs: record fourth whole-repo audit remediation checkpoint）；实现提交 2c28cf0404f4b7bbc0752fa75594580fafef1256（docs: resolve final audit status contradiction，父提交 bf5d83c...）已由用户在外部PowerShell创建；checkpoint 文档提交尚未产生，不得虚构提交哈希；独立 re-audit 尚未进行（NOT_AUDITED_YET）。",
+    "wr_audit_remediation_6_worktree_branch": "deepseek-whole-repo-audit-remediation-6",
+    "wr_audit_remediation_6_worktree_branch_note": "本批（整仓敌对式总审计定向修复第六轮/manifest-only 单字段治理收尾，WHOLE_REPO_AUDIT_REMEDIATION_6）实现所在分支；基线/R5文档收口提交 f83848881e6f1ff03621f5383b00f3580d230283（docs: record fifth whole-repo audit remediation checkpoint）；实现提交 2a075580484fadf3a2e4b7b76f4e4ad918af66e3（docs: normalize G-002 machine-readable audit state，父提交 f838488...）已由用户在外部PowerShell创建；checkpoint 文档提交尚未产生，不得虚构提交哈希；独立 re-audit 尚未进行（NOT_AUDITED_YET）。"
   },
   "feature_status": {
     "authoritative_core_foundation": true,
@@ -650,6 +652,42 @@
         "milestone_tag_target_resolution": null
       },
       "checkpoint_commit": null
+    },
+    {
+      "id": "WHOLE_REPO_AUDIT_REMEDIATION_6",
+      "status": "committed_pending_audit",
+      "commit": "2a075580484fadf3a2e4b7b76f4e4ad918af66e3",
+      "commit_note": "本批（整仓敌对式总审计定向修复第六轮/manifest-only 单字段治理收尾，WHOLE_REPO_AUDIT_REMEDIATION_6）真实提交链：基线/R5文档收口提交 f83848881e6f1ff03621f5383b00f3580d230283（docs: record fifth whole-repo audit remediation checkpoint）；实现提交 2a075580484fadf3a2e4b7b76f4e4ad918af66e3（docs: normalize G-002 machine-readable audit state，父提交 f838488...）。背景：原整仓总审计 CP04L_TO_CP04P_WHOLE_REPO_ADVERSARIAL_AUDIT 结论 WHOLE_REPO_AUDIT_FAILED（G-001..G-005、N-001）；remediation-1/2/3/4/5 targeted re-audit 结论 REMEDIATION_REAUDIT_FAILED／REMEDIATION_2_REAUDIT_FAILED／REMEDIATION_3_REAUDIT_FAILED／REMEDIATION_4_REAUDIT_FAILED／REMEDIATION_5_REAUDIT_FAILED，均不得改写。R5 re-audit 唯一新 finding 为 R5-NEW-001 MINOR（manifest machine-readable generic current field g002_source_gap_locally_resolved 仍表达 G-002 pending）；R5 re-audit 已确认 R4-NEW-001=CLOSED、R3-NEW-001 residual=CLOSED、G-004=STILL_CLOSED、G-005=STILL_CLOSED、R2-NEW-001=STILL_CLOSED，并确认 G-001/G-002/G-003/QILIN_TIMING_BUG/R1-NEW-001/R1-NEW-002 全部 NO_REGRESSION，G-002 source finding 本身仍=CLOSED。本轮唯一实现修复（docs-only）：final_verification.whole_repo_audit_remediation_2.g002_source_gap_locally_resolved 值由 G-002_SOURCE_GAP_LOCALLY_RESOLVED_PENDING_INDEPENDENT_REAUDIT 改为 G-002_CLOSED，key 保持不变；字段消费者搜索确认仅 manifest 自身使用（无 scripts/tests/schema 消费者）；历史 pending 事实继续由明确 HISTORICAL/AS-OF 的 R2 历史 checkpoint 记录承载，未新增任何 generic current scalar 重新表达 G-002 pending。验证（docs-only）：runtime/gameplay files modified=0；未重新运行 pytest（1974 passed、0 failed、0 skipped、0 xfailed 仅作为既有 implementation/regression evidence）；JSON parse 通过；SHA-256 38 entries mismatch=0；manifest machine-state consistency scan 通过（g002_source_gap_locally_resolved 唯一值=G-002_CLOSED；所有 PENDING_INDEPENDENT_REAUDIT 命中均明确 historical/as-of；R2 overall=REMEDIATION_2_REAUDIT_FAILED；R5 overall=REMEDIATION_5_REAUDIT_FAILED）；four-doc current-state contradiction scan=0；git diff --check passed；git ls-files -u empty。统计保持：registered 38种/160张、implementation semantics complete 35种/157张、COMPLETE weapons 8种/9张、PARTIAL weapons 3种/3张、unregistered 0种/0张。门禁保持：authoritative_full_game_core=false、formal_run_ready=false、formal_duel_no_skill_ready=false、multi_player_production_proven=false、milestone_b_complete=false、unsupported_rules=1、approximation_count=0。当前状态：status=committed_pending_audit、independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET、checkpoint_commit=null（检查点文档提交尚未产生，不得虚构）、milestone_tag=null、worktree_commit_pending=true；独立 re-audit 尚未进行；不得把 REMEDIATION_6_REAUDIT_PASSED 或 WHOLE_REPO_AUDIT_PASSED 作为既成事实。",
+      "independent_audit_done": false,
+      "audit_conclusion": "NOT_AUDITED_YET",
+      "milestone_tag": null,
+      "worktree_commit_pending": true,
+      "evidence": "docs/CHECKPOINT_MANIFEST.json；整仓敌对式总审计定向修复第六轮/manifest-only 单字段治理收尾",
+      "scope": "docs-only；R5-NEW-001 MINOR——manifest generic current machine field g002_source_gap_locally_resolved 归一化为 G-002_CLOSED（key 不变，历史 pending 保留在 HISTORICAL/AS-OF 的 R2 历史 checkpoint 记录中）；R5 re-audit 已确认 CLOSED/STILL_CLOSED/NO_REGRESSION 项保持；无 runtime/gameplay 修改；不构成完整多人生产证明、正式单挑完成或里程碑B完成",
+      "implementation_commit": "2a075580484fadf3a2e4b7b76f4e4ad918af66e3",
+      "implementation_commit_message": "docs: normalize G-002 machine-readable audit state",
+      "implementation_parent": "f83848881e6f1ff03621f5383b00f3580d230283",
+      "audit": {
+        "independent_audit_done": false,
+        "audit_conclusion": "NOT_AUDITED_YET",
+        "conclusion": "NOT_AUDITED_YET",
+        "initial_conclusion": null,
+        "final_reaudit_conclusion": null,
+        "audited_at": null,
+        "auditor_note": "独立审计尚未进行（NOT_AUDITED_YET）。背景：原整仓总审计结论 WHOLE_REPO_AUDIT_FAILED（G-001..G-005、N-001）；remediation-1/2/3/4/5 targeted re-audit 结论 REMEDIATION_REAUDIT_FAILED／REMEDIATION_2_REAUDIT_FAILED／REMEDIATION_3_REAUDIT_FAILED／REMEDIATION_4_REAUDIT_FAILED／REMEDIATION_5_REAUDIT_FAILED，均不得改写。本轮仅 manifest-only 单字段治理（g002_source_gap_locally_resolved → G-002_CLOSED，key 不变），无 runtime/gameplay 修改，不得把 REMEDIATION_6_REAUDIT_PASSED 或 WHOLE_REPO_AUDIT_PASSED 作为既成事实；本轮验证（JSON/SHA-256/machine-state scan/git diff --check/git ls-files -u）属于 docs 治理证据；pytest 未在 R6 重跑，1974 passed 仅作为既有 implementation/regression evidence。",
+        "implementation_commit": "2a075580484fadf3a2e4b7b76f4e4ad918af66e3",
+        "checkpoint_commit": null,
+        "audit_gap_fix_commit": null,
+        "final_audit_conclusion": null,
+        "milestone_tag": null,
+        "final_status": "committed_pending_audit",
+        "milestone_tag_note": null,
+        "final_doc_commit": null,
+        "final_doc_commit_message": null,
+        "milestone_tag_verified": false,
+        "milestone_tag_target_resolution": null
+      },
+      "checkpoint_commit": null
     }
   ],
   "final_verification": {
@@ -658,7 +696,7 @@
       "passed": 1974,
       "failed": 0,
       "skipped": 0,
-      "note": "1949=1889+53项武器专项+7项借刀朱雀专项：CP-04P 正式武器技能完整化（tests/test_sgs_production_weapon_skills.py 53项＋tests/test_sgs_production_borrowed_sword_weapon_system.py 新增7项朱雀借刀专项）。2026-08-08 最终规则确认（用户移动版实测确认，USER_CONFIRMED_MOBILE_RULE）：①青龙偃月刀追杀不消耗普通出牌阶段【杀】次数额度——A.历史意义保留（每张追杀仍是真实【杀】使用，独立CARD_USED与完整结算），B.额度意义（slash_used_counts不因追杀增加，手牌其他【杀】不被锁定）；②贯石斧自身不能作为发动代价——候选=手牌＋其他合法装备，排除当前贯石斧实体自身，枚举层排除＋提交时权威验证，伪造提交失败关闭，两张合法代价仍一次批量弃置；通用“牌=手牌区+装备区”区域规则不变。完整 pytest 1953 passed（失败0、跳过0；1959基础上丈八蛇矛规则源复核：确认材料非弃置代价——移除CARD_DISCARDED事件（依据基础术语第12节措辞通则），颜色组合规则来源为7.8特殊说明（当前确认）；材料在“使用/打出”时的精确zone生命周期时点无项目确认通则，报告VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP，丈八蛇矛暂降回PARTIAL并从36种/158张统计移除（回35种/157张），删除6项丈八正向专项测试）；compileall 通过；源码完整性审计 scanned_file_count=122、defect_count=0、audit_item_count=55；完整语义统计35种／157张（8种／9张COMPLETE武器，以registry真实重算）。本轮代码与测试已在当前工作树完成，尚未由用户执行真实Git提交，独立审计尚未进行。 CP-04P 最终状态回填：final_doc_commit=08d78cb6fed86360d647728a6f70422326918ff2（docs: record weapon skill independent audit）已回填，worktree_commit_pending=false；计划里程碑标签 milestone-b2-weapon-skills-audited 尚未创建（milestone_tag_verified=false），待最终状态提交后由用户建立。 WHOLE_REPO_AUDIT_REMEDIATION_1 修复后完整 pytest 1966 passed（新增13项：G-001死亡座座次距离7项、麒麟弓时序2项＋replay 1项、G-003丈八统一fail-closed 3项；麒麟弓窗口移到HP扣减/DAMAGE之前，base_seat_distance改为存活角色环索引计算）。 WHOLE_REPO_AUDIT_REMEDIATION_2 修复后完整 pytest 1974 passed（新增8项：G-001 dead-self 1项——base_seat_distance/effective_distance/actual_distance/is_target_within_distance 对死亡参与者统一fail-closed，先验证参与者存在与存活再应用 alive self→0；R1-NEW-001 Qilin×armor 7项——Qilin pending 改保存 resolution.final_amount（Baiyin Wine final=1、Tengjia Fire final=2，含 dying 边界与 strict replay 篡改拒绝，weapon_choice tuple 移除 amount 职责）；R1-NEW-002 青釭 ignore_armor 清除绑定真正 damage completion、Qilin 窗口期间保持防具无效）。 WHOLE_REPO_AUDIT_REMEDIATION_2 实现提交 e63b40ac1690e03315fd3e0734d5723fb80d5182（fix: complete second whole-repo audit remediation，父提交 4aafd95...）已由用户在外部PowerShell创建；检查点状态 committed_pending_audit、NOT_AUDITED_YET、worktree_commit_pending=true；独立 re-audit 尚未进行；G-002 本地状态 G-002_SOURCE_GAP_LOCALLY_RESOLVED_PENDING_INDEPENDENT_REAUDIT（R2 回填时状态；CURRENT：R2 targeted independent re-audit 已确认 G-002=CLOSED）。 WHOLE_REPO_AUDIT_REMEDIATION_3 实现提交 9c63496e7f34430d8aff3c23e9afc5b5c4482557（fix: close remaining whole-repo audit findings，父提交 3121a300...）已由用户在外部PowerShell创建；本轮为最小收尾（G-004 CP-04L ba64 历史引用分层为 HISTORICAL/AS-OF 且 current live ref 统一 fc3df952...、G-005 stale 清理、R2-NEW-001 annotation 统一 tuple[str,str]|None），无新增测试；检查点状态 committed_pending_audit、NOT_AUDITED_YET、worktree_commit_pending=true；独立 re-audit 尚未进行。 WHOLE_REPO_AUDIT_REMEDIATION_4 实现提交 5eb367599e9d7deb26220cfff8b81144d0d88eff（docs: close remaining whole-repo audit governance findings，父提交 6bef086...）已由用户在外部PowerShell创建；本轮为 docs-only 治理批次（G-004 §8 漏项、R3-NEW-001 G-002 分层），runtime/gameplay 修改数=0，未重新运行 pytest（引用 R3 已记录的 1974 passed）；检查点状态 committed_pending_audit、NOT_AUDITED_YET、worktree_commit_pending=true；独立 re-audit 尚未进行。 WHOLE_REPO_AUDIT_REMEDIATION_5 实现提交 2c28cf0404f4b7bbc0752fa75594580fafef1256（docs: resolve final audit status contradiction，父提交 bf5d83c...）已由用户在外部PowerShell创建；本轮为单点 docs cleanup（ENGINE_STATUS 顶部 R2 G-002 子句双层分层），implementation 仅修改 docs/ENGINE_STATUS.md（1 insertion/1 deletion）、runtime/gameplay 修改数=0、未重新运行 pytest（1974 passed 为既有证据）；检查点状态 committed_pending_audit、NOT_AUDITED_YET、worktree_commit_pending=true；独立 re-audit 尚未进行。"
+      "note": "1949=1889+53项武器专项+7项借刀朱雀专项：CP-04P 正式武器技能完整化（tests/test_sgs_production_weapon_skills.py 53项＋tests/test_sgs_production_borrowed_sword_weapon_system.py 新增7项朱雀借刀专项）。2026-08-08 最终规则确认（用户移动版实测确认，USER_CONFIRMED_MOBILE_RULE）：①青龙偃月刀追杀不消耗普通出牌阶段【杀】次数额度——A.历史意义保留（每张追杀仍是真实【杀】使用，独立CARD_USED与完整结算），B.额度意义（slash_used_counts不因追杀增加，手牌其他【杀】不被锁定）；②贯石斧自身不能作为发动代价——候选=手牌＋其他合法装备，排除当前贯石斧实体自身，枚举层排除＋提交时权威验证，伪造提交失败关闭，两张合法代价仍一次批量弃置；通用“牌=手牌区+装备区”区域规则不变。完整 pytest 1953 passed（失败0、跳过0；1959基础上丈八蛇矛规则源复核：确认材料非弃置代价——移除CARD_DISCARDED事件（依据基础术语第12节措辞通则），颜色组合规则来源为7.8特殊说明（当前确认）；材料在“使用/打出”时的精确zone生命周期时点无项目确认通则，报告VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP，丈八蛇矛暂降回PARTIAL并从36种/158张统计移除（回35种/157张），删除6项丈八正向专项测试）；compileall 通过；源码完整性审计 scanned_file_count=122、defect_count=0、audit_item_count=55；完整语义统计35种／157张（8种／9张COMPLETE武器，以registry真实重算）。本轮代码与测试已在当前工作树完成，尚未由用户执行真实Git提交，独立审计尚未进行。 CP-04P 最终状态回填：final_doc_commit=08d78cb6fed86360d647728a6f70422326918ff2（docs: record weapon skill independent audit）已回填，worktree_commit_pending=false；计划里程碑标签 milestone-b2-weapon-skills-audited 尚未创建（milestone_tag_verified=false），待最终状态提交后由用户建立。 WHOLE_REPO_AUDIT_REMEDIATION_1 修复后完整 pytest 1966 passed（新增13项：G-001死亡座座次距离7项、麒麟弓时序2项＋replay 1项、G-003丈八统一fail-closed 3项；麒麟弓窗口移到HP扣减/DAMAGE之前，base_seat_distance改为存活角色环索引计算）。 WHOLE_REPO_AUDIT_REMEDIATION_2 修复后完整 pytest 1974 passed（新增8项：G-001 dead-self 1项——base_seat_distance/effective_distance/actual_distance/is_target_within_distance 对死亡参与者统一fail-closed，先验证参与者存在与存活再应用 alive self→0；R1-NEW-001 Qilin×armor 7项——Qilin pending 改保存 resolution.final_amount（Baiyin Wine final=1、Tengjia Fire final=2，含 dying 边界与 strict replay 篡改拒绝，weapon_choice tuple 移除 amount 职责）；R1-NEW-002 青釭 ignore_armor 清除绑定真正 damage completion、Qilin 窗口期间保持防具无效）。 WHOLE_REPO_AUDIT_REMEDIATION_2 实现提交 e63b40ac1690e03315fd3e0734d5723fb80d5182（fix: complete second whole-repo audit remediation，父提交 4aafd95...）已由用户在外部PowerShell创建；检查点状态 committed_pending_audit、NOT_AUDITED_YET、worktree_commit_pending=true；独立 re-audit 尚未进行；G-002 本地状态 G-002_SOURCE_GAP_LOCALLY_RESOLVED_PENDING_INDEPENDENT_REAUDIT（R2 回填时状态；CURRENT：R2 targeted independent re-audit 已确认 G-002=CLOSED）。 WHOLE_REPO_AUDIT_REMEDIATION_3 实现提交 9c63496e7f34430d8aff3c23e9afc5b5c4482557（fix: close remaining whole-repo audit findings，父提交 3121a300...）已由用户在外部PowerShell创建；本轮为最小收尾（G-004 CP-04L ba64 历史引用分层为 HISTORICAL/AS-OF 且 current live ref 统一 fc3df952...、G-005 stale 清理、R2-NEW-001 annotation 统一 tuple[str,str]|None），无新增测试；检查点状态 committed_pending_audit、NOT_AUDITED_YET、worktree_commit_pending=true；独立 re-audit 尚未进行。 WHOLE_REPO_AUDIT_REMEDIATION_4 实现提交 5eb367599e9d7deb26220cfff8b81144d0d88eff（docs: close remaining whole-repo audit governance findings，父提交 6bef086...）已由用户在外部PowerShell创建；本轮为 docs-only 治理批次（G-004 §8 漏项、R3-NEW-001 G-002 分层），runtime/gameplay 修改数=0，未重新运行 pytest（引用 R3 已记录的 1974 passed）；检查点状态 committed_pending_audit、NOT_AUDITED_YET、worktree_commit_pending=true；独立 re-audit 尚未进行。 WHOLE_REPO_AUDIT_REMEDIATION_5 实现提交 2c28cf0404f4b7bbc0752fa75594580fafef1256（docs: resolve final audit status contradiction，父提交 bf5d83c...）已由用户在外部PowerShell创建；本轮为单点 docs cleanup（ENGINE_STATUS 顶部 R2 G-002 子句双层分层），implementation 仅修改 docs/ENGINE_STATUS.md（1 insertion/1 deletion）、runtime/gameplay 修改数=0、未重新运行 pytest（1974 passed 为既有证据）；检查点状态 committed_pending_audit、NOT_AUDITED_YET、worktree_commit_pending=true；独立 re-audit 尚未进行。 WHOLE_REPO_AUDIT_REMEDIATION_6 实现提交 2a075580484fadf3a2e4b7b76f4e4ad918af66e3（docs: normalize G-002 machine-readable audit state，父提交 f838488...）已由用户在外部PowerShell创建；本轮为 manifest-only 单字段治理（g002_source_gap_locally_resolved → G-002_CLOSED，key 不变），runtime/gameplay 修改数=0、未重新运行 pytest（1974 passed 为既有证据）；检查点状态 committed_pending_audit、NOT_AUDITED_YET、worktree_commit_pending=true；独立 re-audit 尚未进行。"
     },
     "compileall": {
       "command": ".\\\\.venv\\\\Scripts\\\\python.exe -m compileall -q scripts tests",
@@ -1405,13 +1443,47 @@
       "multi_player_production_proven": false,
       "unsupported_rules": 1,
       "approximation_count": 0
+    },
+    "whole_repo_audit_remediation_6": {
+      "implemented": true,
+      "tested": true,
+      "independent_audit_done": false,
+      "audit_conclusion": "NOT_AUDITED_YET",
+      "milestone_tag": null,
+      "implementation_commit": "2a075580484fadf3a2e4b7b76f4e4ad918af66e3",
+      "implementation_commit_message": "docs: normalize G-002 machine-readable audit state",
+      "implementation_parent": "f83848881e6f1ff03621f5383b00f3580d230283",
+      "checkpoint_commit": null,
+      "final_doc_commit": null,
+      "audit_gap_fix_commit": null,
+      "final_pytest": null,
+      "pytest_note": "docs-only 批次，R6 未重新运行 pytest；1974 passed（0 failed、0 skipped、0 xfailed）仅作为既有 implementation/regression evidence。",
+      "r5_new_001_g002_machine_field_normalized": true,
+      "g002_machine_field_final_value": "G-002_CLOSED",
+      "g002_machine_field_key_unchanged": true,
+      "g002_historical_pending_in_historical_context": true,
+      "r2_overall_reaudit_failed_kept": true,
+      "r5_overall_reaudit_failed_kept": true,
+      "r5_closed_findings_kept": true,
+      "no_regression_kept": true,
+      "runtime_gameplay_files_modified": 0,
+      "implementation_files_modified": [
+        "docs/CHECKPOINT_MANIFEST.json"
+      ],
+      "complete_card_kinds": 35,
+      "complete_entities": 157,
+      "adapter_card_kinds": 38,
+      "adapter_entities": 160,
+      "multi_player_production_proven": false,
+      "unsupported_rules": 1,
+      "approximation_count": 0
     }
   },
   "sha256": {
-    "docs/ENGINE_STATUS.md": "e121622d97c2b5064c6583b42e7c184759a3c8ee9cb1bc7a4452fec7b08dfed5",
-    "docs/IMPLEMENTATION_MATRIX.md": "5687089f3617779fe3fc60b58010b8ced18352a4868a3f78d023ee8c5e927775",
+    "docs/ENGINE_STATUS.md": "4a5d7aa98891944226eb57447988778d2f8974611ded7530ba00fd4436c4b332",
+    "docs/IMPLEMENTATION_MATRIX.md": "2d71ab565b2155ce9c4b68a353695630d898653bc167a2520031ef20451d0b78",
     "docs/LEGACY_RESULTS_INVALID.md": "267d51329b65b4435ed770b9fe90a0d53148d17cc9b0dae3e6d3406b06c0c0cc",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "918383efc8c86a00269ffced42a02a3dd37620a6535afaae5e69470d4aa72aaa",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "853dcdcae278e3be304467b4283d323739b8056088a154163ff95b453bdd7537",
     "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "23b56a0edf0c85657b332100538013de16be4d71ea6a8214ac862a6708105af6",
     "knowledge/三国杀牌堆数据.csv": "e490631698e6b7695c6a9b3ad0c355e421ccfafab696e5b3a97418c9ec80f38b",
     "scripts/sgs_dev_runner.py": "6f88baa78fc9c22106188defda7190cd2a4412325db46f3964d217fd0e61c755",
