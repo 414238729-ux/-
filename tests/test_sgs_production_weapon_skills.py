@@ -34,7 +34,9 @@ from scripts.sgs_engine.actions import (
 from scripts.sgs_engine.events import EventType
 from scripts.sgs_engine.model import (
     DISCARD_PILE,
+    DRAW_PILE,
     PROCESSING_ZONE,
+    REVEALED_ZONE,
     CharacterGender,
     CharacterMetadata,
     PlayerState,
@@ -2043,6 +2045,187 @@ def test_zhangba_nanman_public_legal_actions_enumerates_virtual() -> None:
             "virtual:zhangba:"
         )
         assert "handle" in action.payload
+    _assert_conservation(game)
+
+
+def _zhangba_virtual_use_action(game) -> LegalAction:
+    virtual_uses = [
+        a
+        for a in game.legal_actions()
+        if a.payload.get("zhangba_virtual") is True
+        and a.payload.get("operation") == "use_slash"
+    ]
+    assert virtual_uses
+    return virtual_uses[0]
+
+
+def _put_hand_from_pool(
+    game: ProductionBasicCardBatch, key: str, player_id: str
+) -> str:
+    """从牌堆/弃牌堆取一张指定牌放入目标手牌（不触碰双方既有手牌）。"""
+
+    record = next(
+        r
+        for r in game.formal_registry.records
+        if r.card_key == key
+        and game.state.location_of(r.instance_id)
+        in (DRAW_PILE, DISCARD_PILE)
+    )
+    game._state = game.state.move_card(
+        record.instance_id, ZoneRef.hand(player_id)
+    )
+    return record.instance_id
+
+
+def test_zhangba_active_dying_rescue_finalizes_materials() -> None:
+    """MB-B-002/A：主动丈八杀 → DYING → 桃救回，材料恰好 finalize。"""
+
+    game = _fresh(seed=3)
+    _equip(game, "sgs_weapon_zhangbashemao")
+    _zhangba_non_slash_hand(game, "p1")
+    _set_hp(game, "p2", 1)
+    _put_hand_from_pool(game, "sgs_basic_tao", "p2")
+    _step(game, _zhangba_virtual_use_action(game))
+    _step(game, _action(game, "pass_slash_response"))
+    assert game.phase is ProductionPhase.DYING_RESCUE
+    pending = game.runtime.pending_slash
+    assert pending is not None and pending.virtual
+    materials = pending.material_ids
+    assert len(materials) == 2
+    for instance_id in materials:
+        assert game.state.location_of(instance_id) == PROCESSING_ZONE
+    _step(game, _action(game, "pass_rescue"))
+    _step(game, _action(game, "rescue_with_peach"))
+    assert game.phase is ProductionPhase.PLAY
+    for instance_id in materials:
+        assert game.state.location_of(instance_id) == DISCARD_PILE
+    assert not game.state.card_ids_in(PROCESSING_ZONE)
+    assert game.runtime.pending_slash is None
+    _assert_conservation(game)
+
+
+def test_zhangba_active_dying_death_game_over_finalizes_materials() -> None:
+    """MB-B-002/B：主动丈八杀 → DYING → 死亡/game over，材料不悬空。"""
+
+    game = _fresh(seed=3)
+    _equip(game, "sgs_weapon_zhangbashemao")
+    _zhangba_non_slash_hand(game, "p1")
+    _set_hp(game, "p2", 1)
+    _step(game, _zhangba_virtual_use_action(game))
+    _step(game, _action(game, "pass_slash_response"))
+    assert game.phase is ProductionPhase.DYING_RESCUE
+    pending = game.runtime.pending_slash
+    assert pending is not None and pending.virtual
+    materials = pending.material_ids
+    _step(game, _action(game, "pass_rescue"))
+    _step(game, _action(game, "pass_rescue"))
+    assert game.is_finished
+    assert game.winner_id in {"p1", "p2"}
+    for instance_id in materials:
+        assert game.state.location_of(instance_id) == DISCARD_PILE
+    assert not game.state.card_ids_in(PROCESSING_ZONE)
+    assert not game.state.card_ids_in(REVEALED_ZONE)
+    game.assert_finished_state_invariants()
+    _assert_conservation(game)
+
+
+def test_zhangba_dodge_event_order_materials_after_cancelled() -> None:
+    """MB-M-007：普通闪顺序 = Jink 事件 → 杀 effect cancelled → 材料 finalize。"""
+
+    game = _fresh(seed=3)
+    _equip(game, "sgs_weapon_zhangbashemao")
+    _zhangba_non_slash_hand(game, "p1")
+    _put_hand_from_pool(game, "sgs_basic_shan", "p2")
+    virtual = _zhangba_virtual_use_action(game)
+    virtual_id = virtual.card_instance_id
+    _step(game, virtual)
+    _step(game, _action(game, "play_dodge"))
+    events = list(game.events)
+    jink_index = next(
+        index
+        for index, event in enumerate(events)
+        if event.event_type is EventType.CARD_USED
+        and event.card_key == "sgs_basic_shan"
+        and event.card_user == "p2"
+    )
+    cancelled_index = next(
+        index
+        for index, event in enumerate(events)
+        if event.event_type is EventType.CARD_EFFECT_CANCELLED
+        and event.card_instance_id == virtual_id
+    )
+    material_finalize_indices = [
+        index
+        for index, event in enumerate(events)
+        if event.payload.get("reason") == "zhangba_material_finalize"
+    ]
+    assert material_finalize_indices
+    assert jink_index < cancelled_index < material_finalize_indices[0]
+    assert not game.state.card_ids_in(PROCESSING_ZONE)
+    _assert_conservation(game)
+
+
+def _put_on_top_for_test(
+    game: ProductionBasicCardBatch, instance_id: str
+) -> None:
+    if game.state.location_of(instance_id) != DRAW_PILE:
+        game._state = game.state.move_card(instance_id, DRAW_PILE)
+    pile = list(game.state.card_ids_in(DRAW_PILE))
+    pile.remove(instance_id)
+    game._state = game.state.reorder_zone(DRAW_PILE, (instance_id, *pile))
+
+
+def test_zhangba_bagua_virtual_dodge_event_order_materials_after_cancelled() -> None:
+    """MB-M-007：八卦虚拟闪顺序 = 闪事件 → cancelled → 材料 finalize。"""
+
+    game = _fresh(seed=3)
+    _equip(game, "sgs_weapon_zhangbashemao")
+    _zhangba_non_slash_hand(game, "p1")
+    bagua = next(
+        r
+        for r in game.formal_registry.records
+        if r.card_key == "sgs_armor_baguazhen"
+    )
+    game._state = game.state.move_card(
+        bagua.instance_id, ZoneRef.equipment("p2", "armor")
+    )
+    # 红牌判定成功（♥6 红）
+    red = next(
+        r
+        for r in game.formal_registry.records
+        if r.instance_id == "sgs-mobile-20260725-098"
+    )
+    _put_on_top_for_test(game, red.instance_id)
+    virtual = _zhangba_virtual_use_action(game)
+    virtual_id = virtual.card_instance_id
+    _step(game, virtual)
+    _step(game, _action(game, "activate_bagua"))
+    events = list(game.events)
+    virtual_dodge_index = next(
+        index
+        for index, event in enumerate(events)
+        if event.event_type is EventType.CARD_USED
+        and event.card_key == "sgs_basic_shan"
+        and event.payload.get("purpose") == "bagua_virtual_dodge"
+    )
+    cancelled_index = next(
+        index
+        for index, event in enumerate(events)
+        if event.event_type is EventType.CARD_EFFECT_CANCELLED
+        and event.card_instance_id == virtual_id
+    )
+    material_finalize_indices = [
+        index
+        for index, event in enumerate(events)
+        if event.payload.get("reason") == "zhangba_material_finalize"
+    ]
+    assert material_finalize_indices
+    assert (
+        virtual_dodge_index
+        < cancelled_index
+        < material_finalize_indices[0]
+    )
+    assert not game.state.card_ids_in(PROCESSING_ZONE)
     _assert_conservation(game)
 
 

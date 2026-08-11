@@ -84,10 +84,15 @@ def canonical_state_snapshot(state: GameState) -> dict[str, object]:
                     if player.character is None
                     else {
                         "character_key": player.character.character_key,
-                        "gender": (
+                        "intrinsic_gender": (
                             None
-                            if player.character.gender is None
-                            else player.character.gender.value
+                            if player.character.intrinsic_gender is None
+                            else player.character.intrinsic_gender.value
+                        ),
+                        "effective_gender": (
+                            None
+                            if player.character.effective_gender is None
+                            else player.character.effective_gender.value
                         ),
                     }
                 ),

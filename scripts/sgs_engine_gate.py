@@ -501,10 +501,12 @@ def _evaluate_live_formal_duel_gate(
                 GateIssueCode.AI_NOT_IMPLEMENTED,
                 "正式单挑确定性验收控制器尚未实现",
             )
-        if readiness.all_cards_implemented != derived_all_cards:
+        if (
+            readiness.duel_scope_all_cards_sufficient != derived_all_cards
+        ):
             add(
                 GateIssueCode.FORMAL_DUEL_READINESS_INSPECTION_FAILED,
-                "all_cards_implemented与38类卡牌现场语义明细不一致",
+                "duel_scope_all_cards_sufficient与38类卡牌现场语义明细不一致",
             )
         if (
             readiness.duel_complete_card_key_count
@@ -519,7 +521,13 @@ def _evaluate_live_formal_duel_gate(
         if not derived_all_cards:
             add(
                 GateIssueCode.ALL_CARDS_NOT_IMPLEMENTED,
-                "正式单挑所需卡牌语义尚未全部实现",
+                "正式单挑（严格两人）范围所需卡牌语义尚未全部实现",
+            )
+        if readiness.global_all_cards_implemented is True:
+            add(
+                GateIssueCode.FORMAL_DUEL_READINESS_INSPECTION_FAILED,
+                "global_all_cards_implemented 当前必须保持 False"
+                "（方天画戟多人语义仍为 PARTIAL，MB-B-004）",
             )
         if not readiness.reexecution_replay_supported:
             add(

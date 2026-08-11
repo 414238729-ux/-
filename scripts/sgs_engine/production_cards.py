@@ -34,7 +34,13 @@ from .actions import (
     UnsupportedRuleError,
 )
 from .engine import DEFAULT_DECK_PATH, AuthoritativeCoreSession
-from .model import EQUIPMENT_SLOTS, GameState, ZoneRef
+from .model import (
+    EQUIPMENT_SLOTS,
+    CharacterGender,
+    CharacterMetadata,
+    GameState,
+    ZoneRef,
+)
 
 if TYPE_CHECKING:
     from .production_batch import ProductionBasicCardBatch
@@ -441,12 +447,14 @@ def is_cixiong_opposite_gender_target(
 ) -> bool:
     """返回雌雄双股剑目标是否与持有者异性；未知资料严格失败关闭。
 
-    性别只能来自 ``PlayerState.character.gender`` 的权威角色元数据。此函数
-    不从玩家ID、座次、身份或模式名称推断，也不把缺失资料静默当作同性。
+    性别只读取 ``PlayerState.character`` 的权威角色元数据中的
+    ``effective_gender``（无独立覆盖时回退到 ``intrinsic_gender``），
+    不读取任何玩家ID、座次、身份或模式名称推断，也不把缺失资料静默当作
+    同性。
     ``CharacterGender.NONE``（确认无性别）是有效规则状态：任何要求角色为
     男性/女性、或比较双方性别的效果都不得把 NONE 当作男或女，也不得把
     两个 NONE 视为“异性”——持有者或目标任一方为 NONE 时恒返回 False。
-    ``gender is None``（资料未确认）仍严格失败关闭，与 NONE 严格区分。
+    生效性别为 ``None``（资料未确认）仍严格失败关闭，与 NONE 严格区分。
     """
 
     actor = state.players_by_id.get(actor_id)
@@ -458,21 +466,42 @@ def is_cixiong_opposite_gender_target(
     if (
         actor.character is None
         or target.character is None
-        or actor.character.gender is None
-        or target.character.gender is None
     ):
         raise UnsupportedRuleError(
             "雌雄双股剑技能需要性别判定；正式模式尚未装配权威角色性别"
             "元数据（CHARACTER_GENDER_METADATA_NOT_AVAILABLE），失败关闭"
         )
+    actor_gender = effective_gender_of(actor.character)
+    target_gender = effective_gender_of(target.character)
+    if actor_gender is None or target_gender is None:
+        raise UnsupportedRuleError(
+            "雌雄双股剑技能需要性别判定；生效性别资料未确认"
+            "（CHARACTER_GENDER_METADATA_NOT_AVAILABLE），失败关闭"
+        )
     if (
-        actor.character.gender.value == "none"
-        or target.character.gender.value == "none"
+        actor_gender.value == "none"
+        or target_gender.value == "none"
     ):
         # USER_CONFIRMED_RULE（2026-08-09）：无性别角色不满足任何
         # 男性/女性条件，也不与任何角色构成“异性”。
         return False
-    return actor.character.gender != target.character.gender
+    return actor_gender != target_gender
+
+
+def effective_gender_of(
+    character: CharacterMetadata,
+) -> CharacterGender | None:
+    """返回角色当前生效性别：优先 effective_gender，无覆盖时回退 intrinsic。
+
+    ``None``（资料未知/未装配生效性别）与 ``CharacterGender.NONE``（确认
+    无性别）保持严格区分，调用方不得把前者静默当作后者。
+    """
+
+    if not isinstance(character, CharacterMetadata):
+        raise TypeError("角色元数据必须是CharacterMetadata")
+    if character.effective_gender is not None:
+        return character.effective_gender
+    return character.intrinsic_gender
 
 
 def check_weapon_skill_gate(

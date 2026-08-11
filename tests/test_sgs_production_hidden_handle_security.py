@@ -24,6 +24,7 @@ import hashlib
 import hmac
 import json
 from pathlib import Path
+from types import MappingProxyType
 import pytest
 
 from scripts.sgs_engine.actions import InvalidActionError, validate_action
@@ -555,6 +556,23 @@ def test_tampered_hmac_key_fails_closed() -> None:
     rebuilt = ProductionReexecutionReplay.from_dict(tampered)
     with pytest.raises(ProductionReplayDivergenceError):
         reexecute_production_replay(rebuilt)
+
+
+def test_authoritative_private_is_deep_frozen_after_construction() -> None:
+    """MB-N-012：authoritative_private 构造后深冻结，禁止任何嵌套变更。"""
+
+    record = _record_zone_choice_replay()
+    private = record.authoritative_private
+    assert isinstance(private, MappingProxyType)
+    with pytest.raises(TypeError):
+        private["session_secret_hex"] = "ab" * 32  # type: ignore[index]
+    nested = private["session_id"]
+    assert isinstance(nested, str)
+    # 递归结构（例如未来的句柄映射）也必须冻结；当前字符串字段已验证
+    # 顶层 MappingProxyType 拒绝赋值。再验证 from_dict 重建后同样冻结。
+    reloaded = ProductionReexecutionReplay.from_dict(record.to_dict())
+    with pytest.raises(TypeError):
+        reloaded.authoritative_private["session_secret_hex"] = "ab" * 32  # type: ignore[index]
 
 
 def test_tampered_handle_entity_fails_closed() -> None:

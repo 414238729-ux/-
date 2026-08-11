@@ -36,6 +36,7 @@ from scripts.sgs_engine.model import (
     ZoneRef,
 )
 from scripts.sgs_engine.production_batch import (
+    ArmorDamageResolution,
     BatchActionIdController,
     ProductionBasicCardBatch,
     ProductionBatchError,
@@ -73,8 +74,9 @@ def _fresh(
     *,
     player_hp: tuple[int, int] = (4, 4),
     initial_hand_count: int = 4,
+    factory: type[ProductionBasicCardBatch] = ProductionBasicCardBatch,
 ) -> ProductionBasicCardBatch:
-    game = ProductionBasicCardBatch(
+    game = factory(
         seed=seed,
         player_hp=player_hp,
         initial_hand_count=initial_hand_count,
@@ -88,6 +90,30 @@ def _fresh(
         game.step(BatchActionIdController(action.action_id))
     assert game.phase.value == "play"
     return game
+
+
+class _PreventedZeroChainSession(ProductionBasicCardBatch):
+    """测试专用子类（MB-N-011）：通过生产解析缝强制 prevented_zero。
+
+    生产方法不再暴露 ``amount``／``amount_override`` 测试注入参数；本
+    子类只覆写 ``_resolve_chain_target_amount``，让测试覆盖正式不会自然
+    到达的“最终伤害为0”分支。
+    """
+
+    def _resolve_chain_target_amount(
+        self,
+        state: GameState,
+        chain: _PendingChainDamage,
+        target_id: str,
+    ) -> ArmorDamageResolution:
+        del state, chain, target_id
+        return ArmorDamageResolution(
+            declared_amount=0,
+            final_amount=0,
+            modifiers=(),
+            prevented=True,
+            armor_ignored=False,
+        )
 
 def _me(game: ProductionBasicCardBatch) -> str:
     return game._first_player_id
@@ -692,7 +718,7 @@ def test_original_target_is_not_reprocessed() -> None:
 
 
 def test_prevented_zero_step_returns_finished_outcome() -> None:
-    game = _fresh(73)
+    game = _fresh(73, factory=_PreventedZeroChainSession)
     _stock_tricks(game)
     me, other = _me(game), _other(game)
     game._state = _replace_player(game.state, me, chained=True)
@@ -715,7 +741,7 @@ def test_prevented_zero_step_returns_finished_outcome() -> None:
     finished_before = len(_events_of(game, EventType.CHAIN_DAMAGE_FINISHED))
     next_state, next_runtime, outcome = (
         game._apply_chain_damage_to_target(
-            game.state, runtime, chain, me, amount=0
+            game.state, runtime, chain, me
         )
     )
     assert outcome is _ChainStepOutcome.FINISHED
@@ -728,7 +754,7 @@ def test_prevented_zero_step_returns_finished_outcome() -> None:
 
 
 def test_prevented_zero_finishes_chain_without_loop_or_double_event() -> None:
-    game = _fresh(79)
+    game = _fresh(79, factory=_PreventedZeroChainSession)
     _stock_tricks(game)
     me, other = _me(game), _other(game)
     game._state = _replace_player(game.state, me, chained=True)
@@ -756,7 +782,7 @@ def test_prevented_zero_finishes_chain_without_loop_or_double_event() -> None:
     # 第一个候选归零后必须立即结束：不得再次进入循环、不得访问已清理的
     # pending_chain、不得处理后续尚未开始目标、不得抛 ProductionBatchError。
     next_state, next_runtime = game._advance_chain(
-        game.state, runtime, amount_override=0
+        game.state, runtime
     )
     assert next_runtime.pending_chain is None
     assert next_runtime.phase is ProductionPhase.PLAY
@@ -778,7 +804,9 @@ def test_prevented_zero_finishes_chain_without_loop_or_double_event() -> None:
     assert len(_events_of(game, EventType.DAMAGE)) == 0
 
 
-def test_chain_step_amount_injection_rejects_negative() -> None:
+def test_chain_production_methods_expose_no_test_injection_parameters() -> None:
+    """MB-N-011：测试注入不得出现在生产类方法参数中。"""
+
     game = _fresh(83)
     _stock_tricks(game)
     me, other = _me(game), _other(game)
@@ -798,13 +826,17 @@ def test_chain_step_amount_injection_rejects_negative() -> None:
         session_id=game.session_id,
     )
     runtime = replace(game._runtime, pending_chain=chain)
-    with pytest.raises(ValueError, match="不能为负数"):
+    with pytest.raises(TypeError):
         game._apply_chain_damage_to_target(
-            game.state, runtime, chain, me, amount=-1
+            game.state, runtime, chain, me, amount=0  # type: ignore[call-arg]
         )
-    with pytest.raises(TypeError, match="必须是整数"):
+    with pytest.raises(TypeError):
         game._apply_chain_damage_to_target(
-            game.state, runtime, chain, me, amount=True  # type: ignore[arg-type]
+            game.state, runtime, chain, me, amount=True  # type: ignore[call-arg]
+        )
+    with pytest.raises(TypeError):
+        game._advance_chain(
+            game.state, runtime, amount_override=0  # type: ignore[call-arg]
         )
 
 

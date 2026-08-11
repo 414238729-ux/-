@@ -1,30 +1,77 @@
 # 三国杀统一模拟项目总实施计划
 
-## MILESTONE_B 当前推进状态（2026-08-09）
+## MILESTONE_B 当前推进状态（2026-08-11，CURRENT）
 
-下一精确目标仍是 `FORMAL 160-CARD NO-SKILL DUEL`。本轮以分支 `sol-ultra-milestone-b-formal-duel`、固定基线 `4c8c4466f1950740c69767a01a0b24cab723b310` 开发；工作树尚未提交，`commit=null`、`pending`，没有执行 commit／tag／push。旧 whole-repo audit remediation chain 已永久封存，本轮不创建 remediation-7，不回写其审计结论、分支或标签。
+本精确目标为 `MILESTONE_B_AUDIT_REMEDIATION_1`：定向关闭
+`MILESTONE_B_FORMAL_160_CARD_NO_SKILL_DUEL_INDEPENDENT_ADVERSARIAL_AUDIT`
+（`MILESTONE_B_AUDIT_FAILED`，4 BLOCKING／6 MAJOR／3 MINOR，无新
+RULE_SOURCE_GAP）的全部 13 项 finding。开发分支
+`sol-ultra-milestone-b-formal-duel`，开始 HEAD=
+`ebd656754ed2a528e0d08cd5175b68385fdb8140`；audit branch
+`sol-ultra-audit-milestone-b-formal-duel` 保持冻结于该提交，未移动。工作树
+尚未提交，`commit=null`、`pending`，没有执行 commit／tag／push。旧
+whole-repo audit remediation chain 已永久封存，本轮不创建 remediation-7。
 
-当前已推进但尚未构成里程碑通过的事实：
+当前已关闭（本地实现层面）的事实：
 
-- 正式 CSV 现场加载 160 张唯一实体、38 类卡牌；global `COMPLETE` 为 36 类／158 实体，duel-scope sufficient 为 37 类／159 实体。
-- `FormalNoSkillDuelSession` 是统一 `ProductionBasicCardBatch` 的薄模式层；analysis-only factory 已生产可达，同一 `GameState`、事件、合法动作、响应窗口、伤害、距离、阶段、濒死、胜负、重洗、RNG 与 replay 被复用，没有第二套引擎。
-- 雌雄双股剑通用语义已 `COMPLETE`，但 formal 参与者角色／性别的权威来源仍为 `MODE_GAP`；方天画戟多人附加目标在严格两人 duel 中为 N/A，但 global 仍是 `PARTIAL`。
-- 丈八蛇矛仍有最小规则确认问题：材料区域生命周期是 A（`HAND→PROCESSING→结算后DISCARD`）还是 B（使用／打出开始即 `HAND→DISCARD`、不进 `PROCESSING`）。通用 `VirtualCardReference` foundation 已完成：typed card key、conversion rule、材料实体 ID、physical／virtual 互斥、公共枚举校验、动作 ID 与 strict replay 均已绑定；`tests/test_sgs_engine_actions.py` 定向 18 passed，原独立数据模型缺口已关闭。丈八具体 lifecycle integration 仍由 A／B 规则门禁控制，旧 `virtual:*` 实体 ID 路径不得启用。
-- formal replay 已接入 mode-bound canonical factory 的严格逐动作重执行；status/gate 从现场 inspector 派生，调用方不能用 payload 或 manifest 静态布尔值伪造准入。
-- runner 的 future-ready 分支已实现 canonical 逐 seed 证据复检与原子 JSON 输出；但模块私有 `_FORMAL_EXECUTION_RELEASED` guard 与权威 profile／卡牌／100-seed 前置条件尚未关闭。当前 `mode_implemented=false`、`all_cards_implemented=false`、`unsupported_rules=2`、`approximation_count=0`、`acceptance_seed_count=0`、`formal_duel_no_skill_ready=false`，live gate 在接触输出路径前拒绝。
-- analysis-only 固定 seeds 0..99 诊断已完整保留在 `docs/MILESTONE_B_ANALYSIS_SEED_DIAGNOSTIC.json`：无排除／重采样，55 局自然结束、45 局仅按既有规则门禁抛 `UnsupportedRuleError`（丈八23、雌雄元数据22），safety-cap／非法动作／生产异常／其他异常均为0，全部使用160张牌且联合到达38类牌。这证明本轮观察到的非规则 seed blocker 已清零；但未确认 profile 使总 unsupported=145、approximation=100，formal eligible／reexecution verified均为0，不能计入正式验收。
+- MB-B-001：正式 run 入口现场执行 seeds 0..99；acceptance artifact 升级为
+  schema v2，绑定当前 implementation/rules-profile/deck identity，只作为
+  缓存证据；status 永不把缓存称为 `simulation_executed=true`；artifact
+  完整攻击矩阵全部 fail-closed。
+- MB-B-002：丈八虚拟杀统一 Slash root finalizer；主动杀／借刀杀经
+  DYING 桃救回／死亡／game over 四条路径均 `PROCESSING→DISCARD` 恰好一次。
+- MB-B-003：LegalAction/response/card 候选先按稳定权威语义顺序（实体ID）
+  排列再附加 HMAC handle；同一 seed＋不同 session secret 得到相同语义
+  顺序、winner、action_count 与 final canonical hash。
+- MB-B-004：能力分层——`formal_duel_no_skill_ready=true`、
+  `duel_scope_all_cards_sufficient=true`，但
+  `authoritative_full_game_core=false`、`multi_player_production_proven=false`、
+  `milestone_b_complete=false`、`global_all_cards_implemented=false`，
+  方天 global `PARTIAL`。
+- MB-M-005：`source_confirmed` 只能由 canonical trusted factory 或
+  `from_canonical_profile_value` 授予；普通 JSON 反序列化恒为
+  analysis/untrusted；replay 加载验证 canonical 内容而非让 payload 自证。
+- MB-M-006：`CharacterMetadata.intrinsic_gender`＋`effective_gender`
+  可同时表达（如 intrinsic=MALE、effective=NONE）；雌雄读取 effective。
+- MB-M-007：被闪／八卦虚拟闪事件顺序为 Jink→cancelled→材料 finalize。
+- MB-M-008：新增 `assert_resolution_invariants`／
+  `assert_finished_state_invariants`，replay/acceptance/runner 均执行；
+  FINISHED 时 PROCESSING/REVEALED 为空、所有挂起 root 清理。
+- MB-M-009：新增真实 formal run 入口子集执行、artifact 攻击矩阵、
+  same seed/different secret 确定性、丈八四路径 DYING 回归、finish
+  临时区不变量与 full-core 不得误开放测试。
+- MB-M-010：manifest/docs CURRENT 与 HISTORICAL/AS-OF 分层；旧
+  blocked／0 seeds 段不再看似 current；source integrity 以本轮最终执行
+  结果为准；本轮结束仍 `independent_audit_done=false`、
+  `audit_conclusion=NOT_AUDITED_YET`。
+- MB-N-011：`amount_override`/`amount` 测试注入移出生产接口（test
+  subclass 解析缝）。
+- MB-N-012：`ReplayRecord.authoritative_private` 构造后深冻结并增加
+  mutation rejection 测试。
+- MB-N-013：文档修正为“handle-only 只针对非行动者/公共视图；行动者本人
+  可见自己的两张材料实体ID”。
 
-当前阻塞及顺序：
+100-seed 正式验收（schema v2，seeds 0..99、formal profile、
+analysis_only=false、max_steps=2000、同局 record/replay + strict replay +
+final_state_hash）已重新运行：100/100 自然结束、failures=0；随后第二次
+determinism reproduction（新 session secrets）：winner/action_count/final
+canonical hash mismatch 均为 0。targeted tests、full pytest、compileall、
+source integrity、artifact 攻击矩阵、JSON/SHA/diff-check/unmerged 的最终
+计数见 `docs/CHECKPOINT_MANIFEST.json` 新增 checkpoint 的
+`final_verification`。
 
-1. 取得丈八蛇矛 A／B 生命周期的最小规则确认，并把已完成的统一 `VirtualCardReference` foundation 接到丈八材料区域转换时序；
-2. 取得 formal duel 权威 profile（平台／版本、160 张牌堆适用、初始手牌与体力、先手／首回合、同将／手气卡、参与者角色 key 与性别来源）；
-3. 在前两项关闭后完成 canonical seeds 0..99 的正式运行、严格重执行与逐 seed 证据装配；只有全部前置条件满足时才关闭模块私有 formal execution release guard。runner 消费并原子写出已验证证据的路径已经存在，不再另建第二入口；
-4. 完成 38 类牌的正式 duel 可达／失败关闭证明，以及完整 pytest、compileall、source integrity／SHA／JSON／anti-fake／gate；
-5. 对固定 seeds 0..99 逐项记录 winner、action count、turn／deck／reshuffle、unsupported、approximation、exception 与 safety-cap，100 局必须全部自然结束且不得排除失败 seed。
+独立审计尚未运行（`independent_audit_done=false`、
+`audit_conclusion=NOT_AUDITED_YET`），里程碑标签为 `null`；本轮不预写
+独立 reaudit PASSED。当前结论：`MILESTONE_B_AUDIT_REMEDIATION_1_PRECOMMIT_READY`
+（本地关闭，待独立复审）。
 
-本轮本地实现验证已收口：full pytest `2024 passed, 1 warning in 830.59s`（唯一 warning 为 `.pytest_cache` WinError5）；compileall exit0；source integrity扫描125个 Python 文件、117项 finding／audit item（formal56、test61）、defect0；manifest与诊断JSON解析通过且诊断seed IDs严格为0..99；runner status exit0并现场返回blocked readiness；Git-normalized SHA表47/47匹配；diff-check exit0。analysis-only 诊断的正式验收计数仍为0，这些本地证据不能替代规则确认或正式100-seed验收。独立审计尚未运行（`independent_audit_done=false`、`audit_conclusion=NOT_AUDITED_YET`），里程碑标签为 `null`。当前结论保持 `MILESTONE_B_BLOCKED`。
-
-下方正文保留既有阶段、检查点、提交、测试与封存审计历史。凡旧快照与本节 live 状态冲突，按原检查点时间解释；本节不改写 original=`WHOLE_REPO_AUDIT_FAILED`、R1–R5 FAILED、R6=`REMEDIATION_6_REAUDIT_PASSED` 或 finalization correction verification=`PASSED`。
+下方正文保留既有阶段、检查点、提交、测试与封存审计历史。凡旧快照（含
+2026-08-09 的 `MILESTONE_B_BLOCKED`、`all_cards_implemented=false`、
+`unsupported_rules=2`、acceptance=0 等）与本节 live 状态冲突，均为
+HISTORICAL/AS-OF 或 PRE-AUDIT SNAPSHOT，按原检查点时间解释；本节不改写
+original=`WHOLE_REPO_AUDIT_FAILED`、R1–R5 FAILED、
+R6=`REMEDIATION_6_REAUDIT_PASSED` 或 finalization correction
+verification=`PASSED`。
 
 > 更新日期：2026-08-07
 > 当前定位：正式 Knowledge、轻量规则／技能／策略组件库、阶段 4 的权威核心基础设施、测试专用无技能单挑垂直切片、正式160张牌堆六种基本牌的生产适配器批次、最小普通锦囊垂直切片（【无中生有】、【无懈可击】）、目标区域选牌批次（【过河拆桥】、【顺手牵羊】接入生产适配器），以及伤害型普通锦囊批次（【决斗】、【火攻】接入生产适配器）、群体普通锦囊批次（【南蛮入侵】、【万箭齐发】、【桃园结义】接入生产适配器）、剩余普通锦囊批次（【五谷丰登】完整生产语义＋【铁索连环】牌本体）、属性伤害传导生产基础设施（CP-04J），以及【借刀杀人】＋11种武器牌本体批次（CP-04K，已由用户在外部PowerShell提交，最终实现提交 `75c596b12f34a6222d972b2190148386bb670653`，amend 替代旧提交 `7456377f...`）；以及三种延时锦囊＋判定与阶段基础设施批次（CP-04L：【乐不思蜀】【兵粮寸断】【闪电】接入生产适配器，已由用户在外部PowerShell提交实现，提交哈希 `35c06bd50a431a62e7c3ad01d10384bf6884c403`）；但尚不是正式 160 张牌完整对局引擎。、四种防具＋伤害修正／防止基础设施批次（CP-04M：【八卦阵】【仁王盾】【藤甲】【白银狮子】接入生产适配器，实现提交 29ab73e006408e1e1582a300801e7aa6e04bd9c4 已由用户在外部PowerShell提交）、正式坐骑＋距离／攻击范围基础设施批次（CP-04N：【攻击坐骑】【防御坐骑】接入生产适配器，正式160张实体牌全部注册，实现提交 fd7d69f53e9827877b6a29d67c067012ead6a7af 已由用户在外部PowerShell提交）；以及正式弃牌阶段＋权威回合循环基础设施批次（CP-04O：正式阶段流收敛为 PREPARE→JUDGMENT→DRAW→PLAY→DISCARD→END 单一权威回合循环并正式实现弃牌阶段，实现提交 b1afb1a613a45c630ae1e42975d276d62915e76d 已由用户在外部PowerShell提交，2026-08-07 Grok 网页端独立只读静态审计最终结论 STATIC_AUDIT_PASSED）；以及正式武器技能完整化批次（CP-04P：诸葛连弩、青釭剑[QINGGANG_LIFECYCLE_CONFIRMED]、寒冰剑[逐张弃置语义]、古锭刀、青龙偃月刀[追杀不消耗普通出牌阶段杀额度，USER_CONFIRMED_MOBILE_RULE]、贯石斧[批量代价；自身不能作为代价，USER_CONFIRMED_MOBILE_RULE]、朱雀羽扇[含借刀转火杀]、麒麟弓8种武器完成正式生产语义；雌雄双股剑（DATA_MODEL_GAP: CHARACTER_GENDER_METADATA_NOT_AVAILABLE，规则本身已知）、丈八蛇矛（实现完成但subcard生命周期时点规则缺口VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP，暂计PARTIAL）、方天画戟（多人生产基础环未建立）3种保持PARTIAL，完整工作树实现已在本轮完成，完整 pytest 1974 passed；实现提交 f0a50ce9ace71c5bf0a22540fbdca9e03aa918b3（feat: implement verified production weapon skills）与检查点文档提交 c30b26880b947217d64304ce430d32030b42941e 均已由用户在外部PowerShell创建；2026-08-08 Grok 独立静态审计 STATIC_AUDIT_PASSED（16章全PASSED、BLOCKING/NONBLOCKING NONE），检查点状态 audited、worktree_commit_pending=false（审计记录文档提交 08d78cb6fed86360d647728a6f70422326918ff2 已产生并回填）；里程碑标签 milestone-b2-weapon-skills-audited 已实际建立并指向 398ea58c9006ee9141ea1acfba35f6d9c497be48）；以及整仓敌对式总审计定向修复批次（WHOLE_REPO_AUDIT_REMEDIATION_1：原总审计 CP04L_TO_CP04P_WHOLE_REPO_ADVERSARIAL_AUDIT 结论 WHOLE_REPO_AUDIT_FAILED（G-001..G-005、N-001）；修复实现提交 f1731b95199165a3449f1a0ce84d9facfc1b41c5（fix: remediate whole-repo audit findings）已由用户在外部PowerShell提交，检查点状态 committed_pending_audit、NOT_AUDITED_YET（HISTORICAL/AS-OF：R1文档回填时；CURRENT：remediation-1 targeted re-audit=REMEDIATION_REAUDIT_FAILED，R1未获得通过的独立审计）；以及整仓敌对式总审计定向修复第二轮（WHOLE_REPO_AUDIT_REMEDIATION_2：G-001 dead-self、R1-NEW-001 Qilin resolved final amount、R1-NEW-002 Qinggang cleanup、G-003保持、G-004/G-005、【杀】family通则与8项游戏内文本source同步、G-002=G-002_SOURCE_GAP_LOCALLY_RESOLVED_PENDING_INDEPENDENT_REAUDIT（HISTORICAL/AS-OF：R2实现时本地状态；CURRENT：G-002=CLOSED，由 remediation-2 targeted independent re-audit 确认）；实现提交 e63b40ac1690e03315fd3e0734d5723fb80d5182（fix: complete second whole-repo audit remediation）已由用户在外部PowerShell提交，检查点状态 committed_pending_audit、worktree_commit_pending=true（HISTORICAL/AS-OF：R2文档回填时 NOT_AUDITED_YET；CURRENT：remediation-2 targeted re-audit=REMEDIATION_2_REAUDIT_FAILED，原因是当时G-004/G-005仍OPEN）；以及整仓敌对式总审计定向修复第三轮/最小收尾（WHOLE_REPO_AUDIT_REMEDIATION_3：G-004 ba64历史引用分层、G-005 stale清理、R2-NEW-001 annotation统一tuple[str,str]|None；实现提交 9c63496e7f34430d8aff3c23e9afc5b5c4482557（fix: close remaining whole-repo audit findings）已由用户在外部PowerShell提交，检查点状态 committed_pending_audit、worktree_commit_pending=true（HISTORICAL/AS-OF：R3文档回填时 NOT_AUDITED_YET；CURRENT：remediation-3 targeted re-audit=REMEDIATION_3_REAUDIT_FAILED，原因是当时G-004仍有§8漏项与R3-NEW-001 G-002矛盾）；以及整仓敌对式总审计定向修复第四轮/docs-only治理收尾（WHOLE_REPO_AUDIT_REMEDIATION_4：G-004 §8 CP-04L tag-target漏项修正、R3-NEW-001 G-002分层；实现提交 5eb367599e9d7deb26220cfff8b81144d0d88eff（docs: close remaining whole-repo audit governance findings）已由用户在外部PowerShell提交；docs-only、无runtime/gameplay修改；检查点状态 committed_pending_audit、worktree_commit_pending=true（HISTORICAL/AS-OF：R4文档回填时 NOT_AUDITED_YET；CURRENT：remediation-4 targeted re-audit=REMEDIATION_4_REAUDIT_FAILED，原因是当时唯一残余 contradiction——ENGINE_STATUS 顶部 R2 G-002 子句未分层）；以及整仓敌对式总审计定向修复第五轮/单点最终收尾（WHOLE_REPO_AUDIT_REMEDIATION_5：R4-NEW-001/R3-NEW-001 residual——ENGINE_STATUS 顶部 R2 G-002 子句双层分层；实现提交 2c28cf0404f4b7bbc0752fa75594580fafef1256（docs: resolve final audit status contradiction）已由用户在外部PowerShell提交；docs-only、仅修改docs/ENGINE_STATUS.md、无runtime/gameplay修改；检查点状态 committed_pending_audit、worktree_commit_pending=true（HISTORICAL/AS-OF：R5文档回填时 NOT_AUDITED_YET；CURRENT：remediation-5 targeted re-audit=REMEDIATION_5_REAUDIT_FAILED，唯一新finding R5-NEW-001 MINOR——manifest generic current field 仍表达 G-002 pending）；以及整仓敌对式总审计定向修复第六轮/manifest-only单字段治理收尾（WHOLE_REPO_AUDIT_REMEDIATION_6：g002_source_gap_locally_resolved → G-002_CLOSED（key不变）；实现提交 2a075580484fadf3a2e4b7b76f4e4ad918af66e3（docs: normalize G-002 machine-readable audit state）已由用户在外部PowerShell提交；docs-only、仅修改docs/CHECKPOINT_MANIFEST.json、无runtime/gameplay修改；检查点状态 audited、independent_audit_done=true、audit_conclusion=REMEDIATION_6_REAUDIT_PASSED（WHOLE_REPO_AUDIT_REMEDIATION_6_TARGETED_REAUDIT：R5-NEW-001=CLOSED、其余 finding STILL_CLOSED/NO_REGRESSION、NEW_FINDINGS=NONE、章节18/19/25 PASSED；被审计checkpoint=95d068dd01a97ae4337696a25df4edb1b317f26b、audit_result_commit=0e023694df7ea123c41c2b415784532c9d185d26）、worktree_commit_pending=false、milestone_tag=null；历史链 original WHOLE_REPO_AUDIT_FAILED 与 R1-R5 FAILED 保持，当前通过的是 remediation chain 最终独立复审）

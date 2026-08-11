@@ -1699,6 +1699,89 @@ def test_zhangba_borrowed_without_entity_slash_uses_virtual() -> None:
     )
 
 
+def test_zhangba_borrowed_dying_rescue_finalizes_materials() -> None:
+    """MB-B-002/C：借刀丈八杀 → DYING → 桃救回，材料恰好 finalize。"""
+
+    game = _fresh(seed=3)
+    jiedao_id, weapon_id, slash_ids = _jiedao_fixture(
+        game,
+        weapon_key="sgs_weapon_zhangbashemao",
+        slash_keys=(),
+    )
+    assert slash_ids == []
+    _set_hp(game, "p1", 1)
+    _step(game, _action(game, "use_jiedao", card_key=JIEDAO))
+    _step(game, _action(game, "pass_trick_response"))
+    _step(game, _action(game, "pass_trick_response"))
+    assert game.phase is ProductionPhase.BORROWED_SWORD_CHOICE
+    zhangba_choices = [
+        a
+        for a in game.legal_actions()
+        if a.payload.get("zhangba_virtual") is True
+    ]
+    assert zhangba_choices
+    _step(game, zhangba_choices[0])
+    _step(game, _action(game, "pass_slash_response"))
+    assert game.phase is ProductionPhase.DYING_RESCUE
+    pending = game.runtime.pending_slash
+    assert pending is not None and pending.virtual
+    materials = pending.material_ids
+    for instance_id in materials:
+        assert game.state.location_of(instance_id) == PROCESSING_ZONE
+    tao = next(r for r in game.formal_registry.records if r.card_key == TAO)
+    _swap(game, tao.instance_id, ZoneRef.hand("p1"))
+    _step(game, _action(game, "rescue_with_peach"))
+    assert game.phase is ProductionPhase.PLAY
+    for instance_id in materials:
+        assert game.state.location_of(instance_id) == DISCARD_PILE
+    assert not game.state.card_ids_in(PROCESSING_ZONE)
+    assert game.runtime.pending_borrowed_sword is None
+    assert jiedao_id in game.state.card_ids_in(DISCARD_PILE)
+    assert weapon_id in game.state.card_ids_in(
+        ZoneRef.equipment("p2", "weapon")
+    )
+
+
+def test_zhangba_borrowed_dying_death_game_over_finalizes_materials() -> None:
+    """MB-B-002/D：借刀丈八杀 → DYING → 死亡/game over，材料不悬空。"""
+
+    game = _fresh(seed=3)
+    jiedao_id, weapon_id, slash_ids = _jiedao_fixture(
+        game,
+        weapon_key="sgs_weapon_zhangbashemao",
+        slash_keys=(),
+    )
+    assert slash_ids == []
+    _set_hp(game, "p1", 1)
+    _step(game, _action(game, "use_jiedao", card_key=JIEDAO))
+    _step(game, _action(game, "pass_trick_response"))
+    _step(game, _action(game, "pass_trick_response"))
+    zhangba_choices = [
+        a
+        for a in game.legal_actions()
+        if a.payload.get("zhangba_virtual") is True
+    ]
+    _step(game, zhangba_choices[0])
+    _step(game, _action(game, "pass_slash_response"))
+    assert game.phase is ProductionPhase.DYING_RESCUE
+    pending = game.runtime.pending_slash
+    assert pending is not None and pending.virtual
+    materials = pending.material_ids
+    _step(game, _action(game, "pass_rescue"))
+    _step(game, _action(game, "pass_rescue"))
+    assert game.is_finished
+    assert game.winner_id == "p2"
+    for instance_id in materials:
+        assert game.state.location_of(instance_id) == DISCARD_PILE
+    assert not game.state.card_ids_in(PROCESSING_ZONE)
+    assert game.runtime.pending_borrowed_sword is None
+    assert jiedao_id in game.state.card_ids_in(DISCARD_PILE)
+    assert weapon_id in game.state.card_ids_in(
+        ZoneRef.equipment("p2", "weapon")
+    )
+    game.assert_finished_state_invariants()
+
+
 def test_weapon_gates_never_approximate_unknown_weapons() -> None:
     # 未知武器键（理论上不可能出现在正式牌堆，但防御性断言）必须失败关闭，
     # 不得静默当作白板；approximation_count 始终为0（由源码审计与门禁覆盖）。

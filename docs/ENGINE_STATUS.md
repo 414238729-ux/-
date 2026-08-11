@@ -1,8 +1,16 @@
 # 三国杀正式引擎状态
 
-## MILESTONE_B 当前现场状态（2026-08-09）
+## MILESTONE_B 当前现场状态（2026-08-11，CURRENT）
 
-本节记录 `MILESTONE_B_FORMAL_160_CARD_NO_SKILL_DUEL_ADVANCEMENT` 工作树的当前事实，优先于下方较早批次快照。本轮实现基线为 `2ed9627ba816e9ab5023bd3017ce7cca90ec0022`（`feat: advance formal 160-card duel infrastructure`，已创建并推送远程）；开发分支为 `sol-ultra-milestone-b-formal-duel`，本轮尚未提交，`commit=null`、`pending`。本节不是 whole-repo audit 的续写，也不是 `remediation-7`。
+本节记录 `MILESTONE_B_AUDIT_REMEDIATION_1` 工作树的当前事实，优先于下方
+较早批次快照（下方旧 “MILESTONE_B 当前现场状态（2026-08-09）” 与全部
+“0 seeds/blocked” 段均为 HISTORICAL/AS-OF 或 PRE-AUDIT SNAPSHOT，不表达
+当前状态）。本轮开始 HEAD=`ebd656754ed2a528e0d08cd5175b68385fdb8140`；
+audit branch `sol-ultra-audit-milestone-b-formal-duel` 保持冻结于该提交，
+未移动。本轮工作树尚未提交，`commit=null`、`pending`；独立 Ultra 复审尚未
+发生：`independent_audit_done=false`、`audit_conclusion=NOT_AUDITED_YET`，
+不预写本轮 reaudit PASSED。本节不是 whole-repo audit 的续写，也不是
+`remediation-7`。
 
 ```text
 mode_id=formal_160_card_no_skill_duel
@@ -15,7 +23,8 @@ duel_complete_card_key_count=38
 duel_complete_instance_count=160
 mode_runtime_reachable=true
 mode_implemented=true
-all_cards_implemented=true
+duel_scope_all_cards_sufficient=true
+global_all_cards_implemented=false
 reexecution_replay_supported=true
 unsupported_rules=0
 approximation_count=0
@@ -23,11 +32,19 @@ acceptance_seed_count=100
 fixed_seed_acceptance_passed=true
 formal_duel_no_skill_ready=true
 formal_run_ready=true
+authoritative_full_game_core=false
+multi_player_production_proven=false
+milestone_b_complete=false
+global_fangtian_status=PARTIAL
 ```
 
-用户新确认规则（2026-08-09）：①丈八蛇矛材料生命周期 `USER_CONFIRMED_RULE`——两张材料牌从手牌构成虚拟普通【杀】时 `HAND→PROCESSING` 为权威牌移动，虚拟【杀】整个使用/打出与结算期间材料保持 PROCESSING，本次虚拟【杀】完整结算完成后 `PROCESSING→DISCARD`；`VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP` 已关闭，丈八蛇矛恢复 COMPLETE。②formal soldier profile `USER_CONFIRMED_PROJECT_FORMAL_PROFILE`——双方士兵（soldier）无技能、max_hp=4/initial_hp=4/初始手牌4、唯一 DeterministicRNG 先手、DRAW 正常摸2、无手气卡/身份奖励、正式160牌、死亡胜负；士兵 `effective gender=NONE`（雌雄不因“异性”发动）。③effective gender `NONE`（GENDERLESS）是合法规则状态：任何要求角色为男性/女性或比较双方性别的效果不得把 NONE 当作男或女，两个 NONE 不构成“异性”；`CharacterGender.NONE` 与资料未确认（gender=None）严格区分。
+规则来源（用户确认，HISTORICAL 事实保持）：①丈八蛇矛材料生命周期 `USER_CONFIRMED_RULE`（2026-08-09）——`HAND→PROCESSING→DISCARD`，`VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP` 已关闭；②formal soldier profile `USER_CONFIRMED_PROJECT_FORMAL_PROFILE`（2026-08-09）；③`CharacterGender.NONE` 与资料未确认（None）严格区分。
 
-正式100-seed验收 `FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE`（seeds 0..99、formal profile、analysis_only=false、每局 strict replay reexecution + final_state_hash）已现场运行：100/100 自然结束、failures=0、safety-cap 0、unsupported 0、approximation 0；artifact=docs/FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE.json。live gate 现场派生 `formal_duel_no_skill_ready=true`、`formal_run_ready=true`、blockers=[]；`MILESTONE_B=PASSED`（正式160张无技能单挑范围）。全局门禁保持：`authoritative_full_game_core=false`（正式整局引擎仍未完成）、`multi_player_production_proven=false`、`unsupported_rules=1`（完整整局哨兵）。
+正式100-seed验收 `FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE`（schema v2、seeds 0..99、formal profile、analysis_only=false、max_steps=2000、每局同一 session 现场执行并同步 record decisions、strict replay 同一份 record + final_state_hash）已重新现场运行：100/100 自然结束、failures=0、safety-cap 0、unsupported 0、approximation 0；artifact=docs/FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE.json。artifact 绑定当前 implementation/rules-profile/deck identity，只是缓存证据；live gate 现场严格验证全部关键字段（MB-B-001），`simulation_executed=false` 的 status 绝不把缓存称为已执行。随后又从头运行一次 independent determinism reproduction（相同 0..99、新 session secrets）：winner mismatch=0、action_count mismatch=0、final canonical hash mismatch=0。
+
+`formal_duel_no_skill_ready=true`、`formal_run_ready=true`、`duel_scope_all_cards_sufficient=true` 只证明“正式160张无技能两人单挑”范围。全局门禁保持：`authoritative_full_game_core=false`（正式整局引擎仍未完成）、`multi_player_production_proven=false`、`milestone_b_complete=false`、`global_all_cards_implemented=false`、方天画戟 global `PARTIAL`（MB-B-004）。
+
+本轮修复目标为 `MILESTONE_B_AUDIT_FAILED`（4 BLOCKING／6 MAJOR／3 MINOR，无新 RULE_SOURCE_GAP）的 13 项 finding：MB-B-001..004、MB-M-005..010、MB-N-011..013 均在本工作树本地关闭（逐项结论见 docs/CHECKPOINT_MANIFEST.json 新增 checkpoint）。是否最终关闭由下一次 Ultra 独立复审裁决；本轮不把 `independent_audit_done` 写成 true。
 
 三件原 PARTIAL 武器的当前边界：
 
@@ -37,7 +54,7 @@ formal_run_ready=true
 
 `MILESTONE_B_ANALYSIS_SEED_DIAGNOSTIC`（docs/MILESTONE_B_ANALYSIS_SEED_DIAGNOSTIC.json）仍是 analysis-only 历史诊断，不得改写成正式 acceptance；正式证据只来自 `FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE.json`。
 
-本轮本地验证已经收口：`python -m pytest -q` 为 `2041 passed`（0 failed、0 skipped、0 xfailed，1170.71s）；`python -m compileall -q scripts tests` exit 0；source integrity 122文件／defect 0／audit_item 55；JSON 可解析；SHA-256 38条目 mismatch=0；`git diff --check` exit 0；`git ls-files -u` 为空。以上是本地实现／回归证据，不是独立审计，也不能把 analysis-only 诊断转成正式结论。独立审计尚未运行：`independent_audit_done=false`、`audit_conclusion=NOT_AUDITED_YET`、`milestone_tag=null`。工作树待用户提交。
+本轮本地验证（2026-08-11 最终执行）：`python -m pytest -q` = `2053 passed`（0 failed、0 skipped、0 xfailed，2352.16s，唯一 warning 为 `.pytest_cache` WinError5）；`python -m compileall -q scripts tests` exit 0；source integrity = 127 文件／128 audit item（formal 66、test 62）／defect 0；正式验收 `FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE` v2 = 100/100 PASSED（2631.2s）；正式 runner `run` 现场执行 100 seeds = passed（2648s，`simulation_executed=true`、`result_source=live_execution`）；第二次 determinism reproduction = winner/action_count/final hash mismatch 均 0（288.7s）；artifact 攻击矩阵 24 项全部 fail-closed；JSON 可解析；Git-normalized SHA-256 50 条目 mismatch=0；`git diff --check` exit 0；`git ls-files -u` 为空；audit branch `sol-ultra-audit-milestone-b-formal-duel` 保持冻结于 `ebd656754ed2a528e0d08cd5175b68385fdb8140`。以上都是本地实现／回归证据，不是独立审计。独立审计尚未运行：`independent_audit_done=false`、`audit_conclusion=NOT_AUDITED_YET`、`milestone_tag=null`。工作树待用户提交。
 
 永久封存边界保持不变：original=`WHOLE_REPO_AUDIT_FAILED`；R1–R5 分别为对应 `REMEDIATION_*_REAUDIT_FAILED`；R6=`REMEDIATION_6_REAUDIT_PASSED`；finalization correction verification=`PASSED`。不创建 R7，不修改旧 audit branch／milestone tag，不把 original FAILED 改成 PASSED。
 
@@ -70,8 +87,14 @@ production_mount_distance_infrastructure=true
 production_turn_cycle_discard_infrastructure=true
 production_weapon_skill_completion=true
 authoritative_full_game_core=false
+multi_player_production_proven=false
+milestone_b_complete=false
 formal_duel_no_skill_ready=true
 formal_run_ready=true
+duel_scope_all_cards_sufficient=true
+global_all_cards_implemented=false
+independent_audit_done=false
+audit_conclusion=NOT_AUDITED_YET
 ```
 
 `production_basic_cards_batch=true` 只描述正式160张牌堆中六种基本牌（普通【杀】、火【杀】、雷【杀】、【闪】、【桃】、【酒】）已接入生产适配器批次；`production_single_target_trick_slice=true` 只描述【无中生有】（4张）与【无懈可击】（7张）的最小普通锦囊垂直切片；`production_zone_target_trick_batch=true` 只描述【过河拆桥】（6张）与【顺手牵羊】（5张）接入生产适配器并共用“目标区域选牌、隐藏手牌选择、实体牌移动”基础设施；`production_duel_fire_attack_batch=true` 只描述【决斗】（3张）与【火攻】（3张）接入生产适配器并复用【无懈可击】逐张响应链与伤害型普通锦囊结算路径；`production_group_target_trick_batch=true` 只描述【南蛮入侵】（3张）、【万箭齐发】（1张）与【桃园结义】（1张）接入生产适配器并建立“群体普通锦囊按行动顺序逐目标结算框架”（服务器自动目标序列、逐目标独立【无懈可击】窗口、逐目标响应或受伤／回复、濒死救援期间队列暂停与恢复）；`production_remaining_ordinary_trick_batch=true` 只描述【五谷丰登】（2张）完整生产语义与【铁索连环】（6张）完整语义接入生产适配器（公共REVEALED展示池、逐目标独立【无懈可击】、横置状态切换、重铸与属性伤害传导，CP-04J）；`production_chain_damage_infrastructure=true` 只描述横置角色火／雷属性伤害传导生产基础设施（统一传导入口、原始与派生伤害区分、确定性候选顺序、濒死挂起恢复、严格回放与链事件契约，CP-04J；三人以上传导未由正式生产入口证明）；`production_borrowed_sword_weapon_system=true` 只描述【借刀杀人】（2张）完整双人生产语义与11种／12张武器牌本体接入生产适配器（主动装备、同槽替换、攻击范围动态计算、装备区公开、按角色出杀计数、武器专属技能按集中式影响门禁失败关闭，CP-04K）。它们都不表示普通锦囊批次完成，也不表示正式160张牌无技能单挑完成；`production_turn_cycle_discard_infrastructure=true` 只描述正式阶段流收敛为单一权威回合循环（PREPARE→JUDGMENT→DRAW→PLAY→DISCARD→END）并正式实现弃牌阶段（手牌上限默认等于当前体力值；UI逐张选择只是选择过程，确认后所选牌作为一次批量弃置统一结算并自动推进）与回合级状态清理／下一行动者转交。正式160张牌38种卡牌已全部接入生产适配器（formal_deck_registration_complete=true），其中37种／159张完整语义（CP-04P 将8种／9张武器升级为COMPLETE；2026-08-09 用户确认丈八材料生命周期 HAND→PROCESSING→DISCARD 后丈八蛇矛恢复 COMPLETE，共10种武器COMPLETE），剩余未注册0种／0张；未完整语义能力（方天画戟[多人生产环缺口]、武将技能等）与正式整局入口继续失败关闭（雌雄双股剑与丈八蛇矛均已 COMPLETE）。当前计数口径必须分开：
@@ -82,7 +105,7 @@ unsupported_rules=0
 approximation_count=0
 
 [formal]
-unsupported_rules=1  # 至少存在一个完整正式整局能力阻塞的哨兵，不是精确缺项数（38种正式卡牌已全部注册，35种完整语义，未完整语义能力仍失败关闭）
+unsupported_rules=0  # 正式单挑（严格两人无技能）范围；完整整局能力由 authoritative_full_game_core=false 表达，不再用 unsupported_rules 冒充整局哨兵
 approximation_count=0  # 正式入口拒绝执行，所以没有运行近似
 
 [production_turn_cycle_discard_infrastructure]
@@ -104,8 +127,9 @@ remaining_card_kinds=0
 remaining_normal_tricks=0
 formal_deck_registration_complete=true
 all_card_semantics_complete=false
+duel_scope_all_cards_sufficient=true
 multi_player_production_proven=false
-unsupported_rules=1  # 武器专属技能、武将技能、正式整局等仍失败关闭
+unsupported_rules=0  # 正式单挑范围；完整整局能力由 authoritative_full_game_core=false 表达
 approximation_count=0
 
 [production_basic_cards_batch]
@@ -855,6 +879,8 @@ approximation_count == 0
 AI合法动作枚举完整
 回放可确定性复现
 ```
+
+【HISTORICAL/AS-OF（旧门禁快照）：以下两段描述的是正式完整整局能力尚未就绪时的门禁；CURRENT 以本文顶部 2026-08-11 现场状态为准——formal 单挑已就绪、`run` 确实现场执行，但 `authoritative_full_game_core=false` 保持。】
 
 `scripts/sgs_engine_gate.py` 提供结构化门禁，`scripts/sgs_formal_runner.py` 会真实加载并审计正式160张牌堆。门禁的正式牌数固定为160，入口类型与核心导入由真实路径、源码 AST 和 SHA-256 现场派生；当前“完整整局核心未完成”状态不可由调用方自行改成通过。虽然权威 foundation 已存在，但完整卡牌／阶段规则循环、模式、AI、参战武将整局实现、生产动作适配器和规则版本尚未就绪；`run` 当前返回退出码2，`simulation_executed=false`，并且不会创建请求的输出目录或文件。任一条件不满足时必须继续拒绝正式模拟，并返回中文结构化错误。禁止：
 

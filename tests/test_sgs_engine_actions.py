@@ -324,7 +324,7 @@ def test_action_id_binds_character_and_gender_metadata():
                 item,
                 character=CharacterMetadata(
                     character_key="general_test",
-                    gender=CharacterGender.MALE,
+                    intrinsic_gender=CharacterGender.MALE,
                 ),
             )
             if item.player_id == player.player_id

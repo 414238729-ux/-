@@ -74,10 +74,20 @@ class CharacterGender(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class CharacterMetadata:
-    """可被未来武将系统复用的最小角色身份元数据。"""
+    """可被未来武将系统复用的最小角色身份元数据。
+
+    同时保存 ``intrinsic_gender``（角色固有性别）与 ``effective_gender``
+    （当前生效性别）。两者可以不同（例如 intrinsic=MALE、
+    effective=NONE），以便规则效果读取当前生效性别而不无条件使用固有
+    性别。``effective_gender`` 为 ``None`` 时表示“无独立覆盖”，读取方应
+    回退到 ``intrinsic_gender``；这与 ``CharacterGender.NONE``（确认
+    无性别）严格区分。``gender`` 属性保留为 ``intrinsic_gender`` 的只读
+    兼容别名。
+    """
 
     character_key: str
-    gender: CharacterGender | str | None = None
+    intrinsic_gender: CharacterGender | str | None = None
+    effective_gender: CharacterGender | str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -85,18 +95,38 @@ class CharacterMetadata:
             "character_key",
             _nonempty_text(self.character_key, "角色规则键"),
         )
-        gender = self.gender
-        if gender is None:
-            return
-        if not isinstance(gender, CharacterGender):
-            try:
-                gender = CharacterGender(gender)
-            except (TypeError, ValueError) as exc:
-                allowed = "、".join(item.value for item in CharacterGender)
-                raise ModelValidationError(
-                    f"角色性别只能是：{allowed}"
-                ) from exc
-        object.__setattr__(self, "gender", gender)
+        object.__setattr__(
+            self,
+            "intrinsic_gender",
+            _coerce_character_gender(self.intrinsic_gender, "角色固有性别"),
+        )
+        object.__setattr__(
+            self,
+            "effective_gender",
+            _coerce_character_gender(self.effective_gender, "角色生效性别"),
+        )
+
+    @property
+    def gender(self) -> CharacterGender | None:
+        """兼容只读别名：返回角色固有性别（intrinsic）。"""
+
+        return self.intrinsic_gender
+
+
+def _coerce_character_gender(
+    value: CharacterGender | str | None, label: str
+) -> CharacterGender | None:
+    """把角色性别字段规范化为枚举；None（资料未知）保持严格区分。"""
+
+    if value is None:
+        return None
+    if isinstance(value, CharacterGender):
+        return value
+    try:
+        return CharacterGender(value)
+    except (TypeError, ValueError) as exc:
+        allowed = "、".join(item.value for item in CharacterGender)
+        raise ModelValidationError(f"{label}只能是：{allowed}") from exc
 
 
 GLOBAL_ZONE_KINDS: frozenset[ZoneKind] = frozenset(

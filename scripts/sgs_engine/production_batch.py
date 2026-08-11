@@ -204,6 +204,10 @@ class _PendingSlash:
     # player_visible 正确表示。
     virtual: bool = False
     material_ids: tuple[str, ...] = ()
+    # 丈八虚拟杀材料是否已经 PROCESSING→DISCARD 统一清理。统一 Slash root
+    # finalizer 只允许清理恰好一次：任何后续出口再次到达时不得重复移动，
+    # 也不得在 DYING/game-over 前跳过清理（MB-B-002）。
+    materials_finalized: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -2553,7 +2557,118 @@ class ProductionBasicCardBatch:
         )
         self._step_count += 1
         self._state.assert_card_conservation()
+        self.assert_resolution_invariants()
+        if self.is_finished:
+            self.assert_finished_state_invariants()
         return validated
+
+    def assert_resolution_invariants(self) -> None:
+        """结算中临时区不变量：PROCESSING 中实体必须能被当前挂起根解释。
+
+        这是独立于普通 card conservation 的解析状态不变量（MB-M-008）：
+        只检查“多出来的临时实体”，不把终止规则塞进守恒语义。
+        """
+
+        state = self._state
+        runtime = self._runtime
+        processing_ids = set(state.card_ids_in(PROCESSING_ZONE))
+        accounted: set[str] = set()
+        pending_slash = runtime.pending_slash
+        if pending_slash is not None:
+            if pending_slash.virtual:
+                accounted.update(pending_slash.material_ids)
+            else:
+                accounted.add(pending_slash.slash_instance_id)
+        if runtime.pending_damage_card_id is not None:
+            accounted.add(runtime.pending_damage_card_id)
+        for holder_name in (
+            "pending_trick",
+            "pending_duel",
+            "pending_fire_attack",
+            "pending_group_trick",
+            "pending_borrowed_sword",
+            "pending_wugu",
+            "pending_judgment",
+        ):
+            holder = getattr(runtime, holder_name, None)
+            if holder is None:
+                continue
+            for field_name in (
+                "trick_instance_id",
+                "root_card_instance_id",
+            ):
+                value = getattr(holder, field_name, None)
+                if isinstance(value, str) and value:
+                    accounted.add(value)
+        if pending_slash is not None and pending_slash.virtual:
+            for instance_id in pending_slash.material_ids:
+                if instance_id not in processing_ids:
+                    raise ProductionBatchError(
+                        "解析不变量失败：丈八虚拟杀材料悬空，必须位于处理区"
+                    )
+        unaccounted = processing_ids - accounted
+        if unaccounted:
+            raise ProductionBatchError(
+                "解析不变量失败：PROCESSING 中存在无法由当前挂起根解释"
+                "的实体牌：" + "、".join(sorted(unaccounted))
+            )
+
+    def assert_finished_state_invariants(self) -> None:
+        """FINISHED 后的终止不变量（MB-M-008）。
+
+        FINISHED 时必须：PROCESSING/REVEALED 临时区为空、所有挂起根、
+        响应窗口、濒死与虚拟材料状态均已清理；不允许任何临时 root 悬空。
+        """
+
+        state = self._state
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.FINISHED:
+            raise ProductionBatchError(
+                "终止不变量只能在FINISHED后执行"
+            )
+        if state.card_ids_in(PROCESSING_ZONE):
+            raise ProductionBatchError(
+                "终止不变量失败：FINISHED 时 PROCESSING 必须为空"
+            )
+        if state.card_ids_in(REVEALED_ZONE):
+            raise ProductionBatchError(
+                "终止不变量失败：FINISHED 时 REVEALED 临时区必须为空"
+            )
+        cleared: list[str] = []
+        for field_name in (
+            "pending_slash",
+            "pending_damage_card_id",
+            "pending_chain",
+            "pending_judgment",
+            "pending_borrowed_sword",
+            "pending_group_trick",
+            "pending_duel",
+            "pending_fire_attack",
+            "pending_wugu",
+            "pending_cixiong_choice",
+            "pending_weapon_choice",
+            "pending_slash_choice",
+            "pending_discard_two",
+            "pending_hanbing_discard",
+            "pending_zone_choice",
+            "pending_dying_id",
+            "response_window_id",
+        ):
+            if getattr(runtime, field_name, None) is not None:
+                cleared.append(field_name)
+        if cleared:
+            raise ProductionBatchError(
+                "终止不变量失败：FINISHED 时仍残留挂起状态："
+                + "、".join(cleared)
+            )
+        if runtime.winner_id is None:
+            raise ProductionBatchError(
+                "终止不变量失败：FINISHED 时缺少胜者"
+            )
+        if runtime.rescue_order or runtime.response_window_order:
+            raise ProductionBatchError(
+                "终止不变量失败：FINISHED 时响应/救援顺序必须为空"
+            )
 
     def run(
         self,
@@ -2679,8 +2794,10 @@ class ProductionBasicCardBatch:
                 actions.extend(adapter.enumerate_legal_actions(state, context))
             # CP-04P 丈八蛇矛（7.8 当前确认）：两张手牌当作普通【杀】使用。
             # 虚拟杀不是新的实体卡牌：action 的 card_instance_id 为确定性
-            # 合成虚拟标识（回合＋两张材料），材料对只通过不透明HMAC句柄
-            # 暴露；出牌阶段使用虚拟杀消耗正常【杀】额度。
+            # 合成虚拟标识（回合＋两张材料）。MB-N-013：对非行动者/公共
+            # 视图材料对只通过不透明HMAC句柄暴露；行动者本人可见自己的
+            # 两张材料实体ID（virtual_card.material_card_instance_ids）。
+            # 出牌阶段使用虚拟杀消耗正常【杀】额度。
             if (
                 equipped_weapon_key(state, actor) == "sgs_weapon_zhangbashemao"
                 and self._runtime.slash_used_counts.get(actor, 0) == 0
@@ -2924,7 +3041,12 @@ class ProductionBasicCardBatch:
                     payload={**base, "operation": "cixiong_allow_draw"},
                 )
             )
-            for handle in choice.handles:
+            # MB-B-003：候选必须先按稳定权威语义顺序（实体ID）排列，
+            # 再附加 HMAC opaque handle；绝不允许按句柄字符串排序。
+            for handle in sorted(
+                choice.handles,
+                key=lambda item: choice.handles[item],
+            ):
                 actions.append(
                     LegalAction(
                         action_type=ActionType.CHOOSE_OPTION,
@@ -3036,7 +3158,10 @@ class ProductionBasicCardBatch:
                 ):
                     return ()
                 state_hash = state_sha256(canonical_state_snapshot(state))
-                for handle in choice.handles:
+                for handle in sorted(
+                    choice.handles,
+                    key=lambda item: choice.handles[item],
+                ):
                     actions.append(
                         LegalAction(
                             action_type=ActionType.RESPOND,
@@ -4003,11 +4128,13 @@ class ProductionBasicCardBatch:
                     return self._advance_chain(state, runtime)
                 return self._complete_root_resolution(state, runtime)
             if not card_already_finished:
-                next_state, finish_event = self._finish_slash_processing(
-                    state, runtime, card_instance_id, resolved_reason
+                next_state, runtime, finish_events = (
+                    self._finish_slash_processing(
+                        state, runtime, card_instance_id, resolved_reason
+                    )
                 )
-                if finish_event is not None:
-                    self._events.extend((finish_event,))
+                if finish_events:
+                    self._events.extend(finish_events)
             else:
                 next_state = state
             if runtime.pending_chain is not None:
@@ -4227,15 +4354,7 @@ class ProductionBasicCardBatch:
                 pending_damage_rescue_reason=rescue_reason,
                 pending_damage_death_reason=death_reason,
                 defer_damage_card_finish=defer_root_finish,
-                damage_card_already_finished=(
-                    card_already_finished
-                    or (
-                        runtime.pending_slash is not None
-                        and runtime.pending_slash.virtual
-                        and runtime.pending_slash.slash_instance_id
-                        == card_instance_id
-                    )
-                ),
+                damage_card_already_finished=card_already_finished,
             )
         if defer_root_finish:
             # 根牌（闪电）完成时点由 _complete_root_resolution 控制
@@ -4243,11 +4362,13 @@ class ProductionBasicCardBatch:
                 return self._advance_chain(next_state, runtime)
             return self._complete_root_resolution(next_state, runtime)
         if not card_already_finished:
-            next_state, finish_event = self._finish_slash_processing(
-                next_state, runtime, card_instance_id, resolved_reason
+            next_state, runtime, finish_events = (
+                self._finish_slash_processing(
+                    next_state, runtime, card_instance_id, resolved_reason
+                )
             )
-            if finish_event is not None:
-                self._events.extend((finish_event,))
+            if finish_events:
+                self._events.extend(finish_events)
         if runtime.pending_chain is not None:
             return self._advance_chain(next_state, runtime)
         return self._complete_root_resolution(next_state, runtime)
@@ -4408,43 +4529,21 @@ class ProductionBasicCardBatch:
         runtime: _BatchRuntime,
         chain: _PendingChainDamage,
         target_id: str,
-        *,
-        amount: int | None = None,
     ) -> tuple[GameState, _BatchRuntime, _ChainStepOutcome]:
         """对当前合法候选应用一条独立传导伤害事件。
 
         返回明确的控制流结果：``continue_chain``／``chain_finished``／
-        ``paused_for_rescue``。``amount`` 仅供状态机单元测试注入最终实际
-        伤害（正式调用不传，自动按根基数计算），用于在没有减伤机制时验证
-        ``prevented_zero`` 分支；注入负值一律拒绝。
+        ``paused_for_rescue``。伤害金额统一由
+        ``_resolve_chain_target_amount`` 按当前权威防具解析派生；生产接口
+        不暴露测试注入参数（MB-N-011）。
         """
 
         if target_id in chain.processed_target_ids:
             raise ProductionBatchError("传导目标被重复处理")
-        armor_resolution: ArmorDamageResolution | None = None
-        if amount is None:
-            base = _chain_recipient_base(chain.chain_base_damage, None)
-            # 每名传导目标独立应用自身防具修正（藤甲火+1、白银狮子限伤）；
-            # 局部变化只影响该角色，不改变后续候选使用的传导基础伤害。
-            armor_resolution = resolve_armor_damage(
-                state,
-                victim_id=target_id,
-                damage_type=chain.damage_type,
-                declared_amount=base,
-            )
-            amount = armor_resolution.final_amount
-        else:
-            if isinstance(amount, bool) or not isinstance(amount, int):
-                raise TypeError("注入的传导目标伤害必须是整数")
-            if amount < 0:
-                raise ValueError("注入的传导目标伤害不能为负数")
-            armor_resolution = ArmorDamageResolution(
-                declared_amount=amount,
-                final_amount=amount,
-                modifiers=(),
-                prevented=amount == 0,
-                armor_ignored=False,
-            )
+        armor_resolution = self._resolve_chain_target_amount(
+            state, chain, target_id
+        )
+        amount = armor_resolution.final_amount
         victim = state.players_by_id[target_id]
         chained_old = victim.chained
         unchain, result = _chain_recipient_outcome(amount)
@@ -4585,6 +4684,28 @@ class ProductionBasicCardBatch:
             ), _ChainStepOutcome.PAUSED
         return next_state, next_runtime, _ChainStepOutcome.CONTINUE
 
+    def _resolve_chain_target_amount(
+        self,
+        state: GameState,
+        chain: _PendingChainDamage,
+        target_id: str,
+    ) -> ArmorDamageResolution:
+        """派生当前传导目标的最终伤害金额（权威防具修正）。
+
+        每名传导目标独立应用自身防具修正（藤甲火+1、白银狮子限伤）；
+        局部变化只影响该角色，不改变后续候选使用的传导基础伤害。该方法
+        是测试子类可覆盖的解析缝（测试注入 prevented_zero 必须通过
+        test subclass/专用fixture，不得出现在生产方法参数中，MB-N-011）。
+        """
+
+        base = _chain_recipient_base(chain.chain_base_damage, None)
+        return resolve_armor_damage(
+            state,
+            victim_id=target_id,
+            damage_type=chain.damage_type,
+            declared_amount=base,
+        )
+
     def _finish_chain(
         self,
         state: GameState,
@@ -4619,15 +4740,12 @@ class ProductionBasicCardBatch:
         self,
         state: GameState,
         runtime: _BatchRuntime,
-        *,
-        amount_override: int | None = None,
     ) -> tuple[GameState, _BatchRuntime]:
         """从挂起索引继续处理传导候选；濒死时挂起等待救援恢复。
 
         子调用返回 ``chain_finished`` 时立即返回（不再次进入循环、不重复
         产生结束事件）；返回 ``paused_for_rescue`` 时立即返回等待救援。
-        ``amount_override`` 仅供状态机单元测试注入（prevented_zero 分支），
-        正式调用不得传入。
+        生产接口不暴露测试注入参数（MB-N-011）。
         """
 
         while True:
@@ -4682,7 +4800,6 @@ class ProductionBasicCardBatch:
                     runtime,
                     chain,
                     target_id,
-                    amount=amount_override,
                 )
             )
             if outcome is _ChainStepOutcome.FINISHED:
@@ -4981,16 +5098,15 @@ class ProductionBasicCardBatch:
                     (cancelled_event, *zhangba_finish_events)
                 )
             else:
-                next_state, finish_event = self._finish_slash_processing(
-                    next_state,
-                    runtime,
-                    action.card_instance_id,
-                    f"slash_invalidated_by_{invalid_reason}",
+                next_state, runtime, finish_events = (
+                    self._finish_slash_processing(
+                        next_state,
+                        runtime,
+                        action.card_instance_id,
+                        f"slash_invalidated_by_{invalid_reason}",
+                    )
                 )
-                if finish_event is not None:
-                    self._events.extend((cancelled_event, finish_event))
-                else:
-                    self._events.extend((cancelled_event,))
+                self._events.extend((cancelled_event, *finish_events))
             next_runtime = replace(
                 runtime,
                 slash_used_counts=MappingProxyType(next_counts),
@@ -5391,7 +5507,7 @@ class ProductionBasicCardBatch:
             )
         if invalidation is not None:
             invalid_reason, armor_id = invalidation
-            next_state, finish_event = self._finish_slash_processing(
+            next_state, runtime, finish_events = self._finish_slash_processing(
                 state,
                 runtime,
                 pending.slash_instance_id,
@@ -5414,10 +5530,7 @@ class ProductionBasicCardBatch:
                 target_ids=(pending.target_id,),
                 payload=payload,
             )
-            if finish_event is None:
-                self._events.extend((cancelled_event,))
-            else:
-                self._events.extend((cancelled_event, finish_event))
+            self._events.extend((cancelled_event, *finish_events))
             return self._complete_root_resolution(next_state, runtime)
         return state, replace(
             runtime,
@@ -5478,8 +5591,10 @@ class ProductionBasicCardBatch:
             "dodge_response_complete",
         )
         slash_id = runtime.pending_slash.slash_instance_id
-        next_state, slash_finish = self._finish_slash_processing(
-            next_state, runtime, slash_id, "slash_cancelled_by_dodge"
+        next_state, slash_runtime, slash_finish_events = (
+            self._finish_slash_processing(
+                next_state, runtime, slash_id, "slash_cancelled_by_dodge"
+            )
         )
         cancelled_event = GameEvent(
             event_type=EventType.CARD_EFFECT_CANCELLED,
@@ -5492,20 +5607,17 @@ class ProductionBasicCardBatch:
             target_ids=(context.actor_id,),
             payload={"reason": "dodge"},
         )
-        if slash_finish is not None:
-            self._events.extend(
-                (
-                    bound_event,
-                    *dodge_move_events,
-                    cancelled_event,
-                    slash_finish,
-                )
+        # MB-M-007 事件顺序：Jink response/card events → 虚拟/实体杀
+        # CARD_EFFECT_CANCELLED → Slash root 收尾（丈八材料 finalize 事件）。
+        self._events.extend(
+            (
+                bound_event,
+                *dodge_move_events,
+                cancelled_event,
+                *slash_finish_events,
             )
-        else:
-            self._events.extend(
-                (bound_event, *dodge_move_events, cancelled_event)
-            )
-        pending = runtime.pending_slash
+        )
+        pending = slash_runtime.pending_slash
         assert pending is not None
         # CP-04P 青釭剑生命周期终点A（Knowledge 7.2.1 用户移动版实测确认）：
         # 目标以【闪】成功完成本次响应时，在该【闪】相关结算完成后，本次
@@ -5536,7 +5648,7 @@ class ProductionBasicCardBatch:
             guanshifu_affordable = own_cards >= 2
         if guanshifu_affordable:
             next_runtime = replace(
-                runtime,
+                slash_runtime,
                 phase=ProductionPhase.WEAPON_SLASH_CHOICE,
                 pending_slash=lifecycle_slash,
                 pending_slash_choice=_PendingSlashChoice(
@@ -5587,7 +5699,7 @@ class ProductionBasicCardBatch:
                 }
             )
             next_runtime = replace(
-                runtime,
+                slash_runtime,
                 phase=ProductionPhase.WEAPON_SLASH_CHOICE,
                 pending_slash=lifecycle_slash,
                 pending_slash_choice=_PendingSlashChoice(
@@ -5603,7 +5715,8 @@ class ProductionBasicCardBatch:
             )
         else:
             next_state, next_runtime = self._complete_root_resolution(
-                next_state, replace(runtime, pending_slash=lifecycle_slash)
+                next_state,
+                replace(slash_runtime, pending_slash=lifecycle_slash),
             )
         self._commit_runtime(runtime, next_runtime)
         return next_state
@@ -6304,15 +6417,21 @@ class ProductionBasicCardBatch:
         runtime: _BatchRuntime,
         instance_id: str,
         reason: str,
-    ) -> tuple[GameState, GameEvent | None]:
-        """实体【杀】完成结算；丈八虚拟杀把两张材料从处理区统一清理。
+    ) -> tuple[GameState, _BatchRuntime, tuple[GameEvent, ...]]:
+        """统一 Slash root finalizer：实体【杀】或丈八虚拟杀完成结算。
 
         USER_CONFIRMED_RULE（2026-08-09 用户确认）：材料在虚拟杀整个
         使用/打出与结算期间保持 PROCESSING，本次虚拟【杀】完整结算完成
         后 PROCESSING→DISCARD。实体路径等价 _finish_processing（所有已
-        证明生产路径不变）；虚拟分支在 pending_slash.virtual=True 时
-        可达，材料清理事件由本方法直接登记（顺序先于调用方登记的结算
-        收尾事件，重执行路径一致）。"""
+        证明生产路径不变）。本方法不直接把事件登记进事件流，而是把本次
+        根结算收尾事件以元组返回，由调用方按权威顺序插入（例如被闪路径：
+        Jink response/card events → CARD_EFFECT_CANCELLED → 根结算收尾
+        → 丈八材料 PROCESSING→DISCARD，MB-M-007）。
+
+        幂等性：虚拟材料已清理（materials_finalized=True）时返回空事件，
+        不允许 double-finalize；DYING 救援／死亡／game-over 路径必须最终
+        到达本方法，不允许材料悬空（MB-B-002）。
+        """
 
         pending = runtime.pending_slash
         if (
@@ -6324,6 +6443,8 @@ class ProductionBasicCardBatch:
                 raise ProductionBatchError(
                     "丈八虚拟杀缺少材料实体记录，失败关闭"
                 )
+            if pending.materials_finalized:
+                return state, runtime, ()
             next_state, material_events = self._finalize_zhangba_materials(
                 state,
                 actor_id=pending.attacker_id,
@@ -6334,9 +6455,15 @@ class ProductionBasicCardBatch:
                 ),
                 reason="zhangba_material_finalize",
             )
-            self._events.extend(material_events)
-            return next_state, None
-        return self._finish_processing(state, instance_id, reason)
+            next_runtime = replace(
+                runtime,
+                pending_slash=replace(pending, materials_finalized=True),
+            )
+            return next_state, next_runtime, tuple(material_events)
+        next_state, finish_event = self._finish_processing(
+            state, instance_id, reason
+        )
+        return next_state, runtime, (finish_event,)
 
     def _move_zhangba_materials_to_processing(
         self,
@@ -7866,8 +7993,8 @@ class ProductionBasicCardBatch:
                 )
             )
         # CP-04P 丈八蛇矛（7.8 当前确认）：响应【决斗】需要打出【杀】时
-        # 同样可以把两张手牌当作普通【杀】打出；材料对只通过不透明句柄
-        # 暴露。
+        # 同样可以把两张手牌当作普通【杀】打出；对非行动者/公共视图
+        # 材料对只通过不透明句柄暴露（MB-N-013）。
         if (
             equipped_weapon_key(state, context.actor_id)
             == "sgs_weapon_zhangbashemao"
@@ -7982,7 +8109,8 @@ class ProductionBasicCardBatch:
         zhangba_virtual = bool(payload.get("zhangba_virtual"))
         if zhangba_virtual:
             # 丈八蛇矛虚拟打出：响应【决斗】时把两张手牌当作普通【杀】
-            # 打出；材料对只通过不透明句柄解析。
+            # 打出；对非行动者/公共视图材料对只通过不透明句柄解析
+            # （MB-N-013）。
             if (
                 equipped_weapon_key(state, context.actor_id)
                 != "sgs_weapon_zhangbashemao"
@@ -8899,9 +9027,13 @@ class ProductionBasicCardBatch:
             pending = runtime.pending_slash
             if pending is None or context.actor_id != pending.target_id:
                 raise InvalidActionError("只有当前【杀】目标可以发动【八卦阵】")
-            response_to_card_key = state.cards_by_id[
-                pending.slash_instance_id
-            ].card_key
+            if pending.virtual:
+                # 丈八虚拟杀没有实体牌目录项；响应对象按虚拟【杀】身份处理。
+                response_to_card_key = "sgs_basic_sha"
+            else:
+                response_to_card_key = state.cards_by_id[
+                    pending.slash_instance_id
+                ].card_key
             window_id = runtime.response_window_id
             if window_id is None:
                 raise InvalidActionError("【杀】响应窗口缺少窗口标识")
@@ -9007,11 +9139,13 @@ class ProductionBasicCardBatch:
                     "creates_card_played_event": False,
                 },
             )
-            next_state, slash_finish = self._finish_slash_processing(
-                next_state,
-                runtime,
-                pending.slash_instance_id,
-                "slash_cancelled_by_bagua",
+            next_state, slash_runtime, slash_finish_events = (
+                self._finish_slash_processing(
+                    next_state,
+                    runtime,
+                    pending.slash_instance_id,
+                    "slash_cancelled_by_bagua",
+                )
             )
             cancelled_event = GameEvent(
                 event_type=EventType.CARD_EFFECT_CANCELLED,
@@ -9029,12 +9163,12 @@ class ProductionBasicCardBatch:
                     "virtual_response": True,
                 },
             )
-            if slash_finish is not None:
-                self._events.extend(
-                    (virtual_dodge, cancelled_event, slash_finish)
-                )
-            else:
-                self._events.extend((virtual_dodge, cancelled_event))
+            # MB-M-007：八卦虚拟闪事件 → CARD_EFFECT_CANCELLED → 根收尾
+            # （丈八材料 finalize 事件不得早于闪/取消事件）。
+            self._events.extend(
+                (virtual_dodge, cancelled_event, *slash_finish_events)
+            )
+            next_runtime = replace(slash_runtime, bagua_attempted=True)
             next_state, next_runtime = self._complete_root_resolution(
                 next_state, next_runtime
             )
@@ -9374,7 +9508,10 @@ class ProductionBasicCardBatch:
             "state_hash": state_hash,
         }
         actions: list[LegalAction] = []
-        for handle in runtime.borrowed_sword_slash_handles:
+        for handle in sorted(
+            runtime.borrowed_sword_slash_handles,
+            key=lambda item: runtime.borrowed_sword_slash_handles[item],
+        ):
             actions.append(
                 LegalAction(
                     action_type=ActionType.RESPOND,
@@ -9411,8 +9548,8 @@ class ProductionBasicCardBatch:
         # USER_CONFIRMED_RULE（2026-08-09）：被【借刀杀人】要求使用【杀】
         # 时，同样可以把两张手牌当作普通【杀】使用（丈八蛇矛）；材料
         # HAND→PROCESSING→DISCARD 生命周期与通用使用路径一致。只有第一
-        # 目标当前装备丈八蛇矛且手牌≥2 时提供虚拟选项；材料对只通过
-        # 不透明句柄暴露。
+        # 目标当前装备丈八蛇矛且手牌≥2 时提供虚拟选项；对非行动者/公共
+        # 视图材料对只通过不透明句柄暴露（MB-N-013）。
         if (
             equipped_weapon_key(state, pending.first_target_id)
             == "sgs_weapon_zhangbashemao"
@@ -11270,9 +11407,9 @@ class ProductionBasicCardBatch:
     ) -> tuple[LegalAction, ...]:
         """枚举当前目标的合法响应动作（打出【杀】或【闪】）。
 
-        候选只以绑定当前响应窗口的不透明句柄暴露，不在动作负载中携带
-        实体牌ID、牌名、花色或点数；未打出的目标手牌不会进入玩家可见
-        回放材料。
+        候选只以绑定当前响应窗口的不透明句柄暴露给非行动者/公共视图，
+        不在公开动作负载中携带实体牌ID、牌名、花色或点数；未打出的目标
+        手牌不会进入玩家可见回放材料（行动者本人可见自己的实体牌）。
         """
 
         runtime = self._runtime
@@ -11295,7 +11432,12 @@ class ProductionBasicCardBatch:
             # 响应窗口打开后手牌已变化：不再铸造任何动作，旧句柄失败关闭。
             return ()
         actions: list[LegalAction] = []
-        for handle in sorted(runtime.group_response_handles):
+        # MB-B-003：按稳定权威语义顺序（实体ID）迭代，绝不按HMAC句柄
+        # 字符串排序；同一 seed 不同 session secret 必须得到相同语义顺序。
+        for handle in sorted(
+            runtime.group_response_handles,
+            key=lambda item: runtime.group_response_handles[item],
+        ):
             actions.append(
                 LegalAction(
                     action_type=ActionType.PLAY_CARD,
@@ -11316,8 +11458,8 @@ class ProductionBasicCardBatch:
                 )
             )
         # CP-04P 丈八蛇矛（7.8 当前确认）：响应需要打出【杀】的入口
-        # （【南蛮入侵】）同样可以把两张手牌当作普通【杀】打出；材料对
-        # 只通过不透明句柄暴露。
+        # （【南蛮入侵】）同样可以把两张手牌当作普通【杀】打出；对非
+        # 行动者/公共视图材料对只通过不透明句柄暴露（MB-N-013）。
         if (
             any(
                 card_key in SLASH_CARD_KEYS
@@ -11438,7 +11580,8 @@ class ProductionBasicCardBatch:
             )
         if bool(payload.get("zhangba_virtual")):
             # 丈八蛇矛虚拟打出：响应【南蛮入侵】时把两张手牌当作普通
-            # 【杀】打出；材料对只通过不透明句柄解析。
+            # 【杀】打出；对非行动者/公共视图材料对只通过不透明句柄
+            # 解析（MB-N-013）。
             if adapter.card_key != "sgs_trick_nanmanruqin":
                 raise InvalidActionError(
                     "只有响应【南蛮入侵】要求打出【杀】时可以使用丈八转化"
@@ -11824,6 +11967,34 @@ class ProductionBasicCardBatch:
             return runtime.pending_damage_source_id
         return None
 
+    def _finish_pending_damage_card(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        reason: str,
+    ) -> tuple[GameState, _BatchRuntime, tuple[GameEvent, ...]]:
+        """DYING 出口的统一根结算收尾：实体杀或丈八材料恰好 finalize 一次。
+
+        根牌（闪电）由 ``_complete_root_resolution`` 控制
+        （``defer_damage_card_finish``）；贯石斧强制命中时实体杀已因闪
+        进入弃牌堆（``damage_card_already_finished=True`` 且非虚拟）不
+        重复弃置；丈八虚拟杀绝不因该标记跳过材料清理（MB-B-002）。
+        """
+
+        if runtime.defer_damage_card_finish:
+            return state, runtime, ()
+        pending = runtime.pending_slash
+        if runtime.damage_card_already_finished and not (
+            pending is not None and pending.virtual
+        ):
+            return state, runtime, ()
+        return self._finish_slash_processing(
+            state,
+            runtime,
+            self._pending_damage_card_id(runtime),
+            reason,
+        )
+
     def _rescue_window_id(
         self, runtime: _BatchRuntime, seat: int, decision_count: int
     ) -> str:
@@ -11903,18 +12074,14 @@ class ProductionBasicCardBatch:
                     next_state, runtime, dying_id, rescued=True
                 )
             else:
-                if (
-                    runtime.defer_damage_card_finish
-                    or runtime.damage_card_already_finished
-                ):
-                    next_state = next_state
-                else:
-                    next_state, finish_event = self._finish_processing(
+                next_state, runtime, finish_events = (
+                    self._finish_pending_damage_card(
                         next_state,
-                        self._pending_damage_card_id(runtime),
+                        runtime,
                         self._pending_damage_rescue_reason(runtime),
                     )
-                    pending_events.append(finish_event)
+                )
+                pending_events.extend(finish_events)
                 self._events.extend(pending_events)
                 next_state, next_runtime = self._complete_root_resolution(
                     next_state, runtime
@@ -12004,18 +12171,14 @@ class ProductionBasicCardBatch:
                     next_state, runtime, dying_id, rescued=True
                 )
             else:
-                if (
-                    runtime.defer_damage_card_finish
-                    or runtime.damage_card_already_finished
-                ):
-                    next_state = next_state
-                else:
-                    next_state, finish_event = self._finish_processing(
+                next_state, runtime, finish_events = (
+                    self._finish_pending_damage_card(
                         next_state,
-                        self._pending_damage_card_id(runtime),
+                        runtime,
                         self._pending_damage_rescue_reason(runtime),
                     )
-                    pending_events.append(finish_event)
+                )
+                pending_events.extend(finish_events)
                 self._events.extend(pending_events)
                 next_state, next_runtime = self._complete_root_resolution(
                     next_state, runtime
@@ -12084,19 +12247,15 @@ class ProductionBasicCardBatch:
                 )
                 self._commit_runtime(runtime, next_runtime)
                 return next_state
-            if (
-                runtime.defer_damage_card_finish
-                or runtime.damage_card_already_finished
-            ):
-                # 根牌（闪电）完成时点由 _complete_root_resolution 控制
-                next_state = state
-            else:
-                next_state, finish_event = self._finish_processing(
+            next_state, runtime, finish_events = (
+                self._finish_pending_damage_card(
                     state,
-                    self._pending_damage_card_id(runtime),
+                    runtime,
                     self._pending_damage_rescue_reason(runtime),
                 )
-                self._events.extend((finish_event,))
+            )
+            if finish_events:
+                self._events.extend(finish_events)
             next_state, next_runtime = self._complete_root_resolution(
                 next_state, runtime
             )
@@ -12124,19 +12283,20 @@ class ProductionBasicCardBatch:
         if chain is not None and dying_id != chain.original_target_id:
             # 传导目标死亡时根牌已完成结算，不再重复处理根牌。
             finish_events: list[GameEvent] = []
-        elif (
-            runtime.defer_damage_card_finish
-            or runtime.damage_card_already_finished
-        ):
+        elif runtime.defer_damage_card_finish:
             # 根牌（闪电）完成时点由本路径统一清理
             finish_events = []
         else:
-            next_state, finish_event = self._finish_processing(
+            # MB-B-002：死亡/game-over 前必须统一 finalize 根杀（丈八
+            # 材料 PROCESSING→DISCARD 恰好一次），不允许跳过清理。
+            next_state, runtime, damage_finish_events = (
+                self._finish_pending_damage_card(
                 next_state,
-                self._pending_damage_card_id(runtime),
-                self._pending_damage_death_reason(runtime),
+                    runtime,
+                    self._pending_damage_death_reason(runtime),
+                )
             )
-            finish_events = [finish_event]
+            finish_events = list(damage_finish_events)
         pending_judgment = runtime.pending_judgment
         if (
             pending_judgment is not None

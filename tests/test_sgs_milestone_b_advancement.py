@@ -519,3 +519,73 @@ def test_formal_profile_replay_record_and_reexecute() -> None:
     assert record.header["formal_result"] is True
     result = reexecute_production_replay(record)
     assert result.verified is True
+
+
+def test_finished_state_invariants_hold_for_formal_duel() -> None:
+    """MB-M-008：正式对局 FINISHED 后临时区与挂起 root 必须全部清理。"""
+
+    from scripts.sgs_engine.formal_duel import run_formal_duel_seed_sweep
+
+    results = run_formal_duel_seed_sweep(
+        (3,),
+        configuration=FormalDuelConfiguration.formal_profile(),
+        analysis_only=False,
+        max_steps=2000,
+    )
+    assert len(results) == 1
+    assert results[0].natural_end is True
+    assert results[0].winner in {"p1", "p2"}
+    # sweep 内部已经在每局结束调用 assert_finished_state_invariants；
+    # 这里再通过 readiness 与状态机断言复核临时区语义。
+    from scripts.sgs_engine.model import (
+        DISCARD_PILE,
+        PROCESSING_ZONE,
+        REVEALED_ZONE,
+    )
+
+    game = FormalNoSkillDuelSession(
+        seed=3,
+        configuration=FormalDuelConfiguration.formal_profile(),
+        analysis_only=False,
+    )
+    from scripts.sgs_engine.production_batch import BatchReferenceController
+
+    controller = BatchReferenceController()
+    guard = 0
+    while not game.is_finished and guard < 2000:
+        game.step(controller)
+        guard += 1
+    assert game.is_finished
+    assert not game.state.card_ids_in(PROCESSING_ZONE)
+    assert not game.state.card_ids_in(REVEALED_ZONE)
+    assert game.runtime.pending_slash is None
+    assert game.runtime.pending_damage_card_id is None
+    assert game.runtime.pending_borrowed_sword is None
+    assert game.runtime.pending_group_trick is None
+    assert game.runtime.pending_chain is None
+    game.assert_finished_state_invariants()
+
+
+def test_full_core_scope_is_not_expanded_by_duel_readiness() -> None:
+    """MB-B-004：duel ready 不得把 full-core/多人/全局卡牌状态误开放。"""
+
+    from scripts.sgs_formal_runner import build_current_status
+
+    status = build_current_status(
+        mode_name="formal_160_card_no_skill_duel"
+    )
+    capabilities = status["capabilities"]
+    assert capabilities["authoritative_full_game_core"] is False
+    assert capabilities["multi_player_production_proven"] is False
+    assert capabilities["milestone_b_complete"] is False
+    assert capabilities["global_all_cards_implemented"] is False
+    assert capabilities["duel_scope_all_cards_sufficient"] is True
+    assert capabilities["formal_duel_no_skill_ready"] is True
+    assert status["formal_run_ready"] is True
+    statuses = {
+        item["card_key"]: item
+        for item in status["formal_duel"]["card_semantic_statuses"]
+    }
+    assert (
+        statuses["sgs_weapon_fangtianhuaji"]["global_status"] == "PARTIAL"
+    )

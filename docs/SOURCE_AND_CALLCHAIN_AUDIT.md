@@ -464,9 +464,14 @@ AI 审计脚本只调用本文件内 `CHECKERS`，不调用正式 AI。大量检
 
 因此阶段 1–3 保持通过，阶段 4 为进行中，阶段 5–9 未开始。本轮代码稳定后的最终验收为 `1094 passed`（失败0、跳过0），compileall 通过；源码防伪扫描覆盖99个 Python 文件且 `defect_count=0`。这证明当前 foundation 与既有组件保持可运行，不表示完整对局核心已经完成。
 
-## 11. Milestone B 当前 production formal 调用链（2026-08-09）
+## 11. Milestone B production formal 调用链（HISTORICAL/AS-OF，2026-08-09）
 
-本节是 `MILESTONE_B_FORMAL_160_CARD_NO_SKILL_DUEL_ADVANCEMENT` 的当前开发调用链记录，不改写第 1–10 节的历史时间点，也不是 whole-repo audit 的 remediation-7 或独立审计结论。固定基线为 `4c8c4466f1950740c69767a01a0b24cab723b310`，开发分支为 `sol-ultra-milestone-b-formal-duel`；当前工作树尚未提交，`commit=null`、`pending`。
+本节是 `MILESTONE_B_FORMAL_160_CARD_NO_SKILL_DUEL_ADVANCEMENT` 的
+**旧**开发调用链快照（PRE-AUDIT SNAPSHOT），不改写第 1–10 节的历史时间点，
+也不是 whole-repo audit 的 remediation-7 或独立审计结论。固定基线为
+`4c8c4466f1950740c69767a01a0b24cab723b310`，开发分支为
+`sol-ultra-milestone-b-formal-duel`；当时工作树尚未提交，`commit=null`、
+`pending`。CURRENT 状态以第 12 节为准。
 
 ### 11.1 统一权威调用链
 
@@ -516,3 +521,54 @@ formal session 继续使用同一 `GameState`、唯一 `CardInstance`、统一�
 该文件明确标记 `diagnostic_only=true`、`formal_acceptance_evidence=false`。运行使用 `analysis_convention`，每个 seed 都因未确认 profile 至少增加1个 unsupported 与1个 approximation，汇总为 unsupported=145、approximation=100；`formal_result_eligible_count=0`、`reexecution_verified_count=0`、`formal_acceptance_passed=false`。这些是诊断运行计数，不覆盖现场 inspector 的 `unsupported_rules=2`、`approximation_count=0`，也不改变 readiness 的 `acceptance_seed_count=0`。
 
 本轮本地验证结果为：full pytest `2024 passed, 1 warning in 830.59s`（唯一 warning 是 `.pytest_cache` WinError5）；compileall exit0；source integrity exit0并扫描125个 Python 文件、117项 finding／audit item（formal source56、test code61）、`defect_count=0`；manifest与诊断JSON解析通过，诊断seed IDs严格为0..99；Git-normalized SHA-256表47个文件条目全部匹配；`git diff --check` exit0。runner status exit0并现场派生 deck160／registered38、global36/158、duel37/159、unsupported2、approximation0、runtime reachable true、mode/cards false、replay true、acceptance0、ready false。runner 的 future-ready 消费／复检／原子输出链已经实现；当前失败关闭来自 live prerequisites 与模块私有 release guard，而不是无条件拒绝占位。因此本节证明 production formal 薄层、现场门禁、诊断执行和 runner 结果路径已经接线并通过本地回归，不证明 Milestone B PASSED，也不是独立审计。旧审计链保持 original `WHOLE_REPO_AUDIT_FAILED`、R1–R5 各自 FAILED、R6 `REMEDIATION_6_REAUDIT_PASSED`、finalization correction verification PASSED；未创建 remediation-7，也未移动旧 audit branch 或 milestone tag。
+
+## 12. MILESTONE_B_AUDIT_REMEDIATION_1 ??????2026-08-11?CURRENT?
+
+???? `MILESTONE_B_AUDIT_REMEDIATION_1` ?????????? HEAD=
+`ebd656754ed2a528e0d08cd5175b68385fdb8140`?audit branch
+`sol-ultra-audit-milestone-b-formal-duel` ?????????????????
+?????`commit=null`?`pending`??? Ultra ??????
+?`independent_audit_done=false`?`audit_conclusion=NOT_AUDITED_YET`??
+????? reaudit PASSED?
+
+### 12.1 ????????????
+
+```text
+scripts/sgs_formal_runner.py
+  -> build_current_status()
+     -> _inspect_formal_duel_safely()
+        -> scripts/sgs_engine/formal_duel.py::inspect_formal_duel_readiness()
+           -> FormalCardRegistry.from_formal_csv()  # 160 CardInstance / 38 keys
+           -> _semantic_key_sets()  # global 37/159 vs duel 38/160 ???MB-B-004?
+           -> _load_acceptance_evidence()  # v2 artifact??? provenance ???MB-B-001?
+           -> FormalNoSkillDuelSession(..., analysis_only=True)  # factory probe
+  -> run_formal_simulation()
+     -> require_formal_simulation_ready()  # ?? gate
+     -> run_formal_duel_seed_sweep(0..99)
+        -> FormalNoSkillDuelSession(seed, formal_profile, analysis_only=False)
+        -> record_reference_production_batch(_game=??session)  # ?? record???
+        -> reexecute_production_replay(??record)               # strict replay
+        -> game.assert_finished_state_invariants()               # MB-M-008
+     -> build_formal_acceptance_artifact()  # provenance ?? v2
+     -> _atomic_write_json()                # simulation_executed=true ??????
+```
+
+### 12.2 ??????? scope ??????
+
+| ?? | ?????? |
+|---|---|
+| ???? | 160 ???38 ?????? 160 |
+| global ???? | `global_all_cards_implemented=false`?37 ??159 ????? global `PARTIAL`? |
+| duel-scope sufficient | `duel_scope_all_cards_sufficient=true`?38 ??160 ??? |
+| formal factory | `mode_runtime_reachable=true`?`mode_implemented=true` |
+| replay | `reexecution_replay_supported=true`??? record/replay? |
+| rules | `unsupported_rules=0`?formal duel ??? |
+| approximation | `approximation_count=0` |
+| fixed-seed acceptance | 100?100 ?????failures=0?v2 artifact?seeds 0..99?analysis_only=false?max_steps=2000? |
+| final gate | `formal_duel_no_skill_ready=true`?`formal_run_ready=true` |
+| full-core scope | `authoritative_full_game_core=false`?`multi_player_production_proven=false`?`milestone_b_complete=false` |
+
+source integrity ??????????? docs/CHECKPOINT_MANIFEST.json ??
+checkpoint ? final_verification???????? original `WHOLE_REPO_AUDIT_FAILED`?
+R1?R5 ?? FAILED?R6 `REMEDIATION_6_REAUDIT_PASSED`?finalization
+correction verification PASSED???? remediation-7????? audit branch?

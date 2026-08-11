@@ -17,15 +17,18 @@ import json
 import os
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
 from .deck_data import load_deck_csv
 from .sgs_engine.formal_duel import (
+    FormalDuelConfiguration,
     FormalDuelReadiness,
-    FormalDuelSeedResult,
+    build_formal_acceptance_artifact,
     inspect_formal_duel_readiness,
+    run_formal_duel_seed_sweep,
 )
 from .sgs_engine.production_batch import FORMAL_NO_SKILL_DUEL_MODE
 from .sgs_engine_gate import (
@@ -322,7 +325,10 @@ def build_current_status(
         "authoritative_core_foundation_path": foundation.module_path,
         "authoritative_core_foundation_sha256": foundation.source_sha256,
         "authoritative_core_foundation_issues": list(foundation.issues),
+        # MB-B-004：正式单挑 ready 绝不等于完整引擎 ready。
         "authoritative_full_game_core": False,
+        "multi_player_production_proven": False,
+        "milestone_b_complete": False,
         "mode_implemented": manifest.mode_implemented,
         "ai_implemented": manifest.ai_implemented,
         "ruleset_version": manifest.ruleset_version,
@@ -340,9 +346,12 @@ def build_current_status(
             capabilities.update(
                 {
                     "authoritative_full_game_core": False,
+                    "multi_player_production_proven": False,
+                    "milestone_b_complete": False,
                     "mode_runtime_reachable": False,
                     "deterministic_controller_implemented": False,
-                    "all_cards_implemented": False,
+                    "duel_scope_all_cards_sufficient": False,
+                    "global_all_cards_implemented": False,
                     "reexecution_replay_supported": False,
                     "formal_duel_no_skill_ready": False,
                 }
@@ -351,16 +360,21 @@ def build_current_status(
             formal_duel_status = live_readiness.to_dict()
             capabilities.update(
                 {
-                    "authoritative_full_game_core": (
-                        live_readiness.formal_duel_no_skill_ready
-                    ),
+                    "authoritative_full_game_core": False,
+                    "multi_player_production_proven": False,
+                    "milestone_b_complete": False,
                     "mode_runtime_reachable": (
                         live_readiness.mode_runtime_reachable
                     ),
                     "deterministic_controller_implemented": (
                         live_readiness.deterministic_controller_implemented
                     ),
-                    "all_cards_implemented": live_readiness.all_cards_implemented,
+                    "duel_scope_all_cards_sufficient": (
+                        live_readiness.duel_scope_all_cards_sufficient
+                    ),
+                    "global_all_cards_implemented": (
+                        live_readiness.global_all_cards_implemented
+                    ),
                     "reexecution_replay_supported": (
                         live_readiness.reexecution_replay_supported
                     ),
@@ -408,96 +422,6 @@ def build_current_status(
     return status
 
 
-def _validated_formal_seed_evidence(
-    readiness: FormalDuelReadiness,
-) -> tuple[FormalDuelSeedResult, ...]:
-    """在 live gate 之后再次验证将被写出的 canonical 逐 seed 证据。"""
-
-    if type(readiness) is not FormalDuelReadiness:
-        raise RuntimeError("正式单挑canonical readiness类型无效，拒绝写出结果")
-    if readiness.mode_id != FORMAL_NO_SKILL_DUEL_MODE:
-        raise RuntimeError("正式单挑canonical readiness模式ID不匹配，拒绝写出结果")
-    if not (
-        readiness.formal_duel_no_skill_ready is True
-        and type(readiness.deck_count) is int
-        and readiness.deck_count == 160
-        and type(readiness.registered_instance_count) is int
-        and readiness.registered_instance_count == 160
-        and readiness.all_cards_implemented is True
-        and readiness.mode_runtime_reachable is True
-        and readiness.mode_implemented is True
-        and readiness.deterministic_controller_implemented is True
-        and readiness.reexecution_replay_supported is True
-        and type(readiness.unsupported_rules) is int
-        and readiness.unsupported_rules == 0
-        and type(readiness.approximation_count) is int
-        and readiness.approximation_count == 0
-        and readiness.blockers == ()
-    ):
-        raise RuntimeError("正式单挑canonical readiness在门禁后不再完整就绪，拒绝写出结果")
-
-    seed_results = tuple(readiness.acceptance_seed_results)
-    if (
-        len(seed_results) != 100
-        or any(type(item) is not FormalDuelSeedResult for item in seed_results)
-        or tuple(item.seed for item in seed_results) != tuple(range(100))
-    ):
-        raise RuntimeError("正式单挑结果必须包含精确seed 0..99的100条canonical证据")
-
-    for expected_seed, item in enumerate(seed_results):
-        integer_fields_valid = (
-            type(item.seed) is int
-            and item.seed == expected_seed
-            and type(item.deck_count) is int
-            and item.deck_count == 160
-            and type(item.action_count) is int
-            and item.action_count > 0
-            and type(item.turn_count) is int
-            and item.turn_count > 0
-            and type(item.draw_pile_count) is int
-            and item.draw_pile_count >= 0
-            and type(item.reshuffle_count) is int
-            and item.reshuffle_count >= 0
-            and type(item.unsupported_rules) is int
-            and item.unsupported_rules == 0
-            and type(item.approximation_count) is int
-            and item.approximation_count == 0
-        )
-        reached_keys_valid = (
-            isinstance(item.reached_card_keys, tuple)
-            and all(
-                isinstance(card_key, str) and bool(card_key.strip())
-                for card_key in item.reached_card_keys
-            )
-        )
-        if not (
-            integer_fields_valid
-            and item.winner in {"p1", "p2"}
-            and item.safety_cap_triggered is False
-            and item.exception_type is None
-            and item.exception_message is None
-            and item.natural_end is True
-            and item.formal_result_eligible is True
-            and item.reexecution_verified is True
-            and reached_keys_valid
-        ):
-            raise RuntimeError(
-                f"正式单挑seed {expected_seed}的canonical证据不合格，拒绝写出结果"
-            )
-
-    if not (
-        type(readiness.acceptance_seed_count) is int
-        and readiness.acceptance_seed_count == 100
-        and type(readiness.acceptance_natural_end_count) is int
-        and readiness.acceptance_natural_end_count == 100
-        and type(readiness.acceptance_failure_count) is int
-        and readiness.acceptance_failure_count == 0
-        and readiness.fixed_seed_acceptance_passed is True
-    ):
-        raise RuntimeError("正式单挑100-seed汇总与canonical逐项证据不一致，拒绝写出结果")
-    return seed_results
-
-
 def _atomic_write_json(output_path: Path, payload: object) -> None:
     """在目标目录内完整写入临时文件，再原子替换最终结果。"""
 
@@ -526,14 +450,22 @@ def run_formal_simulation(
     mode_name: str,
     general_names: Sequence[str] = (),
     output_path: str | Path | None = None,
+    seeds: Sequence[int] | None = None,
+    max_steps: int = 2000,
 ) -> Path:
-    """通过现场门禁后，把 canonical 100-seed证据原子写为正式结果。
+    """通过现场门禁后，现场执行正式 100-seed 验收并原子写为正式结果。
 
     当前任何 blocker 都会在检查 ``output_path`` 或创建目录之前失败关闭。
     调用方只可指定精确模式和结果路径，不能提交 capability、配置或 seed
-    汇总来授予正式资格。
+    汇总来授予正式资格。``seeds`` 默认精确 0..99；测试可以传入更小的
+    seed 子集以真实执行入口（CLI 不暴露该参数），但只有完整 0..99 才
+    会被 ``write_formal_acceptance_artifact`` 接受为正式验收 artifact。
+    ``simulation_executed=true`` 只在该命令确实现场执行后写出；绝不把
+    复制缓存称为已执行（MB-B-001）。
     """
 
+    if max_steps != 2000:
+        raise ValueError("正式运行入口固定使用2000步安全上限")
     manifest = build_current_manifest(
         mode_name=mode_name,
         general_names=general_names,
@@ -545,42 +477,68 @@ def run_formal_simulation(
             f"{FORMAL_NO_SKILL_DUEL_MODE!r}"
         )
 
-    readiness, inspection_error = _inspect_formal_duel_safely()
-    if readiness is None:
-        raise RuntimeError(
-            "正式单挑门禁通过后canonical readiness复检失败："
-            f"{inspection_error}"
-        )
-    seed_results = _validated_formal_seed_evidence(readiness)
     if output_path is None:
         raise ValueError("正式单挑门禁通过后必须提供JSON结果输出路径")
     output = Path(output_path)
     if not output.name or (output.exists() and output.is_dir()):
         raise ValueError("正式单挑结果输出路径必须指向JSON文件")
 
-    payload = {
-        "schema_version": FORMAL_RESULT_SCHEMA_VERSION,
-        "status": "passed",
-        "simulation_executed": True,
-        "result_source": "canonical_live_readiness",
-        "mode_id": FORMAL_NO_SKILL_DUEL_MODE,
-        "deck_count": readiness.deck_count,
-        "unsupported_rules": readiness.unsupported_rules,
-        "approximation_count": readiness.approximation_count,
-        "all_cards_implemented": readiness.all_cards_implemented,
-        "mode_implemented": readiness.mode_implemented,
-        "reexecution_replay_supported": readiness.reexecution_replay_supported,
-        "formal_duel_no_skill_ready": readiness.formal_duel_no_skill_ready,
-        "acceptance_seed_count": readiness.acceptance_seed_count,
-        "acceptance_natural_end_count": (
-            readiness.acceptance_natural_end_count
-        ),
-        "acceptance_failure_count": readiness.acceptance_failure_count,
-        "fixed_seed_acceptance_passed": (
-            readiness.fixed_seed_acceptance_passed
-        ),
-        "seed_results": [item.to_dict() for item in seed_results],
-    }
+    prepared_seeds = tuple(range(100)) if seeds is None else tuple(seeds)
+    if (
+        not prepared_seeds
+        or any(
+            isinstance(seed, bool) or not isinstance(seed, int)
+            for seed in prepared_seeds
+        )
+        or len(prepared_seeds) != len(set(prepared_seeds))
+    ):
+        raise ValueError("正式运行的seed集合必须是互不重复的整数")
+
+    started = time.time()
+    seed_results = run_formal_duel_seed_sweep(
+        prepared_seeds,
+        configuration=FormalDuelConfiguration.formal_profile(),
+        analysis_only=False,
+        max_steps=max_steps,
+    )
+    elapsed = time.time() - started
+    if len(seed_results) != len(prepared_seeds) or any(
+        item.natural_end is not True
+        or item.formal_result_eligible is not True
+        or item.reexecution_verified is not True
+        or item.winner not in {"p1", "p2"}
+        or item.unsupported_rules != 0
+        or item.approximation_count != 0
+        or item.safety_cap_triggered
+        or item.exception_type is not None
+        or not isinstance(item.final_state_hash, str)
+        for item in seed_results
+    ):
+        raise RuntimeError("正式单挑现场执行存在失败 seed，拒绝写出结果")
+
+    if tuple(prepared_seeds) == tuple(range(100)):
+        payload = build_formal_acceptance_artifact(
+            seed_results, elapsed_seconds=elapsed
+        )
+    else:
+        # 测试专用 seed 子集：仍真实执行并逐 seed 记录，但不是正式验收
+        # artifact（gate 只接受精确 0..99 + 全部 provenance 绑定）。
+        payload = {
+            "schema": "SGS_FORMAL_DUEL_RUN_SUBSET_v1",
+            "mode": FORMAL_NO_SKILL_DUEL_MODE,
+            "seeds": list(prepared_seeds),
+            "analysis_only": False,
+            "max_steps": max_steps,
+            "seed_results": [item.to_dict() for item in seed_results],
+            "note": (
+                "测试专用正式入口执行子集；不是正式验收证据，"
+                "gate 不接受该 schema"
+            ),
+        }
+    payload["schema_version"] = FORMAL_RESULT_SCHEMA_VERSION
+    payload["status"] = "passed"
+    payload["simulation_executed"] = True
+    payload["result_source"] = "live_execution"
     _atomic_write_json(output, payload)
     return output
 

@@ -797,11 +797,15 @@ class ProductionReexecutionReplay:
                 raw_config = initial_configuration.get(
                     "formal_duel_configuration"
                 )
-                if (
-                    raw_config is None
-                    or FormalDuelConfiguration.from_dict(raw_config)
-                    != FormalDuelConfiguration.formal_profile()
-                ):
+                try:
+                    canonical_replay_config = (
+                        FormalDuelConfiguration.from_canonical_profile_value(
+                            raw_config
+                        )
+                    )
+                except Exception:
+                    canonical_replay_config = None
+                if canonical_replay_config is None:
                     raise ProductionReplayFormatError(
                         "正式结果回放必须绑定项目canonical formal profile"
                     )
@@ -874,6 +878,15 @@ class ProductionReexecutionReplay:
         object.__setattr__(self, "events", _freeze(events))
         object.__setattr__(self, "event_hash_chain", event_hash_chain)
         object.__setattr__(self, "outcome", _freeze(outcome))
+        object.__setattr__(
+            self,
+            "authoritative_private",
+            _freeze(
+                _require_mapping(
+                    self.authoritative_private, "authoritative_private"
+                )
+            ),
+        )
 
         calculated = sha256_value(self._material_dict())
         supplied = self.record_sha256
@@ -1249,6 +1262,7 @@ def record_reference_production_batch(
         )
 
     assert game.winner_id is not None
+    game.assert_finished_state_invariants()
     event_values = tuple(_event_values(game))
     outcome = {
         "winner_id": game.winner_id,
@@ -1284,9 +1298,10 @@ def record_reference_formal_duel(
 ) -> ProductionReexecutionReplay:
     """从可信 formal factory 录制同一生产核心的严格规则重执行回放。
 
-    当前正式规则配置尚未关闭，因此默认且通常只能用于
-    ``analysis_only`` 诊断。这里不接受牌堆路径、洗牌开关或夹具，避免
-    调用方把测试配置包装成正式单挑记录。
+    这里不接受牌堆路径、洗牌开关或夹具，避免调用方把测试配置包装成
+    正式单挑记录。正式 profile（USER_CONFIRMED_PROJECT_FORMAL_PROFILE，
+    2026-08-09）与正式执行哨兵已释放；analysis_only=false 时只接受
+    canonical formal profile。
     """
 
     from .formal_duel import (
@@ -1401,7 +1416,21 @@ def reexecute_production_replay(
             raise ProductionReplayFormatError(
                 "正式单挑initial_configuration.analysis_only必须是布尔值"
             )
-        formal_configuration = FormalDuelConfiguration.from_dict(formal_value)
+        if analysis_only:
+            # analysis-only 记录只重建分析约定配置，不授予可信来源；
+            # 会话以 analysis_only=True 运行，不产生正式结果。
+            formal_configuration = FormalDuelConfiguration.from_dict(
+                formal_value
+            )
+        else:
+            # 正式记录必须与 canonical formal profile 逐字段一致；验证的
+            # 是 canonical 内容，而不是让 payload 自行获得 trusted
+            # provenance（MB-M-005）。
+            formal_configuration = (
+                FormalDuelConfiguration.from_canonical_profile_value(
+                    formal_value
+                )
+            )
         game = FormalNoSkillDuelSession(
             seed=int(header["seed"]),
             configuration=formal_configuration,

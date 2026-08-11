@@ -120,7 +120,7 @@ def test_character_metadata_is_bound_into_canonical_state_hash() -> None:
                 player,
                 character=CharacterMetadata(
                     character_key="test_general_a",
-                    gender=CharacterGender.MALE,
+                    intrinsic_gender=CharacterGender.MALE,
                 ),
             )
             if player.player_id == p1.player_id
@@ -135,7 +135,7 @@ def test_character_metadata_is_bound_into_canonical_state_hash() -> None:
                 player,
                 character=CharacterMetadata(
                     character_key="test_general_a",
-                    gender=None,
+                    intrinsic_gender=None,
                 ),
             )
             if player.player_id == p1.player_id
@@ -148,11 +148,13 @@ def test_character_metadata_is_bound_into_canonical_state_hash() -> None:
 
     assert male_snapshot["players"][0]["character"] == {
         "character_key": "test_general_a",
-        "gender": "male",
+        "intrinsic_gender": "male",
+        "effective_gender": None,
     }
     assert unknown_snapshot["players"][0]["character"] == {
         "character_key": "test_general_a",
-        "gender": None,
+        "intrinsic_gender": None,
+        "effective_gender": None,
     }
     assert state_sha256(base_snapshot) != state_sha256(male_snapshot)
     assert state_sha256(unknown_snapshot) != state_sha256(male_snapshot)
