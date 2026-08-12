@@ -35,6 +35,7 @@ from .sgs_engine_gate import (
     DeckReadiness,
     EngineSourceReadiness,
     FormalSimulationBlockedError,
+    FormalSimulationExecutionFailedError,
     FormalSimulationManifest,
     GeneralReadiness,
     evaluate_formal_run_gate,
@@ -514,7 +515,27 @@ def run_formal_simulation(
         or not isinstance(item.final_state_hash, str)
         for item in seed_results
     ):
-        raise RuntimeError("正式单挑现场执行存在失败 seed，拒绝写出结果")
+        # MB-B-001：live execution 已真实发生（simulation_executed=true），
+        # 但结果失败——必须写出 failed artifact，绝不能输出 passed。
+        failed_payload: dict[str, object] = {
+            "schema": "SGS_FORMAL_DUEL_RUN_FAILED_v1",
+            "schema_version": FORMAL_RESULT_SCHEMA_VERSION,
+            "status": "failed",
+            "simulation_executed": True,
+            "result_source": "live_execution",
+            "mode": FORMAL_NO_SKILL_DUEL_MODE,
+            "seeds": list(prepared_seeds),
+            "analysis_only": False,
+            "max_steps": max_steps,
+            "seed_results": [item.to_dict() for item in seed_results],
+            "note": (
+                "正式 run 命令确实现场执行了 seeds；live 结果存在失败项，"
+                "status=failed。simulation_executed=true 只表示执行已发生，"
+                "不表示执行成功（MB-B-001）。"
+            ),
+        }
+        _atomic_write_json(output, failed_payload)
+        raise FormalSimulationExecutionFailedError(failed_payload)
 
     if tuple(prepared_seeds) == tuple(range(100)):
         payload = build_formal_acceptance_artifact(
@@ -600,6 +621,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         }
         print(_json_text(payload), file=sys.stderr)
         return 2
+    except FormalSimulationExecutionFailedError as exc:
+        payload = exc.payload
+        print(_json_text(payload), file=sys.stderr)
+        return 3
     return 0
 
 

@@ -231,6 +231,12 @@ def test_exact_formal_duel_run_uses_live_blockers_and_writes_nothing(
         acceptance_failure_count=0,
         fixed_seed_acceptance_passed=False,
         formal_duel_no_skill_ready=False,
+        formal_duel_execution_ready=False,
+        blockers=(
+            __import__("scripts.sgs_engine.formal_duel", fromlist=["FormalDuelBlocker"]).FormalDuelBlocker(
+                "TEST_BLOCKER", "MODE_GAP", "测试模拟 blocker"
+            ),
+        ),
     )
     monkeypatch.setattr(
         engine_gate,
@@ -248,7 +254,6 @@ def test_exact_formal_duel_run_uses_live_blockers_and_writes_nothing(
     assert output.parent.exists() is False
     codes = set(captured.value.result.issue_codes)
     assert GateIssueCode.MODE_NOT_IMPLEMENTED not in codes
-    assert GateIssueCode.FIXED_SEED_ACCEPTANCE_NOT_PASSED in codes
     assert GateIssueCode.ALL_CARDS_NOT_IMPLEMENTED not in codes
     assert GateIssueCode.UNSUPPORTED_RULES not in codes
     assert GateIssueCode.FULL_GAME_CORE_NOT_IMPLEMENTED in codes

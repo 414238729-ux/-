@@ -12,7 +12,7 @@ import hashlib
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Mapping
 
 from .sgs_engine.formal_duel import (
     FormalDuelReadiness,
@@ -550,68 +550,12 @@ def _evaluate_live_formal_duel_gate(
                 "现场检测到"
                 f"{readiness.approximation_count}项近似替代，禁止标记为正式结果",
             )
-        seed_results = tuple(readiness.acceptance_seed_results)
-        seed_result_types_valid = all(
-            isinstance(item, FormalDuelSeedResult) for item in seed_results
-        )
-        derived_seed_count = len(seed_results)
-        if seed_result_types_valid:
-            derived_natural_end_count = sum(
-                bool(item.natural_end) for item in seed_results
-            )
-            derived_seed_failure_count = sum(
-                not (
-                    item.natural_end
-                    and item.formal_result_eligible
-                    and item.reexecution_verified
-                    and item.winner in {"p1", "p2"}
-                    and item.deck_count == FORMAL_DECK_CARD_COUNT
-                    and item.action_count > 0
-                    and item.turn_count > 0
-                    and item.draw_pile_count >= 0
-                    and item.unsupported_rules == 0
-                    and item.approximation_count == 0
-                    and not item.safety_cap_triggered
-                    and item.exception_type is None
-                    and item.exception_message is None
-                )
-                for item in seed_results
-            )
-            derived_seed_ids = tuple(item.seed for item in seed_results)
-        else:
-            derived_natural_end_count = 0
-            derived_seed_failure_count = max(1, derived_seed_count)
-            derived_seed_ids = ()
-        seed_evidence_complete = (
-            seed_result_types_valid
-            and derived_seed_ids == tuple(range(100))
-            and derived_seed_count == 100
-            and derived_natural_end_count == 100
-            and derived_seed_failure_count == 0
-        )
-        seed_summaries_consistent = (
-            readiness.acceptance_seed_count == derived_seed_count
-            and readiness.acceptance_natural_end_count
-            == derived_natural_end_count
-            and readiness.acceptance_failure_count
-            == derived_seed_failure_count
-            and readiness.fixed_seed_acceptance_passed
-            == seed_evidence_complete
-        )
-        if not seed_summaries_consistent:
-            add(
-                GateIssueCode.FORMAL_DUEL_READINESS_INSPECTION_FAILED,
-                "100-seed汇总与逐seed canonical验收记录不一致",
-            )
-        seed_acceptance_consistent = (
-            seed_evidence_complete and seed_summaries_consistent
-        )
-        if not seed_acceptance_consistent:
-            add(
-                GateIssueCode.FIXED_SEED_ACCEPTANCE_NOT_PASSED,
-                "正式单挑尚无至少100个固定seed全部自然结束、逐seed保留且"
-                "零异常/零上限/零unsupported/零approximation的现场验收",
-            )
+        # MB-B-001：run 前置门禁只检查 STATIC EXECUTION ELIGIBILITY。
+        # 签入 acceptance artifact 是缓存报告（cached_acceptance_report_valid
+        # 等只读字段），不是执行凭证；artifact stale 不得阻止开始新的 live
+        # execution（否则永远无法生成新 artifact 的循环）。live 结果由正式
+        # run 命令真实执行后现场验证，FIXED_SEED_ACCEPTANCE_NOT_PASSED 不再
+        # 作为 run 前置 blocker（对应失败改由 run 的现场结果判定）。
         for blocker in readiness.blockers:
             add(
                 GateIssueCode.FORMAL_DUEL_READINESS_BLOCKER,
@@ -629,18 +573,24 @@ def _evaluate_live_formal_duel_gate(
             and readiness.reexecution_replay_supported
             and derived_unsupported_rules == 0
             and readiness.approximation_count == 0
-            and seed_acceptance_consistent
             and not readiness.blockers
         )
         if readiness.formal_duel_no_skill_ready != derived_ready:
             add(
                 GateIssueCode.FORMAL_DUEL_READINESS_INSPECTION_FAILED,
-                "formal_duel_no_skill_ready与现场组成能力不一致，拒绝静态布尔自证",
+                "formal_duel_no_skill_ready与现场静态组成能力不一致，拒绝布尔自证",
+            )
+        if hasattr(readiness, "formal_duel_execution_ready") and (
+            readiness.formal_duel_execution_ready != derived_ready
+        ):
+            add(
+                GateIssueCode.FORMAL_DUEL_READINESS_INSPECTION_FAILED,
+                "formal_duel_execution_ready与现场静态组成能力不一致",
             )
         if not derived_ready:
             add(
                 GateIssueCode.FULL_GAME_CORE_NOT_IMPLEMENTED,
-                "正式单挑现场能力尚不能从开局运行至可严格重执行的自然胜负",
+                "正式单挑现场静态能力尚不能从开局运行至自然胜负",
             )
 
     canonical_source = _canonical_formal_runner_source()
@@ -734,6 +684,19 @@ class FormalSimulationBlockedError(RuntimeError):
         self.result = result
         details = "\n".join(f"- {issue.message}" for issue in result.issues)
         super().__init__(f"正式模拟已被失败关闭门禁拒绝：\n{details}")
+
+
+class FormalSimulationExecutionFailedError(RuntimeError):
+    """正式 run 命令确实现场执行了 seeds，但 live 结果存在失败项。
+
+    ``simulation_executed=true`` 只回答“有没有真实执行”，不回答“执行是否
+    成功”；本异常与写出的 failed artifact 同时表示“执行发生了，但结果
+    失败”（MB-B-001），不得被解释为 passed。
+    """
+
+    def __init__(self, payload: Mapping[str, object]) -> None:
+        self.payload = payload
+        super().__init__("正式单挑现场执行存在失败 seed，结果为 failed")
 
 
 def require_formal_simulation_ready(manifest: FormalSimulationManifest) -> FormalRunGateResult:

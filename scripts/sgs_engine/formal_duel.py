@@ -128,9 +128,6 @@ class FormalDuelConfiguration:
     player_max_hp: tuple[int, int]
     first_player_policy: str
     participants: tuple[CharacterMetadata | None, CharacterMetadata | None]
-    # 内部可信来源令牌：只有 canonical trusted factory 能把它设为 True。
-    # 它不是规则字段，不进入 to_dict；普通反序列化恒为 False。
-    _trusted_provenance: bool = False
 
     def __post_init__(self) -> None:
         for field_name, label in (
@@ -176,24 +173,14 @@ class FormalDuelConfiguration:
                 "参战角色元数据必须恰好包含两项CharacterMetadata或None"
             )
         object.__setattr__(self, "participants", participants)
-        if not isinstance(self._trusted_provenance, bool):
-            raise FormalDuelConfigurationError("内部可信来源令牌必须是布尔值")
 
     @property
     def source_confirmed(self) -> bool:
-        return (
-            self._trusted_provenance
-            and self.verification_status in _FORMAL_SOURCE_STATUSES
-            and self.deck_applicable
-            and all(
-                item is not None
-                and (
-                    item.effective_gender is not None
-                    or item.intrinsic_gender is not None
-                )
-                for item in self.participants
-            )
-        )
+        # MB-M-005：普通 FormalDuelConfiguration 实例（含数值完全等于
+        # canonical profile 的调用方构造）永远不持有 trusted provenance。
+        # 只有内部 canonical factory 返回的 TrustedFormalDuelConfiguration
+        # 才具备正式资格。
+        return False
 
     @classmethod
     def from_canonical_profile_value(
@@ -248,7 +235,7 @@ class FormalDuelConfiguration:
         2026-08-09）：雌雄双股剑不会因双方“异性”而发动。
         """
 
-        return cls(
+        return TrustedFormalDuelConfiguration(
             platform="三国杀移动版",
             version="2026-07-25牌堆快照",
             source_location=(
@@ -273,7 +260,6 @@ class FormalDuelConfiguration:
                     CharacterGender.NONE,
                 ),
             ),
-            _trusted_provenance=True,
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -398,6 +384,66 @@ class FormalDuelConfiguration:
         )
 
 
+def _canonical_formal_profile_value() -> dict[str, object]:
+    """canonical formal profile 的值字典（无 trusted 能力，避免递归）。
+
+    供 TrustedFormalDuelConfiguration.__post_init__ 做精确值校验，以及
+    replay 身份比较使用；构造本身不产生 trusted capability。
+    """
+
+    soldier = {
+        "character_key": "soldier",
+        "intrinsic_gender": "none",
+        "effective_gender": "none",
+    }
+    return {
+        "platform": "三国杀移动版",
+        "version": "2026-07-25牌堆快照",
+        "source_location": (
+            "USER_CONFIRMED_PROJECT_FORMAL_PROFILE"
+            "（2026-08-09 用户确认）"
+        ),
+        "verification_status": "当前确认",
+        "deck_applicable": True,
+        "initial_hand_count": 4,
+        "player_hp": [4, 4],
+        "player_max_hp": [4, 4],
+        "first_player_policy": "deterministic_rng",
+        "participants": [dict(soldier), dict(soldier)],
+    }
+
+
+@dataclass(frozen=True, slots=True)
+class TrustedFormalDuelConfiguration(FormalDuelConfiguration):
+    """唯一持有正式 trusted provenance 的配置类型（MB-M-005）。
+
+    只有内部 canonical factory（``FormalDuelConfiguration.formal_profile()``
+    与 ``from_canonical_profile_value`` 的成功路径）能构造本类型。普通
+    ``FormalDuelConfiguration(...)``、``from_dict(...)``、``replace(...)``、
+    ``copy/deepcopy``、JSON roundtrip 或数值完全等于 canonical 的调用方
+    构造均只能得到 untrusted 的普通配置（``source_confirmed=False``），
+    不能自我授予 formal eligibility。
+
+    本类型不可被篡改：``__post_init__`` 强制当前值必须与 canonical
+    formal profile 精确一致；任何 ``dataclasses.replace`` 修改字段都会
+    在校验处失败关闭，从而无法用 trusted 类型包装非 canonical 值。
+    """
+
+    def __post_init__(self) -> None:
+        # frozen+slots dataclass 子类中零参数 super() 会失败（CPython
+        # slots 交互限制），显式调用父类校验。
+        FormalDuelConfiguration.__post_init__(self)
+        if self.to_dict() != _canonical_formal_profile_value():
+            raise FormalDuelConfigurationError(
+                "TrustedFormalDuelConfiguration 必须精确等于项目 canonical "
+                "formal profile；禁止用 trusted 类型包装被修改的配置"
+            )
+
+    @property
+    def source_confirmed(self) -> bool:
+        return True
+
+
 class FormalNoSkillDuelSession(ProductionBasicCardBatch):
     """复用同一生产核心的正式单挑模式会话；没有第二套引擎。"""
 
@@ -420,28 +466,20 @@ class FormalNoSkillDuelSession(ProductionBasicCardBatch):
             raise TypeError("正式单挑会话必须接收FormalDuelConfiguration")
         if not isinstance(analysis_only, bool):
             raise TypeError("analysis_only必须是布尔值")
-        if not configuration.source_confirmed and not analysis_only:
-            raise FormalDuelConfigurationError(
-                "正式单挑配置尚未由规则源确认；只能显式analysis_only诊断"
-            )
-        if (
-            configuration.source_confirmed
-            and not analysis_only
-            and not _FORMAL_EXECUTION_RELEASED
+        if not analysis_only and not isinstance(
+            configuration, TrustedFormalDuelConfiguration
         ):
+            # MB-M-005：正式结果只能由内部 canonical factory 返回的
+            # TrustedFormalDuelConfiguration 产生；普通构造、from_dict、
+            # replace、copy/deepcopy、JSON roundtrip 或数值完全等于
+            # canonical 的调用方配置均不能自我授予 trusted provenance。
+            raise FormalDuelConfigurationError(
+                "正式单挑结果只接受内部 canonical factory 返回的 "
+                "TrustedFormalDuelConfiguration；调用方配置不能自我授权"
+            )
+        if configuration.source_confirmed and not _FORMAL_EXECUTION_RELEASED:
             raise FormalDuelConfigurationError(
                 "正式单挑仍有卡牌／重放门禁未关闭，禁止生成正式结果"
-            )
-        if (
-            configuration.source_confirmed
-            and not analysis_only
-            and configuration != FormalDuelConfiguration.formal_profile()
-        ):
-            # 正式结果只能由项目 canonical formal profile 产生；调用方
-            # 自行构造的“当前确认”配置不能自我授权正式结果。
-            raise FormalDuelConfigurationError(
-                "正式单挑结果只接受项目 canonical formal profile；"
-                "调用方配置不能自我授权"
             )
         self._formal_configuration = configuration
         self._analysis_only = analysis_only
@@ -574,6 +612,20 @@ class FormalDuelReadiness:
     acceptance_failure_count: int
     fixed_seed_acceptance_passed: bool
     formal_duel_no_skill_ready: bool
+    # MB-B-001：三层语义分离。
+    # A. STATIC EXECUTION ELIGIBILITY：当前代码在静态规则/牌堆/profile
+    # 范围内可以开始 formal duel execution；不依赖任何旧 acceptance
+    # artifact（否则 artifact stale → 无法运行 → 永远无法生成新 artifact
+    # 的循环）。
+    formal_duel_execution_ready: bool
+    # B. CACHED ACCEPTANCE REPORT VALIDITY：签入 artifact 自身一致性
+    # （schema/identity/seed集合/digest）；只描述缓存报告，不得等同
+    # “刚刚执行过”，也不得独立授权 Milestone PASSED。
+    cached_acceptance_report_valid: bool
+    cached_acceptance_seed_count: int
+    cached_acceptance_natural_end_count: int
+    cached_acceptance_failure_count: int
+    cached_fixed_seed_acceptance_passed: bool
     blockers: tuple[FormalDuelBlocker, ...]
     card_semantic_statuses: tuple[FormalDuelCardStatus, ...]
     # 汇总计数不是验收证据。门禁必须逐项检查这里的 canonical seed 记录，
@@ -610,6 +662,24 @@ class FormalDuelReadiness:
             "acceptance_failure_count": self.acceptance_failure_count,
             "fixed_seed_acceptance_passed": self.fixed_seed_acceptance_passed,
             "formal_duel_no_skill_ready": self.formal_duel_no_skill_ready,
+            "formal_duel_execution_ready": (
+                self.formal_duel_execution_ready
+            ),
+            "cached_acceptance_report_valid": (
+                self.cached_acceptance_report_valid
+            ),
+            "cached_acceptance_seed_count": (
+                self.cached_acceptance_seed_count
+            ),
+            "cached_acceptance_natural_end_count": (
+                self.cached_acceptance_natural_end_count
+            ),
+            "cached_acceptance_failure_count": (
+                self.cached_acceptance_failure_count
+            ),
+            "cached_fixed_seed_acceptance_passed": (
+                self.cached_fixed_seed_acceptance_passed
+            ),
             "blockers": [
                 {
                     "code": item.code,
@@ -751,17 +821,16 @@ def inspect_formal_duel_readiness() -> FormalDuelReadiness:
         reexecute_production_replay
     )
     unsupported_rules = 0
-    # 正式 runner 逐个严格重执行固定 seeds 0..99 的现场结果由正式验收
-    # artifact 现场加载（_load_acceptance_evidence，fail-closed）；缺失、
-    # 损坏或含失败 seed 时保持空，analysis-only 诊断不得冒充验收。
-    acceptance_seed_results: tuple[FormalDuelSeedResult, ...] = (
-        _load_acceptance_evidence()
+    # MB-B-001：三层语义分离。
+    # B. CACHED ACCEPTANCE REPORT：签入 artifact 是缓存报告，只描述
+    # “报告自身一致”，不表示“刚刚执行过”，也不得独立授权 Milestone
+    # PASSED。缺失/损坏/身份不匹配 → (False, ())。
+    cached_acceptance_valid, cached_results = _load_acceptance_evidence()
+    cached_acceptance_seed_count = len(cached_results)
+    cached_acceptance_natural_end_count = sum(
+        item.natural_end for item in cached_results
     )
-    acceptance_seed_count = len(acceptance_seed_results)
-    acceptance_natural_end_count = sum(
-        item.natural_end for item in acceptance_seed_results
-    )
-    acceptance_failure_count = sum(
+    cached_acceptance_failure_count = sum(
         not (
             item.natural_end
             and item.formal_result_eligible
@@ -773,26 +842,34 @@ def inspect_formal_duel_readiness() -> FormalDuelReadiness:
             and not item.safety_cap_triggered
             and item.exception_type is None
         )
-        for item in acceptance_seed_results
+        for item in cached_results
     )
-    fixed_seed_acceptance_passed = (
-        tuple(item.seed for item in acceptance_seed_results) == tuple(range(100))
-        and acceptance_natural_end_count == 100
-        and acceptance_failure_count == 0
+    cached_fixed_seed_acceptance_passed = (
+        cached_acceptance_valid
+        and tuple(item.seed for item in cached_results) == tuple(range(100))
+        and cached_acceptance_natural_end_count == 100
+        and cached_acceptance_failure_count == 0
     )
-    ready = (
+    # 兼容字段：acceptance_* 即 cached 报告证据（只读报告，不授权执行）。
+    acceptance_seed_results = cached_results
+    acceptance_seed_count = cached_acceptance_seed_count
+    acceptance_natural_end_count = cached_acceptance_natural_end_count
+    acceptance_failure_count = cached_acceptance_failure_count
+    fixed_seed_acceptance_passed = cached_fixed_seed_acceptance_passed
+    # A. STATIC EXECUTION ELIGIBILITY：当前代码在静态规则/牌堆/profile
+    # 范围内可以开始 formal duel execution；不依赖旧 acceptance artifact
+    # （artifact stale 不得阻止开始新的 live execution，MB-B-001）。
+    static_ready = (
         mode_runtime_reachable
         and mode_implemented
         and duel_scope_all_cards_sufficient
         and replay_supported
         and unsupported_rules == 0
-        and fixed_seed_acceptance_passed
-        and acceptance_seed_count >= 100
-        and acceptance_natural_end_count == acceptance_seed_count
-        and acceptance_failure_count == 0
-        and len(acceptance_seed_results) == 100
         and not blockers
     )
+    formal_duel_execution_ready = static_ready
+    # formal_duel_no_skill_ready 语义 = 静态执行资格（可与执行）。
+    formal_duel_no_skill_ready = static_ready
     return FormalDuelReadiness(
         mode_id=FORMAL_NO_SKILL_DUEL_MODE,
         deck_count=registry.card_count,
@@ -815,7 +892,17 @@ def inspect_formal_duel_readiness() -> FormalDuelReadiness:
         acceptance_natural_end_count=acceptance_natural_end_count,
         acceptance_failure_count=acceptance_failure_count,
         fixed_seed_acceptance_passed=fixed_seed_acceptance_passed,
-        formal_duel_no_skill_ready=ready,
+        formal_duel_no_skill_ready=formal_duel_no_skill_ready,
+        formal_duel_execution_ready=formal_duel_execution_ready,
+        cached_acceptance_report_valid=cached_acceptance_valid,
+        cached_acceptance_seed_count=cached_acceptance_seed_count,
+        cached_acceptance_natural_end_count=(
+            cached_acceptance_natural_end_count
+        ),
+        cached_acceptance_failure_count=cached_acceptance_failure_count,
+        cached_fixed_seed_acceptance_passed=(
+            cached_fixed_seed_acceptance_passed
+        ),
         blockers=tuple(blockers),
         card_semantic_statuses=tuple(card_statuses),
         acceptance_seed_results=acceptance_seed_results,
@@ -1149,15 +1236,17 @@ def write_formal_acceptance_artifact(
 
 def _load_acceptance_evidence(
     artifact_path: str | Path | None = None,
-) -> tuple["FormalDuelSeedResult", ...]:
+) -> tuple[bool, tuple["FormalDuelSeedResult", ...]]:
     """从正式100-seed验收artifact现场加载逐seed证据；缺失/损坏保持空。
 
-    artifact 只是缓存证据：必须与当前实现身份、canonical rules/profile
+    artifact 只是缓存报告：必须与当前实现身份、canonical rules/profile
     身份、牌堆身份完全绑定，且所有关键字段严格验证（MB-B-001）。任何
     字段缺失、未知字段、非零 unsupported/approximation、非自然结束、
     失败 seed、seed 集合不精确、strict replay 缺失、final_state_hash
     非法、analysis_only=true、max_steps 不符或身份不匹配都会使本函数
-    返回空（fail-closed），不允许用调用方手写 JSON 或静态布尔值授权。
+    返回 (False, ())（fail-closed）。
+    返回 ``(valid, results)``：valid 只表示“缓存报告自身一致”，不表示
+    “刚刚执行过”；只有正式 run 命令真实执行后才会产生本次 live 结果。
     """
 
     import json
@@ -1166,51 +1255,51 @@ def _load_acceptance_evidence(
         artifact_path
     )
     if not target.exists():
-        return ()
+        return False, ()
     try:
         with target.open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
     except (OSError, ValueError):
-        return ()
+        return False, ()
     if not isinstance(payload, Mapping):
-        return ()
+        return False, ()
     if set(payload) != _ARTIFACT_TOP_FIELDS:
-        return ()
+        return False, ()
     if payload.get("schema") != _ACCEPTANCE_SCHEMA:
-        return ()
+        return False, ()
     if payload.get("mode") != FORMAL_NO_SKILL_DUEL_MODE:
-        return ()
+        return False, ()
     if payload.get("passed") is not True:
-        return ()
+        return False, ()
     if payload.get("analysis_only") is not False:
-        return ()
+        return False, ()
     if payload.get("max_steps") != _CANONICAL_ACCEPTANCE_MAX_STEPS:
-        return ()
+        return False, ()
     raw_seeds = payload.get("seeds")
     if (
         not isinstance(raw_seeds, Sequence)
         or len(raw_seeds) != 100
         or tuple(raw_seeds) != tuple(range(100))
     ):
-        return ()
+        return False, ()
     if payload.get("seed_count") != 100:
-        return ()
+        return False, ()
     if payload.get("natural_end_count") != 100:
-        return ()
+        return False, ()
     if payload.get("reexecution_verified_count") != 100:
-        return ()
+        return False, ()
     if payload.get("failure_count") != 0:
-        return ()
+        return False, ()
     if payload.get("failures") != []:
-        return ()
+        return False, ()
     try:
         profile_value = _plain_config_value(
             payload.get("canonical_formal_profile")
         )
     except Exception:
-        return ()
+        return False, ()
     if profile_value != FormalDuelConfiguration.formal_profile().to_dict():
-        return ()
+        return False, ()
     for label, current in (
         ("implementation_identity", implementation_identity()),
         ("rules_profile_identity", rules_profile_identity()),
@@ -1218,24 +1307,24 @@ def _load_acceptance_evidence(
     ):
         stored = payload.get(label)
         if not isinstance(stored, str) or stored != current:
-            return ()
+            return False, ()
     raw_detail = payload.get("seeds_detail")
     if not isinstance(raw_detail, Sequence) or len(raw_detail) != 100:
-        return ()
+        return False, ()
     results: list[FormalDuelSeedResult] = []
     for expected_seed, item in enumerate(raw_detail):
         if not isinstance(item, Mapping):
-            return ()
+            return False, ()
         if set(item) != _SEED_DETAIL_FIELDS:
-            return ()
+            return False, ()
         seed = item.get("seed")
         if isinstance(seed, bool) or not isinstance(seed, int):
-            return ()
+            return False, ()
         if seed != expected_seed:
-            return ()
+            return False, ()
         winner = item.get("winner")
         if winner not in {"p1", "p2"}:
-            return ()
+            return False, ()
         for field in (
             "action_count",
             "turn_count",
@@ -1249,7 +1338,7 @@ def _load_acceptance_evidence(
                 or not isinstance(value, int)
                 or value < 0
             ):
-                return ()
+                return False, ()
         if (
             item.get("action_count") == 0
             or item.get("turn_count") == 0
@@ -1259,10 +1348,10 @@ def _load_acceptance_evidence(
             or item.get("passed") is not True
             or item.get("strict_reexecution") is not True
         ):
-            return ()
+            return False, ()
         final_state_hash = item.get("final_state_hash")
         if not _is_sha256_hex(final_state_hash):
-            return ()
+            return False, ()
         results.append(
             FormalDuelSeedResult(
                 seed=seed,
@@ -1284,7 +1373,7 @@ def _load_acceptance_evidence(
                 final_state_hash=final_state_hash,
             )
         )
-    return tuple(results)
+    return True, tuple(results)
 
 
 def run_formal_duel_seed_sweep(

@@ -8,8 +8,9 @@
 RULE_SOURCE_GAP）的全部 13 项 finding。开发分支
 `sol-ultra-milestone-b-formal-duel`，开始 HEAD=
 `ebd656754ed2a528e0d08cd5175b68385fdb8140`；audit branch
-`sol-ultra-audit-milestone-b-formal-duel` 保持冻结于该提交，未移动。工作树
-尚未提交，`commit=null`、`pending`，没有执行 commit／tag／push。旧
+`sol-ultra-audit-milestone-b-formal-duel` 保持冻结于该提交，未移动。
+【CURRENT LIVE】实现提交 8ce497064fbb4686177cf63cca5265e902037129（fix: remediate milestone B formal duel audit findings）已由用户创建；remediation-1 targeted independent re-audit 结论 MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED；Remediation 2 NOT_AUDITED_YET。
+【HISTORICAL/AS-OF（PRECOMMIT SNAPSHOT）】当时工作树尚未提交，`commit=null`、`pending`，没有执行 commit／tag／push。旧
 whole-repo audit remediation chain 已永久封存，本轮不创建 remediation-7。
 
 当前已关闭（本地实现层面）的事实：

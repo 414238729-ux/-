@@ -493,6 +493,67 @@ class _PendingHanbingDiscard:
     snapshot_digest: str | None = None
 
 
+# MB-M-008 FINISHED transient inventory：这些 _BatchRuntime 字段在
+# FINISHED 时必须是空/默认值（B 类 transient/pending）。A 类永久/历史
+# 字段（current_player_id、turn_number、phase、slash_used_counts、
+# judgment_entry_indices、judgment_entry_counter）允许存在；winner_id
+# 必须非空。assert_finished_state_invariants 与终局清理都基于本清单，
+# 新增 transient 字段必须同步登记，避免 invariant 成为垃圾隐藏器。
+FINISHED_TRANSIENT_RUNTIME_FIELDS: frozenset[str] = frozenset({
+    "pending_judgment",
+    "skipped_phases",
+    "phase_skip_reasons",
+    "defer_damage_card_finish",
+    "damage_card_already_finished",
+    "wine_buff_owner_id",
+    "wine_buff_used_this_play_phase",
+    "pending_slash",
+    "pending_trick",
+    "trick_effect_active",
+    "trick_consecutive_passes",
+    "trick_response_order",
+    "trick_response_index",
+    "trick_decision_count",
+    "trick_direct_response_to",
+    "pending_dying_id",
+    "rescue_order",
+    "rescue_index",
+    "rescue_decision_count",
+    "response_window_id",
+    "response_window_order",
+    "response_window_source_sequence",
+    "pending_zone_choice",
+    "zone_choice_handles",
+    "zone_choice_snapshot_digest",
+    "pending_duel",
+    "pending_fire_attack",
+    "fire_attack_reveal_handles",
+    "pending_group_trick",
+    "group_response_handles",
+    "group_response_snapshot_digest",
+    "pending_wugu",
+    "pending_borrowed_sword",
+    "borrowed_sword_slash_handles",
+    "borrowed_sword_slash_snapshot_digest",
+    "pending_damage_card_id",
+    "pending_damage_source_id",
+    "pending_damage_kill_credit",
+    "pending_damage_rescue_reason",
+    "pending_damage_death_reason",
+    "pending_chain",
+    "bagua_attempted",
+    "discard_phase_window_id",
+    "discard_phase_selected_ids",
+    "discard_phase_handles",
+    "discard_phase_snapshot_digest",
+    "pending_cixiong_choice",
+    "pending_weapon_choice",
+    "pending_slash_choice",
+    "pending_discard_two",
+    "pending_hanbing_discard",
+    "processed_judgment_instance_ids",
+})
+
 @dataclass(frozen=True, slots=True)
 class _BatchRuntime:
     current_player_id: str
@@ -2618,6 +2679,10 @@ class ProductionBasicCardBatch:
 
         FINISHED 时必须：PROCESSING/REVEALED 临时区为空、所有挂起根、
         响应窗口、濒死与虚拟材料状态均已清理；不允许任何临时 root 悬空。
+        检查基于 ``FINISHED_TRANSIENT_RUNTIME_FIELDS`` 完整 inventory
+        （B 类 transient/pending 必须为空），A 类永久字段允许存在，
+        winner_id 必须非空。新增 transient 字段必须登记进 inventory，
+        否则 invariant 会成为垃圾隐藏器。
         """
 
         state = self._state
@@ -2635,27 +2700,13 @@ class ProductionBasicCardBatch:
                 "终止不变量失败：FINISHED 时 REVEALED 临时区必须为空"
             )
         cleared: list[str] = []
-        for field_name in (
-            "pending_slash",
-            "pending_damage_card_id",
-            "pending_chain",
-            "pending_judgment",
-            "pending_borrowed_sword",
-            "pending_group_trick",
-            "pending_duel",
-            "pending_fire_attack",
-            "pending_wugu",
-            "pending_cixiong_choice",
-            "pending_weapon_choice",
-            "pending_slash_choice",
-            "pending_discard_two",
-            "pending_hanbing_discard",
-            "pending_zone_choice",
-            "pending_dying_id",
-            "response_window_id",
-        ):
-            if getattr(runtime, field_name, None) is not None:
-                cleared.append(field_name)
+        for field_name in sorted(FINISHED_TRANSIENT_RUNTIME_FIELDS):
+            value = getattr(runtime, field_name, None)
+            if value in (None, (), {}, 0, False) or (
+                isinstance(value, str) and value == ""
+            ):
+                continue
+            cleared.append(field_name)
         if cleared:
             raise ProductionBatchError(
                 "终止不变量失败：FINISHED 时仍残留挂起状态："
@@ -12422,6 +12473,21 @@ class ProductionBasicCardBatch:
             pending_discard_two=None,
             pending_hanbing_discard=None,
             damage_card_already_finished=False,
+            # MB-M-008：终局清理必须覆盖 FINISHED_TRANSIENT_RUNTIME_FIELDS 全部
+            # B 类字段；以下为独立复审在 seed 3 观察到的漏清字段。
+            pending_trick=None,
+            trick_effect_active=False,
+            trick_consecutive_passes=0,
+            trick_response_order=(),
+            trick_response_index=0,
+            trick_decision_count=0,
+            trick_direct_response_to=None,
+            zone_choice_snapshot_digest=None,
+            pending_damage_rescue_reason=None,
+            pending_damage_death_reason=None,
+            bagua_attempted=False,
+            wine_buff_owner_id=None,
+            wine_buff_used_this_play_phase=False,
         )
         self._commit_runtime(runtime, next_runtime)
         return next_state

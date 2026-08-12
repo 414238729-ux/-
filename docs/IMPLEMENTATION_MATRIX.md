@@ -2,10 +2,9 @@
 
 ## MILESTONE_B 当前矩阵（2026-08-11，CURRENT）
 
-本节记录 `MILESTONE_B_AUDIT_REMEDIATION_1` 工作树当前事实（开始 HEAD=
-`ebd656754ed2a528e0d08cd5175b68385fdb8140`；audit branch
-`sol-ultra-audit-milestone-b-formal-duel` 保持冻结，未移动）。工作树尚未提交
-（`commit=null`、`pending`），独立 Ultra 复审尚未运行：
+本节记录 `MILESTONE_B_AUDIT_REMEDIATION_1` 当前事实。
+【CURRENT LIVE】实现提交 8ce497064fbb4686177cf63cca5265e902037129（fix: remediate milestone B formal duel audit findings，父提交 ebd656754ed2a528e0d08cd5175b68385fdb8140）已由用户创建；audit branch `sol-ultra-audit-milestone-b-formal-duel` 保持冻结于 ebd6567...、remediation-1 re-audit branch 冻结于 8ce4970...；remediation-1 targeted independent re-audit 结论 MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED；Remediation 2 NOT_AUDITED_YET。
+【HISTORICAL/AS-OF（PRECOMMIT SNAPSHOT）】开始 HEAD=`ebd656754ed2a528e0d08cd5175b68385fdb8140`，当时工作树尚未提交（`commit=null`、`pending`）、独立复审尚未运行：
 `independent_audit_done=false`、`audit_conclusion=NOT_AUDITED_YET`；它不是
 已封存 whole-repo audit remediation chain 的续写，也不创建 remediation-7。
 下方旧矩阵（2026-08-09 及更早）为 HISTORICAL/AS-OF 或 PRE-AUDIT SNAPSHOT，

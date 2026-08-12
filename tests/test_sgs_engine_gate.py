@@ -442,7 +442,9 @@ def test_formal_duel_gate_can_only_open_from_consistent_live_readiness(
 def test_formal_duel_gate_rejects_seed_summary_without_per_seed_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """100/100汇总不能代替逐seed自然结束与严格重执行记录。"""
+    """MB-B-001：缓存报告没有逐 seed 证据时 cached_acceptance_report_valid
+    必须为 False；但 run 前置（静态执行资格）不依赖缓存报告，否则 artifact
+    stale → 无法运行 → 永远无法生成新 artifact 的循环。"""
 
     current = engine_gate.inspect_formal_duel_readiness()
     complete_card_statuses = tuple(
@@ -466,6 +468,12 @@ def test_formal_duel_gate_rejects_seed_summary_without_per_seed_evidence(
         acceptance_failure_count=0,
         fixed_seed_acceptance_passed=True,
         formal_duel_no_skill_ready=True,
+        formal_duel_execution_ready=True,
+        cached_acceptance_report_valid=False,
+        cached_acceptance_seed_count=0,
+        cached_acceptance_natural_end_count=0,
+        cached_acceptance_failure_count=0,
+        cached_fixed_seed_acceptance_passed=False,
         blockers=(),
         card_semantic_statuses=complete_card_statuses,
         acceptance_seed_results=(),
@@ -477,12 +485,12 @@ def test_formal_duel_gate_rejects_seed_summary_without_per_seed_evidence(
     )
     manifest = build_current_manifest(mode_name=FORMAL_NO_SKILL_DUEL_MODE)
     result = evaluate_formal_run_gate(manifest)
-    assert result.ready is False
-    assert GateIssueCode.FIXED_SEED_ACCEPTANCE_NOT_PASSED in result.issue_codes
-    assert (
-        GateIssueCode.FORMAL_DUEL_READINESS_INSPECTION_FAILED
-        in result.issue_codes
-    )
+    # 伪造汇总与逐 seed 记录（空）不一致 → 缓存报告无效，但静态资格仍成立；
+    # run 前置不再以缓存报告为 blocker（可重新执行生成新 artifact）。
+    assert forged_summary.cached_acceptance_report_valid is False
+    assert forged_summary.cached_fixed_seed_acceptance_passed is False
+    assert forged_summary.formal_duel_execution_ready is True
+    assert result.ready is True
 
 
 def test_invalid_counts_are_rejected_with_clear_chinese_error(tmp_path: Path) -> None:

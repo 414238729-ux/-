@@ -5,11 +5,13 @@
 本节记录 `MILESTONE_B_AUDIT_REMEDIATION_1` 工作树的当前事实，优先于下方
 较早批次快照（下方旧 “MILESTONE_B 当前现场状态（2026-08-09）” 与全部
 “0 seeds/blocked” 段均为 HISTORICAL/AS-OF 或 PRE-AUDIT SNAPSHOT，不表达
-当前状态）。本轮开始 HEAD=`ebd656754ed2a528e0d08cd5175b68385fdb8140`；
-audit branch `sol-ultra-audit-milestone-b-formal-duel` 保持冻结于该提交，
-未移动。本轮工作树尚未提交，`commit=null`、`pending`；独立 Ultra 复审尚未
-发生：`independent_audit_done=false`、`audit_conclusion=NOT_AUDITED_YET`，
-不预写本轮 reaudit PASSED。本节不是 whole-repo audit 的续写，也不是
+当前状态）。【CURRENT LIVE】MILESTONE_B_AUDIT_REMEDIATION_1 实现提交已由用户创建：
+8ce497064fbb4686177cf63cca5265e902037129（fix: remediate milestone B formal duel audit findings，父提交 ebd656754ed2a528e0d08cd5175b68385fdb8140）；audit branch
+`sol-ultra-audit-milestone-b-formal-duel` 保持冻结于 ebd6567...，remediation-1 re-audit branch `sol-ultra-audit-milestone-b-remediation-1` 冻结于 8ce4970...；
+remediation-1 targeted independent re-audit 结论为 MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED（CURRENT，不得改写为 PASSED）；Remediation 2 尚未独立审计
+（NOT_AUDITED_YET）。
+【HISTORICAL/AS-OF（PRECOMMIT SNAPSHOT）】本轮开始时 HEAD=`ebd656754ed2a528e0d08cd5175b68385fdb8140`，当时工作树尚未提交、`commit=null`、`pending`、`independent_audit_done=false`、
+`audit_conclusion=NOT_AUDITED_YET`，不预写当时 reaudit PASSED。本节不是 whole-repo audit 的续写，也不是
 `remediation-7`。
 
 ```text

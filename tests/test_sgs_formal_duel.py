@@ -71,7 +71,7 @@ def test_formal_duel_configuration_cannot_self_authorize_formal_result() -> None
     # trusted provenance；source_confirmed 只能由 canonical factory 授予。
     assert confirmed_by_caller.source_confirmed is False
     with pytest.raises(
-        FormalDuelConfigurationError, match="尚未由规则源确认"
+        FormalDuelConfigurationError, match="TrustedFormalDuelConfiguration"
     ):
         FormalNoSkillDuelSession(
             seed=0,
@@ -127,6 +127,11 @@ def test_live_readiness_has_exact_mode_scoped_card_semantics() -> None:
     assert readiness.acceptance_failure_count == 0
     assert len(readiness.acceptance_seed_results) == 100
     assert readiness.fixed_seed_acceptance_passed is True
+    # MB-B-001：缓存报告有效性与静态执行资格分离。
+    assert readiness.cached_acceptance_report_valid is True
+    assert readiness.cached_acceptance_seed_count == 100
+    assert readiness.cached_fixed_seed_acceptance_passed is True
+    assert readiness.formal_duel_execution_ready is True
     # MB-B-004：能力必须分层——duel scope 充分，但全局完整引擎不得成立。
     assert readiness.duel_scope_all_cards_sufficient is True
     assert readiness.global_all_cards_implemented is False
@@ -159,7 +164,7 @@ def test_from_dict_cannot_self_authorize_canonical_profile() -> None:
     assert rebuilt.to_dict() == canonical.to_dict()
     assert rebuilt.source_confirmed is False
     with pytest.raises(
-        FormalDuelConfigurationError, match="尚未由规则源确认"
+        FormalDuelConfigurationError, match="TrustedFormalDuelConfiguration"
     ):
         FormalNoSkillDuelSession(
             seed=0,
@@ -418,7 +423,8 @@ def _write_artifact(
 
 def test_acceptance_artifact_valid_roundtrip_loads_100_seeds(tmp_path) -> None:
     path = _write_artifact(tmp_path)
-    loaded = formal_duel_module._load_acceptance_evidence(path)
+    valid, loaded = formal_duel_module._load_acceptance_evidence(path)
+    assert valid is True
     assert len(loaded) == 100
     assert tuple(item.seed for item in loaded) == tuple(range(100))
     assert all(item.reexecution_verified for item in loaded)
@@ -529,7 +535,7 @@ def test_acceptance_artifact_attack_matrix_fail_closed(
     )
     for index, mutator in enumerate(mutators):
         path = _write_artifact(tmp_path / f"case-{index}", mutator)
-        assert formal_duel_module._load_acceptance_evidence(path) == (), (
+        assert formal_duel_module._load_acceptance_evidence(path) == (False, ()), (
             f"篡改用例 #{index} 必须 fail-closed：{mutator.__name__}"
         )
 
