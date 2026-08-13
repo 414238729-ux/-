@@ -489,6 +489,55 @@ class TrustedFormalDuelConfiguration(FormalDuelConfiguration):
         return self._capability_token is _TRUSTED_FORMAL_CAPABILITY
 
 
+def assert_trusted_formal_configuration(
+    configuration: FormalDuelConfiguration,
+) -> None:
+    """单一 trusted authority boundary（remediation-4，R3-NEW-003）。
+
+    正式会话与正式执行入口统一调用本函数，不得在多处复制不同版本的
+    验证逻辑。三项验证缺一不可：
+    1. exact trusted type（``type(...) is TrustedFormalDuelConfiguration``，
+       拒绝子类）；
+    2. capability identity（模块私有 ``_TRUSTED_FORMAL_CAPABILITY`` 的
+       同一对象身份）；
+    3. canonical profile value（``to_dict()`` 精确等于当前 canonical
+       formal profile value）。
+
+    第 3 项是 canonical value invariant：即使对象绕过
+    ``TrustedFormalDuelConfiguration.__post_init__``（例如
+    ``object.__new__`` + ``object.__setattr__`` 的低层反射构造）伪造出
+    type/token 正确但 profile value 非 canonical 的对象（如
+    player_hp=(9,9)），也必须在正式 authority boundary fail-closed。
+    比较对象只是规则 profile value，不含 capability token、
+    ``source_confirmed`` derived flag 或 runtime secret，因此 replay 的
+    record value → current canonical factory → value comparison 稳定工作。
+    """
+
+    if not isinstance(configuration, FormalDuelConfiguration):
+        raise TypeError("正式单挑会话必须接收FormalDuelConfiguration")
+    if type(configuration) is not TrustedFormalDuelConfiguration:
+        raise FormalDuelConfigurationError(
+            "正式单挑结果只接受内部 canonical factory 返回的 "
+            "TrustedFormalDuelConfiguration（exact type 校验）；"
+            "调用方配置不能自我授权"
+        )
+    if (
+        getattr(configuration, "_capability_token", None)
+        is not _TRUSTED_FORMAL_CAPABILITY
+    ):
+        raise FormalDuelConfigurationError(
+            "正式单挑结果只接受真实持有模块私有 capability token 的 "
+            "TrustedFormalDuelConfiguration（capability identity 校验）；"
+            "调用方配置不能自我授权"
+        )
+    if configuration.to_dict() != _canonical_formal_profile_value():
+        raise FormalDuelConfigurationError(
+            "正式单挑配置的 profile value 必须精确等于项目 canonical "
+            "formal profile；type/token 正确但值非 canonical 的对象同样"
+            "失败关闭（canonical value invariant）"
+        )
+
+
 class FormalNoSkillDuelSession(ProductionBasicCardBatch):
     """复用同一生产核心的正式单挑模式会话；没有第二套引擎。"""
 
@@ -511,23 +560,13 @@ class FormalNoSkillDuelSession(ProductionBasicCardBatch):
             raise TypeError("正式单挑会话必须接收FormalDuelConfiguration")
         if not isinstance(analysis_only, bool):
             raise TypeError("analysis_only必须是布尔值")
-        if not analysis_only and (
-            type(configuration) is not TrustedFormalDuelConfiguration
-            or getattr(configuration, "_capability_token", None)
-            is not _TRUSTED_FORMAL_CAPABILITY
-        ):
-            # MB-M-005（remediation-3）：正式结果只能由内部 canonical
-            # factory 返回、且真实持有模块私有 capability token 的
-            # TrustedFormalDuelConfiguration 产生；普通构造、from_dict、
-            # replace、copy/deepcopy、JSON roundtrip、数值完全等于
-            # canonical 的调用方配置，乃至 import 类型后手工传入全部
-            # canonical values 的直接构造，均不能自我授予 trusted
-            # provenance（capability identity 校验，不只是 isinstance）。
-            raise FormalDuelConfigurationError(
-                "正式单挑结果只接受内部 canonical factory 返回的 "
-                "TrustedFormalDuelConfiguration（capability token 身份校验）；"
-                "调用方配置不能自我授权"
-            )
+        if not analysis_only:
+            # MB-M-005（remediation-3）+ R3-NEW-003（remediation-4）：
+            # exact trusted type、capability identity、canonical profile
+            # value 三项统一由唯一 authority boundary 校验，调用方不能
+            # 自我授予 trusted provenance，低层反射伪造的非 canonical
+            # 对象也必须失败关闭。
+            assert_trusted_formal_configuration(configuration)
         if configuration.source_confirmed and not _FORMAL_EXECUTION_RELEASED:
             raise FormalDuelConfigurationError(
                 "正式单挑仍有卡牌／重放门禁未关闭，禁止生成正式结果"
@@ -1057,25 +1096,36 @@ def _is_sha256_hex(value: object) -> bool:
 
 FORMAL_SIMULATION_TRANSITIVE_INPUT_INVENTORY: tuple[str, ...] = (
     # 生产引擎源码（scripts/sgs_engine/**/*.py 由 _implementation_source_files
-    # 动态收集）；以下为引擎目录之外、正式模拟真实运行时读取的语义依赖。
+    # 动态收集）；以下为引擎目录之外、正式模拟真实运行时读取的语义依赖的
+    # explicit enumerated inventory。本清单是人工维护的显式清单，不宣称
+    # “自动覆盖全部 transitive imports/data dependencies”——新增正式
+    # 运行时依赖必须显式登记（remediation-4，R3-NEW-002）。
     "scripts/sgs_engine_gate.py",
     "scripts/sgs_formal_runner.py",
     "scripts/sgs_formal_milestone_b_acceptance.py",
     "scripts/deck_data.py",
+    "scripts/_validation.py",
+    "scripts/sgs_hash_inventory.py",
     "knowledge/三国杀牌堆数据.csv",
     "knowledge/三国杀卡牌结构化数据.csv",
 )
 
 
 def _implementation_source_files(root: Path | None = None) -> tuple[Path, ...]:
-    """返回构成当前正式实现身份的全部输入文件（按仓库相对路径排序）。
+    """返回 explicit enumerated 正式模拟依赖清单的文件集合（按路径排序）。
 
-    remediation-3（MB-B-001）修复：identity 必须覆盖正式模拟真实运行时
-    读取的全部语义依赖——生产引擎源码、formal duel 源码、runner/gate 语义
-    代码、card registry、deck source/data（scripts/deck_data.py）、
-    牌堆 CSV 与结构化卡牌/规则 CSV（其中含武器攻击范围，青龙偃月刀攻击
-    范围变化必须改变 identity）。接受方（acceptance artifact）、可变
-    CURRENT docs、audit report、manifest 自身与输出文件一律排除。
+    remediation-3（MB-B-001）修复 + remediation-4（R3-NEW-002）补齐：
+    identity 覆盖当前已确认的正式模拟语义输入——生产引擎源码、formal
+    duel 源码、runner/gate 语义代码、card registry、deck source/data
+    （scripts/deck_data.py）、deck 加载校验 helper（scripts/_validation.py）、
+    identity 归一化 helper（scripts/sgs_hash_inventory.py）、牌堆 CSV 与
+    结构化卡牌/规则 CSV（其中含武器攻击范围，青龙偃月刀攻击范围变化必须
+    改变 identity）。接受方（acceptance artifact）、可变 CURRENT docs、
+    audit report、manifest 自身与输出文件一律排除。
+
+    本清单是显式枚举，不是自动 import/data 依赖闭包分析：仓库目前没有
+    可靠的依赖闭包工具，因此不得声称“自动覆盖全部 transitive
+    dependencies”；新增正式语义输入必须同步登记并配 mutation 测试。
     """
 
     root = _REPOSITORY_ROOT if root is None else Path(root)
@@ -1088,11 +1138,13 @@ def _implementation_source_files(root: Path | None = None) -> tuple[Path, ...]:
 
 
 def implementation_identity(root: Path | None = None) -> str:
-    """当前实现身份：正式模拟全部语义依赖的确定性 SHA-256。
+    """当前实现身份：explicit enumerated 正式模拟依赖清单的确定性 SHA-256。
 
     每项输入使用唯一 canonical helper ``git_normalized_sha256``（UTF-8、
     去 BOM、CRLF→LF 归一），因此仅行尾变化不会改变 identity，内容语义
     变化必然改变 identity；docs/审计/manifest/artifact 变化不改变 identity。
+    身份只覆盖 ``FORMAL_SIMULATION_TRANSITIVE_INPUT_INVENTORY`` 与引擎
+    目录内显式登记的输入，不宣称自动 transitive closure。
     """
 
     root = _REPOSITORY_ROOT if root is None else Path(root)
@@ -1576,13 +1628,11 @@ def run_formal_duel_seed_sweep(
         or max_steps < 1
     ):
         raise ValueError("安全动作上限必须是正整数")
-    if not analysis_only and (
-        configuration != FormalDuelConfiguration.formal_profile()
-    ):
-        raise FormalDuelConfigurationError(
-            "正式结果只接受项目 canonical formal profile；"
-            "调用方配置不能自我授权"
-        )
+    if not analysis_only:
+        # R3-NEW-003（remediation-4）：正式 seed sweep 与 Session 使用同一
+        # trusted authority boundary（exact type + capability identity +
+        # canonical profile value），不复制另一套部分比较逻辑。
+        assert_trusted_formal_configuration(configuration)
     results: list[FormalDuelSeedResult] = []
     for seed in prepared_seeds:
         game: FormalNoSkillDuelSession | None = None
@@ -1674,8 +1724,10 @@ def run_formal_duel_seed_sweep(
 __all__ = [
     "_ACCEPTANCE_SCHEMA",
     "ALLOWED_RULE_STATUS",
+    "assert_trusted_formal_configuration",
     "build_formal_acceptance_artifact",
     "deck_identity",
+    "FORMAL_SIMULATION_TRANSITIVE_INPUT_INVENTORY",
     "FormalDuelBlocker",
     "FormalDuelCardStatus",
     "FormalDuelConfiguration",

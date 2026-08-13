@@ -1,17 +1,33 @@
 # 三国杀正式引擎状态
 
-## MILESTONE_B 当前现场状态（2026-08-13，CURRENT）
+## MILESTONE_B 当前现场状态（2026-08-14，CURRENT）
 
-本节记录 `MILESTONE_B_AUDIT_REMEDIATION_3` 工作树的当前事实，优先于下方
+本节记录 `MILESTONE_B_AUDIT_REMEDIATION_4` 工作树的当前事实，优先于下方
 较早批次快照（下方旧 “MILESTONE_B 当前现场状态（2026-08-09/08-11）” 与全部
 “0 seeds/blocked” 段均为 HISTORICAL/AS-OF 或 PRE-AUDIT SNAPSHOT，不表达
-当前状态）。【CURRENT LIVE】MILESTONE_B_AUDIT_REMEDIATION_2 实现提交已由用户创建：
-0793c819ad45cc21328fad7d8afa6882d6197613（fix: close milestone B remediation 2 correctness gaps，父提交 8ce497064fbb4686177cf63cca5265e902037129）；audit branch
+当前状态）。【CURRENT LIVE】MILESTONE_B_AUDIT_REMEDIATION_3 实现提交已由用户创建：
+5d970560e306b84af518798e11db12c2a42dfc44（fix: close milestone B remediation 3 correctness gaps，父提交 0793c819ad45cc21328fad7d8afa6882d6197613）；audit branch
 `sol-ultra-audit-milestone-b-formal-duel` 保持冻结于 ebd6567...，remediation-1 re-audit branch `sol-ultra-audit-milestone-b-remediation-1` 冻结于 8ce4970...，
-remediation-2 re-audit branch `sol-ultra-audit-milestone-b-remediation-2` 冻结于 0793c819...；remediation-1 targeted independent re-audit=
+remediation-2 re-audit branch `sol-ultra-audit-milestone-b-remediation-2` 冻结于 0793c819...，remediation-3 re-audit branch `sol-ultra-audit-milestone-b-remediation-3` 冻结于 5d97056...；remediation-1 targeted independent re-audit=
 MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED（CURRENT，不得改写为 PASSED）；remediation-2 targeted independent re-audit=
-MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED（CURRENT，唯一失败原因见下）；Remediation 3 当前工作树本地修复进行中、尚未独立复审：
-remediation_3_worktree_state=PRECOMMIT、independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET（不预写 R3 PASSED）。
+MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED（CURRENT，唯一失败原因见下）；R3 V4-Pro pre-audit（只读软件正确性复核，QA evidence，不是 Sol Ultra final independent re-audit）=
+MILESTONE_B_REMEDIATION_3_PRE_AUDIT_FAILED（3 MINOR new findings：R3-NEW-001/002/003 + DOC-OBS-001，五项 R2 残留 finding 均 CLOSED）；Remediation 4 当前工作树本地修复进行中、尚未 pre-audit：
+remediation_4_worktree_state=PRECOMMIT、independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET（不预写 R4 PASSED）。
+
+R4 本轮修复范围（本地实现层面，只处理 R3 pre-audit 的 3 项 MINOR + 1 项文档观察）：
+R3-NEW-001——`_PendingWeaponChoice` 建立
+`PENDING_WEAPON_CHOICE_EXECUTION_FIELD_INVENTORY`（21 个 A 类字段全部进入
+execution snapshot/hash）与 `_pending_weapon_choice_value` canonical
+serializer；与 `runtime.pending_slash` 重复保存的 identity 字段建立一致性
+invariant（分叉 fail-closed）；逐字段 single-field mutation 与
+damage_amount 行为复现测试。R3-NEW-002——implementation bundle 显式登记
+`scripts/_validation.py` 与 `scripts/sgs_hash_inventory.py`，文档措辞改为
+explicit enumerated dependency inventory（不宣称自动 transitive closure）。
+R3-NEW-003——`assert_trusted_formal_configuration` 单一 authority boundary
+（exact trusted type + capability identity + canonical profile value），
+FormalNoSkillDuelSession 与 run_formal_duel_seed_sweep 统一调用，低层反射
+伪造的非 canonical trusted 对象在正式入口 fail-closed。DOC-OBS-001——
+manifest R3 source_integrity 残留乱码占位恢复为真实 UTF-8 状态文本。
 
 Remediation 2 re-audit 失败原因（CURRENT，逐项）：MB-B-001 BLOCKING——
 live-result 汇总不严格（malformed final hash／deck_count=159／action_count=0／
@@ -99,11 +115,11 @@ pending_slash_choice.pending_slash 与 runtime.pending_slash 一致性 invariant
 
 `MILESTONE_B_ANALYSIS_SEED_DIAGNOSTIC`（docs/MILESTONE_B_ANALYSIS_SEED_DIAGNOSTIC.json）仍是 analysis-only 历史诊断，不得改写成正式 acceptance；正式证据只来自 `FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE.json`。
 
-本轮本地验证（R3，2026-08-13 最终执行；均为本地实现/回归证据，不是独立审计）：见
-docs/CHECKPOINT_MANIFEST.json 新增 checkpoint `MILESTONE_B_AUDIT_REMEDIATION_3`
+本轮本地验证（R4，2026-08-14 最终执行；均为本地实现/回归证据，不是独立审计）：见
+docs/CHECKPOINT_MANIFEST.json 新增 checkpoint `MILESTONE_B_AUDIT_REMEDIATION_4`
 的 final_verification（targeted tests、full pytest、compileall、source
-integrity、正式 100-seed 验收、正式 runner live 100-seed、第二确定性运行、
-execution hash 专项、JSON/SHA/diff-check/unmerged 均以该记录为准）。
+integrity、正式 100-seed 验收、正式 runner live 100-seed、确定性对比
+（fresh session secrets）、JSON/SHA/diff-check/unmerged 均以该记录为准）。
 【HISTORICAL/AS-OF（R1 2026-08-11 验证）】`python -m pytest -q` = `2053 passed`
 （0 failed、0 skipped、0 xfailed，2352.16s，唯一 warning 为 `.pytest_cache`
 WinError5）；正式验收 100/100 PASSED（2631.2s）；正式 runner run 100 seeds =
@@ -112,9 +128,14 @@ passed（2648s）；第二 determinism reproduction mismatch 均 0（288.7s）�
 （0 failed、0 skipped、0 xfailed，823.97s）；正式验收 100/100（1269.5s）；
 正式 runner live 100-seed status=passed、simulation_executed=true（1277.7s）；
 第二确定性运行 winner/action_count/final_state_hash mismatch=0/0/0（2554.6s）。
-R1/R2 均为已提交且已独立复审失败的历史轮次；R3 尚未独立复审
+【HISTORICAL/AS-OF（R3 2026-08-13 验证）】targeted 40 项、full pytest
+`2158 passed`；正式验收 100/100（1154.7s）；正式 runner live 100-seed
+status=passed、simulation_executed=true（1188.77s）；第二确定性运行
+mismatch=0/0/0（2304.5s）。R1/R2 均为已提交且已独立复审失败的历史轮次；
+R3 已提交且 V4-Pro pre-audit=`MILESTONE_B_REMEDIATION_3_PRE_AUDIT_FAILED`
+（QA evidence，不是 Sol Ultra final independent re-audit）；R4 尚未 pre-audit
 （independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET、
-remediation_3_worktree_state=PRECOMMIT，工作树待用户提交）。
+remediation_4_worktree_state=PRECOMMIT，工作树待用户提交）。
 
 永久封存边界保持不变：original=`WHOLE_REPO_AUDIT_FAILED`；R1–R5 分别为对应 `REMEDIATION_*_REAUDIT_FAILED`；R6=`REMEDIATION_6_REAUDIT_PASSED`；finalization correction verification=`PASSED`。不创建 R7，不修改旧 audit branch／milestone tag，不把 original FAILED 改成 PASSED。
 ## 历史批次状态正文（HISTORICAL/AS-OF）

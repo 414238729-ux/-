@@ -10,8 +10,8 @@
 | 本轮实现基线 | `2ed9627ba816e9ab5023bd3017ce7cca90ec0022`（`feat: advance formal 160-card duel infrastructure`，已创建并推送远程） |
 | 开始时工作树 | clean |
 | 开始时 unmerged | empty |
-| 当前 Git 写入状态 | 【CURRENT LIVE】R2 实现提交 0793c819ad45cc21328fad7d8afa6882d6197613（fix: close milestone B remediation 2 correctness gaps，父提交 8ce4970...）已提交；【Remediation 3 工作树】本轮修复未提交（PRECOMMIT） |
-| 当前里程碑状态 | `formal_duel_no_skill_ready=true`（静态执行资格）；`MILESTONE_B=PASSED`（正式160张无技能单挑范围）；remediation-1 re-audit=`MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED`；remediation-2 re-audit=`MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED`；Remediation 3 工作树=`PRECOMMIT`、`NOT_AUDITED_YET` |
+| 当前 Git 写入状态 | 【CURRENT LIVE】R3 实现提交 5d970560e306b84af518798e11db12c2a42dfc44（fix: close milestone B remediation 3 correctness gaps，父提交 0793c819...）已提交；【Remediation 4 工作树】本轮修复未提交（PRECOMMIT） |
+| 当前里程碑状态 | `formal_duel_no_skill_ready=true`（静态执行资格）；`MILESTONE_B=PASSED`（正式160张无技能单挑范围）；remediation-1 re-audit=`MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED`；remediation-2 re-audit=`MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED`；R3 pre-audit=`MILESTONE_B_REMEDIATION_3_PRE_AUDIT_FAILED`（QA evidence）；Remediation 4 工作树=`PRECOMMIT`、`NOT_AUDITED_YET` |
 
 永久封存边界不变：original whole-repo audit 为 `WHOLE_REPO_AUDIT_FAILED`；R1 至 R5 为对应 remediation re-audit FAILED；R6 为 `REMEDIATION_6_REAUDIT_PASSED`；finalization correction verification 为 PASSED。不创建 R7，不移动旧审计分支或标签，不把 original FAILED 改写为 PASSED。
 
@@ -106,4 +106,4 @@ flowchart TD
 
 1. 方天画戟 global PARTIAL（MULTIPLAYER/MULTI_TARGET_INFRASTRUCTURE_GAP）保持；duel-scope 为 NOT_APPLICABLE_TO_DUEL，不得虚报 global COMPLETE。
 2. 正式整局入口（authoritative_full_game_core）仍未完成；完整里程碑的全局语义仍需后续批次。
-3. 【CURRENT LIVE】R2 实现提交 0793c819... 已提交；remediation-1 re-audit=`MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED`、remediation-2 re-audit=`MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED`；Remediation 3 工作树=`PRECOMMIT`、`NOT_AUDITED_YET`；不得预写 Remediation 3 审计 PASSED、未来 commit SHA 或 milestone tag；Remediation 3 工作树修改未提交。
+3. 【CURRENT LIVE】R3 实现提交 5d97056... 已提交；remediation-1 re-audit=`MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED`、remediation-2 re-audit=`MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED`、R3 pre-audit=`MILESTONE_B_REMEDIATION_3_PRE_AUDIT_FAILED`（QA evidence）；Remediation 4 工作树=`PRECOMMIT`、`NOT_AUDITED_YET`；不得预写 Remediation 4 审计 PASSED、未来 commit SHA 或 milestone tag；Remediation 4 工作树修改未提交。

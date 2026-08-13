@@ -1,24 +1,29 @@
 # 三国杀统一模拟项目总实施计划
 
-## MILESTONE_B 当前推进状态（2026-08-13，CURRENT）
+## MILESTONE_B 当前推进状态（2026-08-14，CURRENT）
 
-本精确目标为 `MILESTONE_B_AUDIT_REMEDIATION_3`：针对
-`MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED` 的第三轮、严格收敛的软件正确性
-修复，只处理仍 OPEN 的 5 项：MB-B-001（BLOCKING）、MB-M-005（MAJOR）、
-MB-M-009（MAJOR）、MB-M-010（MAJOR）、R2-NEW-001（MINOR）。开发分支
+本精确目标为 `MILESTONE_B_AUDIT_REMEDIATION_4`：针对
+`MILESTONE_B_REMEDIATION_3_PRE_AUDIT_FAILED`（V4-Pro pre-audit，QA evidence）
+的最后一组小范围软件正确性修复，只处理 3 项 MINOR new finding（R3-NEW-001
+／R3-NEW-002／R3-NEW-003）与 1 项文档观察（DOC-OBS-001）。开发分支
 `sol-ultra-milestone-b-formal-duel`，开始 HEAD=
-`0793c819ad45cc21328fad7d8afa6882d6197613`（fix: close milestone B remediation
-2 correctness gaps），parent=`8ce497064fbb4686177cf63cca5265e902037129`；
+`5d970560e306b84af518798e11db12c2a42dfc44`（fix: close milestone B
+remediation 3 correctness gaps），parent=
+`0793c819ad45cc21328fad7d8afa6882d6197613`；
 audit branch `sol-ultra-audit-milestone-b-formal-duel` 保持冻结于
 ebd6567...，remediation-1 re-audit branch 冻结于 8ce4970...，remediation-2
 re-audit branch `sol-ultra-audit-milestone-b-remediation-2` 冻结于 0793c819...，
-均未移动。
+remediation-3 re-audit branch `sol-ultra-audit-milestone-b-remediation-3`
+冻结于 5d97056...，均未移动。
 【CURRENT LIVE】remediation-1 targeted independent re-audit=
 MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED；remediation-2 targeted independent
 re-audit=MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED（MB-B-001 BLOCKING／
 MB-M-005 MAJOR／MB-M-009 MAJOR／MB-M-010 MAJOR／R2-NEW-001 MINOR）；
-Remediation 3 工作树本地修复中：remediation_3_worktree_state=PRECOMMIT、
-independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET，不预写 R3
+R3 V4-Pro pre-audit=`MILESTONE_B_REMEDIATION_3_PRE_AUDIT_FAILED`（3 MINOR
+new findings + DOC-OBS-001；QA evidence，不是 Sol Ultra final independent
+re-audit）；Remediation 4 工作树本地修复中：
+remediation_4_worktree_state=PRECOMMIT、
+independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET，不预写 R4
 PASSED；提交后由用户产生新的 Git SHA，下一轮审计以 Git 身份为准。
 【HISTORICAL/AS-OF（PRECOMMIT SNAPSHOT，2026-08-11）】R1 开始时 HEAD=
 `ebd656754ed2a528e0d08cd5175b68385fdb8140`，当时工作树尚未提交、`commit=null`、
@@ -84,11 +89,12 @@ session secrets）：winner/action_count/final canonical hash mismatch 均为 0�
 R3 将再次重新运行（见 docs/CHECKPOINT_MANIFEST.json 新增 checkpoint 的
 `final_verification`）。
 
-独立审计状态（CURRENT）：R1 re-audit FAILED、R2 re-audit FAILED；Remediation
-3 尚未独立复审（`independent_audit_done=false`、
-`audit_conclusion=NOT_AUDITED_YET`、remediation_3_worktree_state=PRECOMMIT、
+独立审计状态（CURRENT）：R1 re-audit FAILED、R2 re-audit FAILED；R3 V4-Pro
+pre-audit=`MILESTONE_B_REMEDIATION_3_PRE_AUDIT_FAILED`（QA evidence）；
+Remediation 4 尚未 pre-audit（`independent_audit_done=false`、
+`audit_conclusion=NOT_AUDITED_YET`、remediation_4_worktree_state=PRECOMMIT、
 `milestone_tag=null`），本轮不预写独立 reaudit PASSED；当前结论：
-`MILESTONE_B_AUDIT_REMEDIATION_3_PRECOMMIT_READY`（本地关闭，待独立复审，
+`MILESTONE_B_AUDIT_REMEDIATION_4_PRECOMMIT_READY`（本地关闭，待 pre-audit，
 以本轮最终验证为准）。
 
 下方正文保留既有阶段、检查点、提交、测试与封存审计历史。凡旧快照（含

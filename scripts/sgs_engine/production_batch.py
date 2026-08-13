@@ -556,8 +556,10 @@ FINISHED_TRANSIENT_RUNTIME_FIELDS: frozenset[str] = frozenset({
 
 # R2-NEW-001：execution snapshot/hash 的运行时字段清单（A 类＝会改变未来
 # 执行语义，必须进入 execution snapshot/hash；B 类纯展示/cache/debug 可
-# 排除；本 runtime 不存在 B 类字段）。任何新增行为相关字段必须同步登记到
-# 本清单与 ``_BatchRuntime.audit_value()``，否则严格重执行可能漏检分叉。
+# 排除；本 runtime 顶层不存在 B 类字段）。任何新增行为相关字段必须同步登记
+# 到本清单与 ``_BatchRuntime.audit_value()``，否则严格重执行可能漏检分叉。
+# 嵌套挂起结构（如 ``_PendingWeaponChoice``）也必须有自己的 execution
+# field inventory 与 canonical serializer，不能只依赖顶层清单。
 EXECUTION_HASH_RUNTIME_INVENTORY: frozenset[str] = frozenset(
     FINISHED_TRANSIENT_RUNTIME_FIELDS
     | {
@@ -571,6 +573,50 @@ EXECUTION_HASH_RUNTIME_INVENTORY: frozenset[str] = frozenset(
         "winner_id",
     }
 )
+
+
+# R3-NEW-001（remediation-4）：_PendingWeaponChoice 的 execution 字段
+# 清单。逐字段分类（与 remediation-4 设计一致）：
+#   A 类（影响当前或后续执行语义，必须进入 execution snapshot/hash）：
+#     weapon_key、kind、attacker_id、target_id、slash_instance_id、
+#     damage_event_id、window_id、damage_amount、damage_type、card_key、
+#     card_user、source_id、kill_credit、resolved_reason、death_reason、
+#     rescue_reason、defer_root_finish、declared_amount、modifiers、
+#     armor_ignored、extra_payload —— 全部 21 个字段均为 A 类。
+#     damage_event_id 当前生产路径恒为 None，但它是窗口状态槽而非纯展示/
+#     cache/debug，按保守策略纳入（任何分叉都必须失败关闭）。
+#   C 类（重复保存/derived）：slash_instance_id、attacker_id、target_id
+#     与 runtime.pending_slash 重复保存同一 semantic root；在
+#     ``_BatchRuntime.audit_value()`` 中建立一致性 invariant，分叉时
+#     fail-closed，序列化时各自按 canonical 表示完整输出。
+# 本清单必须与 dataclass 字段集合精确一致：新增字段必须显式登记/分类，
+# 否则 ``test_*`` 的 inventory equality 回归会失败（禁止静默漂移）。
+PENDING_WEAPON_CHOICE_EXECUTION_FIELD_INVENTORY: frozenset[str] = frozenset(
+    {
+        "weapon_key",
+        "kind",
+        "attacker_id",
+        "target_id",
+        "slash_instance_id",
+        "damage_event_id",
+        "window_id",
+        "damage_amount",
+        "damage_type",
+        "card_key",
+        "card_user",
+        "source_id",
+        "kill_credit",
+        "resolved_reason",
+        "death_reason",
+        "rescue_reason",
+        "defer_root_finish",
+        "declared_amount",
+        "modifiers",
+        "armor_ignored",
+        "extra_payload",
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class _BatchRuntime:
@@ -648,6 +694,22 @@ class _BatchRuntime:
             raise ProductionBatchError(
                 "pending_slash_choice.pending_slash 与 runtime.pending_slash "
                 "不一致（重复保存的 semantic root 分叉，禁止静默接受）"
+            )
+        # R3-NEW-001：pending_weapon_choice 同样重复保存 slash root 的
+        # 身份字段；必须与 runtime.pending_slash 一致，否则 fail-closed
+        #（不允许两份副本无声分叉）。
+        if self.pending_weapon_choice is not None and (
+            self.pending_slash is None
+            or self.pending_slash.slash_instance_id
+            != self.pending_weapon_choice.slash_instance_id
+            or self.pending_slash.attacker_id
+            != self.pending_weapon_choice.attacker_id
+            or self.pending_slash.target_id
+            != self.pending_weapon_choice.target_id
+        ):
+            raise ProductionBatchError(
+                "pending_weapon_choice 与 runtime.pending_slash 的 semantic "
+                "root 不一致（重复保存的 slash root 分叉，禁止静默接受）"
             )
         pending = None
         if self.pending_slash is not None:
@@ -769,23 +831,7 @@ class _BatchRuntime:
             "pending_slash_choice": self._pending_slash_choice_value(),
             "pending_discard_two": self._pending_discard_two_value(),
             "pending_hanbing_discard": self._pending_hanbing_discard_value(),
-            "pending_weapon_choice": (
-                None
-                if self.pending_weapon_choice is None
-                else {
-                    "weapon_key": self.pending_weapon_choice.weapon_key,
-                    "kind": self.pending_weapon_choice.kind,
-                    "attacker_id": self.pending_weapon_choice.attacker_id,
-                    "target_id": self.pending_weapon_choice.target_id,
-                    "slash_instance_id": (
-                        self.pending_weapon_choice.slash_instance_id
-                    ),
-                    "damage_event_id": (
-                        self.pending_weapon_choice.damage_event_id
-                    ),
-                    "window_id": self.pending_weapon_choice.window_id,
-                }
-            ),
+            "pending_weapon_choice": self._pending_weapon_choice_value(),
         }
 
     def _pending_slash_value(
@@ -818,6 +864,48 @@ class _BatchRuntime:
             "pending_slash": self._pending_slash_value(choice.pending_slash),
             "handles": dict(choice.handles),
             "snapshot_digest": choice.snapshot_digest,
+        }
+
+    def _pending_weapon_choice_value(self) -> dict[str, object] | None:
+        """_PendingWeaponChoice 的 canonical execution serializer。
+
+        R3-NEW-001（remediation-4）：覆盖
+        ``PENDING_WEAPON_CHOICE_EXECUTION_FIELD_INVENTORY`` 的全部 A 类
+        字段，键序稳定（构造顺序即 canonical 顺序），``modifiers`` 保持
+        权威顺序，``extra_payload`` 按字符串键稳定排序，None 与空值语义
+        原样保留。任何字段遗漏都会使 execution hash 对行为相关分叉失明。
+        """
+
+        choice = self.pending_weapon_choice
+        if choice is None:
+            return None
+        return {
+            "weapon_key": choice.weapon_key,
+            "kind": choice.kind,
+            "attacker_id": choice.attacker_id,
+            "target_id": choice.target_id,
+            "slash_instance_id": choice.slash_instance_id,
+            "damage_event_id": choice.damage_event_id,
+            "window_id": choice.window_id,
+            "damage_amount": choice.damage_amount,
+            "damage_type": choice.damage_type,
+            "card_key": choice.card_key,
+            "card_user": choice.card_user,
+            "source_id": choice.source_id,
+            "kill_credit": choice.kill_credit,
+            "resolved_reason": choice.resolved_reason,
+            "death_reason": choice.death_reason,
+            "rescue_reason": choice.rescue_reason,
+            "defer_root_finish": choice.defer_root_finish,
+            "declared_amount": choice.declared_amount,
+            "modifiers": list(choice.modifiers),
+            "armor_ignored": choice.armor_ignored,
+            "extra_payload": dict(
+                sorted(
+                    choice.extra_payload.items(),
+                    key=lambda item: str(item[0]),
+                )
+            ),
         }
 
     def _pending_discard_two_value(self) -> dict[str, object] | None:
