@@ -35,6 +35,7 @@ if str(_REPO_ROOT) not in sys.path:
 from scripts.sgs_engine.formal_duel import (
     FormalDuelConfiguration,
     run_formal_duel_seed_sweep,
+    validate_formal_live_result,
     write_formal_acceptance_artifact,
 )
 
@@ -71,17 +72,7 @@ def main(argv: list[str]) -> int:
     failures = [
         item
         for item in results
-        if not (
-            item.natural_end
-            and item.formal_result_eligible
-            and item.reexecution_verified
-            and item.winner in {"p1", "p2"}
-            and item.deck_count == 160
-            and item.unsupported_rules == 0
-            and item.approximation_count == 0
-            and not item.safety_cap_triggered
-            and item.exception_type is None
-        )
+        if not validate_formal_live_result(item)[0]
     ]
     passed = len(results) == 100 and not failures
     print(

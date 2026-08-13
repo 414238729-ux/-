@@ -1,13 +1,25 @@
 # 三国杀正式实现矩阵
 
-## MILESTONE_B 当前矩阵（2026-08-11，CURRENT）
+## MILESTONE_B 当前矩阵（2026-08-13，CURRENT）
 
-本节记录 `MILESTONE_B_AUDIT_REMEDIATION_1` 当前事实。
-【CURRENT LIVE】实现提交 8ce497064fbb4686177cf63cca5265e902037129（fix: remediate milestone B formal duel audit findings，父提交 ebd656754ed2a528e0d08cd5175b68385fdb8140）已由用户创建；audit branch `sol-ultra-audit-milestone-b-formal-duel` 保持冻结于 ebd6567...、remediation-1 re-audit branch 冻结于 8ce4970...；remediation-1 targeted independent re-audit 结论 MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED；Remediation 2 NOT_AUDITED_YET。
-【HISTORICAL/AS-OF（PRECOMMIT SNAPSHOT）】开始 HEAD=`ebd656754ed2a528e0d08cd5175b68385fdb8140`，当时工作树尚未提交（`commit=null`、`pending`）、独立复审尚未运行：
-`independent_audit_done=false`、`audit_conclusion=NOT_AUDITED_YET`；它不是
+本节记录 `MILESTONE_B_AUDIT_REMEDIATION_3` 当前事实。
+【CURRENT LIVE】MILESTONE_B_AUDIT_REMEDIATION_2 实现提交
+0793c819ad45cc21328fad7d8afa6882d6197613（fix: close milestone B remediation
+2 correctness gaps，父提交 8ce497064fbb4686177cf63cca5265e902037129）已由
+用户创建；audit branch `sol-ultra-audit-milestone-b-formal-duel` 保持冻结于
+ebd6567...、remediation-1 re-audit branch 冻结于 8ce4970...、remediation-2
+re-audit branch `sol-ultra-audit-milestone-b-remediation-2` 冻结于 0793c819...；
+remediation-1 targeted independent re-audit 结论 MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED；
+remediation-2 targeted independent re-audit 结论 MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED
+（MB-B-001 BLOCKING／MB-M-005 MAJOR／MB-M-009 MAJOR／MB-M-010 MAJOR／
+R2-NEW-001 MINOR）；Remediation 3 工作树本地修复中、
+remediation_3_worktree_state=PRECOMMIT、independent_audit_done=false、
+audit_conclusion=NOT_AUDITED_YET（不预写 R3 PASSED）。
+【HISTORICAL/AS-OF（PRECOMMIT SNAPSHOT）】R1 开始 HEAD=`ebd656754ed2a528e0d08cd5175b68385fdb8140`，当时工作树尚未提交（`commit=null`、`pending`）、独立复审尚未运行：
+`independent_audit_done=false`、`audit_conclusion=NOT_AUDITED_YET`；R2 开始
+HEAD=`8ce4970...`，R2 工作树当时未提交。二者都不是
 已封存 whole-repo audit remediation chain 的续写，也不创建 remediation-7。
-下方旧矩阵（2026-08-09 及更早）为 HISTORICAL/AS-OF 或 PRE-AUDIT SNAPSHOT，
+下方旧矩阵（2026-08-09/08-11 及更早）为 HISTORICAL/AS-OF 或 PRE-AUDIT SNAPSHOT，
 不表达当前状态。
 
 | 范围 | 当前状态 | 现场证据与精确边界 |
@@ -19,15 +31,18 @@
 | 雌雄双股剑 | 通用 `COMPLETE`；formal 由士兵 `effective_gender=NONE` 权威提供 | `CharacterMetadata.intrinsic_gender`＋`effective_gender` 可同时表达；雌雄读取 effective gender；NONE 不构成“异性”，None（资料未知）与 NONE 严格区分 |
 | 丈八蛇矛 | `COMPLETE`（USER_CONFIRMED_RULE 2026-08-09） | 材料 `HAND→PROCESSING→DISCARD`；统一 Slash root finalizer 保证 DYING 救回／死亡／game over 均恰好 finalize 一次；事件顺序为 Jink→cancelled→材料 finalize；对非行动者/公共视图 handle-only |
 | 方天画戟 | global `PARTIAL`；duel `N/A` | 两人 duel 无第三名目标；不得用 duel 测试把多人／多目标语义标为 global `COMPLETE` |
-| formal mode factory | `mode_runtime_reachable=true`、`mode_implemented=true` | canonical factory 可到达同一生产核心；formal profile 由 trusted factory 授予（MB-M-005） |
+| formal mode factory | `mode_runtime_reachable=true`、`mode_implemented=true` | canonical factory 可到达同一生产核心；formal profile 由 trusted factory 授予（MB-M-005；R3：私有 capability sentinel，公开构造失败关闭） |
 | formal replay／隐私 | `reexecution_replay_supported=true` | 同一 session 现场执行并同步 record decisions，再 strict replay 同一份 record；player-visible 与 omniscient 分层 |
-| formal runner | 实现已接线；`run` 确实现场执行 | status 现场派生 readiness（`simulation_executed=false`）；run 命令现场执行 seeds 0..99、same-game record/replay 并写出带 provenance 的 v2 artifact；绝不把复制缓存称为 `simulation_executed=true`（MB-B-001） |
-| formal gate | 现场派生、保持关闭 | artifact 只是缓存证据：必须绑定当前 implementation/rules-profile/deck identity 且全部关键字段严格验证；调用方 payload／manifest 布尔值不能授予准入 |
-| 正式 100 固定 seed | `PASSED`（重新运行） | seeds 0..99、formal profile、analysis_only=false、max_steps=2000、每局 strict replay + final_state_hash：100/100 自然结束、failures=0；随后第二次 determinism reproduction（新 session secrets）winner/action_count/final hash mismatch=0 |
-| 本地回归／完整性 | 见 manifest final_verification | targeted tests、full pytest、compileall、source integrity（以本轮最终执行为准）、JSON/SHA/diff-check/unmerged 均记录于 docs/CHECKPOINT_MANIFEST.json |
-| 最终门禁 | `formal_duel_no_skill_ready=true`、`formal_run_ready=true` | 只证明正式160张无技能两人单挑范围；`authoritative_full_game_core=false`、`multi_player_production_proven=false`、`milestone_b_complete=false` 保持（MB-B-004） |
+| formal runner | 实现已接线；`run` 确实现场执行 | status 现场派生 readiness（`simulation_executed=false`）；run 命令现场执行 seeds 0..99、same-game record/replay 并写出带 provenance 的 v2 artifact；绝不把复制缓存称为 `simulation_executed=true`（MB-B-001；R3：唯一 canonical live-result validator，非法 live result 一律 status=failed，runner 不得覆写） |
+| formal gate | 现场派生、保持关闭 | artifact 只是缓存证据：必须绑定当前 implementation/rules-profile/deck identity 且全部关键字段严格验证；调用方 payload／manifest 布尔值不能授予准入；静态执行资格不依赖缓存 artifact（stale 不阻塞新 live run） |
+| implementation identity | `FORMAL_SIMULATION_TRANSITIVE_INPUT_INVENTORY` | R3：digest 覆盖生产引擎源码、runner/gate 语义代码、card registry、scripts/deck_data.py、牌堆 CSV、结构化卡牌/规则 CSV（含武器攻击范围）；Git-normalized SHA-256，行尾归一；docs／manifest／acceptance artifact 排除 |
+| 正式 100 固定 seed | `PASSED`（R1/R2 各重新运行；R3 再次运行） | seeds 0..99、formal profile、analysis_only=false、max_steps=2000、每局 strict replay + final_state_hash：R1 100/100（2631.2s）、R2 100/100（1269.5s）、failures=0；各自随后做 determinism reproduction（新 session secrets）winner/action_count/final hash mismatch=0 |
+| 本地回归／完整性 | 见 manifest final_verification | targeted tests、full pytest、compileall、source integrity（以 R3 最终执行为准）、JSON/SHA/diff-check/unmerged 均记录于 docs/CHECKPOINT_MANIFEST.json |
+| 最终门禁 | `formal_duel_no_skill_ready=true`、`formal_run_ready=true` | 只证明正式160张无技能两人单挑范围（duel-scope）；`authoritative_full_game_core=false`、`multi_player_production_proven=false`、`milestone_b_complete=false` 保持（MB-B-004）；full-game 正式入口继续失败关闭，与 duel-scope ready 不互斥——前者描述整局引擎，后者描述本模式范围 |
 
 下方各节保留既有批次与封存审计的历史证据。凡旧的 35 类／157 实体、雌雄
+
+
 仍为 DATA_MODEL_GAP、formal `unsupported_rules=1`、acceptance=0 或
 `MILESTONE_B_BLOCKED` 快照与本节冲突，均按其原检查点时间解释；original
 whole-repo audit FAILED、R1–R5 FAILED、R6 PASSED 与 finalization

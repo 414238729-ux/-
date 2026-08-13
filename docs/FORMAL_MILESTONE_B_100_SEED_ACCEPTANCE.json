@@ -109,7 +109,7 @@
   "reexecution_verified_count": 100,
   "failure_count": 0,
   "passed": true,
-  "elapsed_seconds": 1269.5,
+  "elapsed_seconds": 1154.68,
   "analysis_only": false,
   "max_steps": 2000,
   "canonical_formal_profile": {
@@ -141,7 +141,7 @@
       }
     ]
   },
-  "implementation_identity": "044d0a461db5f92201186e7dc1660253f05f2e7b97dc94071bbfd806df0bf92c",
+  "implementation_identity": "64c0ab9c6e586da471d8b93a4837c44c7f8414d48bf453f9d407b8b1d1a4fe8a",
   "rules_profile_identity": "9a7b0e9f45c05292a207c500e5b024a77d97b4a6c9446230d81d357c7b514283",
   "deck_identity": "e490631698e6b7695c6a9b3ad0c355e421ccfafab696e5b3a97418c9ec80f38b",
   "seeds_detail": [

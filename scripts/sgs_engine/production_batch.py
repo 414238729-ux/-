@@ -554,6 +554,24 @@ FINISHED_TRANSIENT_RUNTIME_FIELDS: frozenset[str] = frozenset({
     "processed_judgment_instance_ids",
 })
 
+# R2-NEW-001：execution snapshot/hash 的运行时字段清单（A 类＝会改变未来
+# 执行语义，必须进入 execution snapshot/hash；B 类纯展示/cache/debug 可
+# 排除；本 runtime 不存在 B 类字段）。任何新增行为相关字段必须同步登记到
+# 本清单与 ``_BatchRuntime.audit_value()``，否则严格重执行可能漏检分叉。
+EXECUTION_HASH_RUNTIME_INVENTORY: frozenset[str] = frozenset(
+    FINISHED_TRANSIENT_RUNTIME_FIELDS
+    | {
+        "current_player_id",
+        "turn_number",
+        "phase",
+        "slash_used_counts",
+        "judgment_entry_indices",
+        "judgment_entry_counter",
+        "processed_judgment_instance_ids",
+        "winner_id",
+    }
+)
+
 @dataclass(frozen=True, slots=True)
 class _BatchRuntime:
     current_player_id: str
@@ -620,18 +638,20 @@ class _BatchRuntime:
     pending_hanbing_discard: _PendingHanbingDiscard | None = None
 
     def audit_value(self) -> dict[str, object]:
+        # R2-NEW-001：pending_slash_choice 内部再次保存同一 slash root；
+        # 不允许两份副本无声分叉——必须与 runtime.pending_slash 表示相同
+        # 状态（consistency invariant），序列化时按统一 canonical 表示。
+        if self.pending_slash_choice is not None and (
+            self.pending_slash is None
+            or self.pending_slash_choice.pending_slash != self.pending_slash
+        ):
+            raise ProductionBatchError(
+                "pending_slash_choice.pending_slash 与 runtime.pending_slash "
+                "不一致（重复保存的 semantic root 分叉，禁止静默接受）"
+            )
         pending = None
         if self.pending_slash is not None:
-            pending = {
-                "attacker_id": self.pending_slash.attacker_id,
-                "target_id": self.pending_slash.target_id,
-                "slash_instance_id": self.pending_slash.slash_instance_id,
-                "boosted": self.pending_slash.boosted,
-                "ignore_armor": self.pending_slash.ignore_armor,
-                "fire_converted": self.pending_slash.fire_converted,
-                "virtual": self.pending_slash.virtual,
-                "material_ids": list(self.pending_slash.material_ids),
-            }
+            pending = self._pending_slash_value(self.pending_slash)
         pending_trick = None
         if self.pending_trick is not None:
             pending_trick = {
@@ -692,6 +712,7 @@ class _BatchRuntime:
             "skipped_phases": dict(self.skipped_phases),
             "phase_skip_reasons": dict(self.phase_skip_reasons),
             "defer_damage_card_finish": self.defer_damage_card_finish,
+            "damage_card_already_finished": self.damage_card_already_finished,
             "wine_buff_owner_id": self.wine_buff_owner_id,
             "wine_buff_used_this_play_phase": self.wine_buff_used_this_play_phase,
             "pending_slash": pending,
@@ -745,6 +766,9 @@ class _BatchRuntime:
                 self.discard_phase_snapshot_digest
             ),
             "pending_cixiong_choice": self._pending_cixiong_choice_value(),
+            "pending_slash_choice": self._pending_slash_choice_value(),
+            "pending_discard_two": self._pending_discard_two_value(),
+            "pending_hanbing_discard": self._pending_hanbing_discard_value(),
             "pending_weapon_choice": (
                 None
                 if self.pending_weapon_choice is None
@@ -762,6 +786,67 @@ class _BatchRuntime:
                     "window_id": self.pending_weapon_choice.window_id,
                 }
             ),
+        }
+
+    def _pending_slash_value(
+        self, pending: _PendingSlash | None
+    ) -> dict[str, object] | None:
+        if pending is None:
+            return None
+        return {
+            "attacker_id": pending.attacker_id,
+            "target_id": pending.target_id,
+            "slash_instance_id": pending.slash_instance_id,
+            "boosted": pending.boosted,
+            "ignore_armor": pending.ignore_armor,
+            "fire_converted": pending.fire_converted,
+            "virtual": pending.virtual,
+            "material_ids": list(pending.material_ids),
+            "materials_finalized": pending.materials_finalized,
+        }
+
+    def _pending_slash_choice_value(self) -> dict[str, object] | None:
+        choice = self.pending_slash_choice
+        if choice is None:
+            return None
+        return {
+            "weapon_key": choice.weapon_key,
+            "kind": choice.kind,
+            "attacker_id": choice.attacker_id,
+            "target_id": choice.target_id,
+            "window_id": choice.window_id,
+            "pending_slash": self._pending_slash_value(choice.pending_slash),
+            "handles": dict(choice.handles),
+            "snapshot_digest": choice.snapshot_digest,
+        }
+
+    def _pending_discard_two_value(self) -> dict[str, object] | None:
+        pending = self.pending_discard_two
+        if pending is None:
+            return None
+        return {
+            "chooser_id": pending.chooser_id,
+            "cards_owner_id": pending.cards_owner_id,
+            "source_kind": pending.source_kind,
+            "window_id": pending.window_id,
+            "selected_ids": list(pending.selected_ids),
+            "selected_zones": dict(pending.selected_zones),
+            "handles": dict(pending.handles),
+            "snapshot_digest": pending.snapshot_digest,
+            "excluded_instance_id": pending.excluded_instance_id,
+        }
+
+    def _pending_hanbing_discard_value(self) -> dict[str, object] | None:
+        pending = self.pending_hanbing_discard
+        if pending is None:
+            return None
+        return {
+            "attacker_id": pending.attacker_id,
+            "target_id": pending.target_id,
+            "window_id": pending.window_id,
+            "step": pending.step,
+            "handles": dict(pending.handles),
+            "snapshot_digest": pending.snapshot_digest,
         }
 
     def _pending_cixiong_choice_value(self) -> dict[str, object] | None:

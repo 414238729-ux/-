@@ -1,24 +1,39 @@
 # 三国杀统一模拟项目总实施计划
 
-## MILESTONE_B 当前推进状态（2026-08-11，CURRENT）
+## MILESTONE_B 当前推进状态（2026-08-13，CURRENT）
 
-本精确目标为 `MILESTONE_B_AUDIT_REMEDIATION_1`：定向关闭
-`MILESTONE_B_FORMAL_160_CARD_NO_SKILL_DUEL_INDEPENDENT_ADVERSARIAL_AUDIT`
-（`MILESTONE_B_AUDIT_FAILED`，4 BLOCKING／6 MAJOR／3 MINOR，无新
-RULE_SOURCE_GAP）的全部 13 项 finding。开发分支
+本精确目标为 `MILESTONE_B_AUDIT_REMEDIATION_3`：针对
+`MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED` 的第三轮、严格收敛的软件正确性
+修复，只处理仍 OPEN 的 5 项：MB-B-001（BLOCKING）、MB-M-005（MAJOR）、
+MB-M-009（MAJOR）、MB-M-010（MAJOR）、R2-NEW-001（MINOR）。开发分支
 `sol-ultra-milestone-b-formal-duel`，开始 HEAD=
-`ebd656754ed2a528e0d08cd5175b68385fdb8140`；audit branch
-`sol-ultra-audit-milestone-b-formal-duel` 保持冻结于该提交，未移动。
-【CURRENT LIVE】实现提交 8ce497064fbb4686177cf63cca5265e902037129（fix: remediate milestone B formal duel audit findings）已由用户创建；remediation-1 targeted independent re-audit 结论 MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED；Remediation 2 NOT_AUDITED_YET。
-【HISTORICAL/AS-OF（PRECOMMIT SNAPSHOT）】当时工作树尚未提交，`commit=null`、`pending`，没有执行 commit／tag／push。旧
-whole-repo audit remediation chain 已永久封存，本轮不创建 remediation-7。
+`0793c819ad45cc21328fad7d8afa6882d6197613`（fix: close milestone B remediation
+2 correctness gaps），parent=`8ce497064fbb4686177cf63cca5265e902037129`；
+audit branch `sol-ultra-audit-milestone-b-formal-duel` 保持冻结于
+ebd6567...，remediation-1 re-audit branch 冻结于 8ce4970...，remediation-2
+re-audit branch `sol-ultra-audit-milestone-b-remediation-2` 冻结于 0793c819...，
+均未移动。
+【CURRENT LIVE】remediation-1 targeted independent re-audit=
+MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED；remediation-2 targeted independent
+re-audit=MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED（MB-B-001 BLOCKING／
+MB-M-005 MAJOR／MB-M-009 MAJOR／MB-M-010 MAJOR／R2-NEW-001 MINOR）；
+Remediation 3 工作树本地修复中：remediation_3_worktree_state=PRECOMMIT、
+independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET，不预写 R3
+PASSED；提交后由用户产生新的 Git SHA，下一轮审计以 Git 身份为准。
+【HISTORICAL/AS-OF（PRECOMMIT SNAPSHOT，2026-08-11）】R1 开始时 HEAD=
+`ebd656754ed2a528e0d08cd5175b68385fdb8140`，当时工作树尚未提交、`commit=null`、
+`pending`，没有执行 commit／tag／push；R2 开始时 HEAD=`8ce4970...`，R2 工作树
+当时未提交。二者均为提交前工作树快照，不表达当前状态。旧 whole-repo audit
+remediation chain 已永久封存，本轮不创建 remediation-7。
 
-当前已关闭（本地实现层面）的事实：
+R1 本地实现层面已关闭的事实（HISTORICAL/AS-OF，2026-08-11；R1 re-audit 已
+独立复审为 FAILED，R2/R3 在其上继续修复）：
 
 - MB-B-001：正式 run 入口现场执行 seeds 0..99；acceptance artifact 升级为
   schema v2，绑定当前 implementation/rules-profile/deck identity，只作为
   缓存证据；status 永不把缓存称为 `simulation_executed=true`；artifact
-  完整攻击矩阵全部 fail-closed。
+  完整攻击矩阵全部 fail-closed。（R3 继续收紧：唯一 canonical live-result
+  validator，runner 不得覆写为 passed。）
 - MB-B-002：丈八虚拟杀统一 Slash root finalizer；主动杀／借刀杀经
   DYING 桃救回／死亡／game over 四条路径均 `PROCESSING→DISCARD` 恰好一次。
 - MB-B-003：LegalAction/response/card 候选先按稳定权威语义顺序（实体ID）
@@ -32,6 +47,7 @@ whole-repo audit remediation chain 已永久封存，本轮不创建 remediation
 - MB-M-005：`source_confirmed` 只能由 canonical trusted factory 或
   `from_canonical_profile_value` 授予；普通 JSON 反序列化恒为
   analysis/untrusted；replay 加载验证 canonical 内容而非让 payload 自证。
+  （R3 继续收紧：trusted capability 私有 sentinel，公开构造失败关闭。）
 - MB-M-006：`CharacterMetadata.intrinsic_gender`＋`effective_gender`
   可同时表达（如 intrinsic=MALE、effective=NONE）；雌雄读取 effective。
 - MB-M-007：被闪／八卦虚拟闪事件顺序为 Jink→cancelled→材料 finalize。
@@ -40,11 +56,11 @@ whole-repo audit remediation chain 已永久封存，本轮不创建 remediation
   FINISHED 时 PROCESSING/REVEALED 为空、所有挂起 root 清理。
 - MB-M-009：新增真实 formal run 入口子集执行、artifact 攻击矩阵、
   same seed/different secret 确定性、丈八四路径 DYING 回归、finish
-  临时区不变量与 full-core 不得误开放测试。
+  临时区不变量与 full-core 不得误开放测试。（R3 继续补齐：runner 验证
+  矩阵、provenance、identity 依赖、execution hash mutation 测试。）
 - MB-M-010：manifest/docs CURRENT 与 HISTORICAL/AS-OF 分层；旧
   blocked／0 seeds 段不再看似 current；source integrity 以本轮最终执行
-  结果为准；本轮结束仍 `independent_audit_done=false`、
-  `audit_conclusion=NOT_AUDITED_YET`。
+  结果为准。（R3 继续收口：R2 re-audit FAILED 回填、R3 仅 NOT_AUDITED_YET。）
 - MB-N-011：`amount_override`/`amount` 测试注入移出生产接口（test
   subclass 解析缝）。
 - MB-N-012：`ReplayRecord.authoritative_private` 构造后深冻结并增加
@@ -52,22 +68,31 @@ whole-repo audit remediation chain 已永久封存，本轮不创建 remediation
 - MB-N-013：文档修正为“handle-only 只针对非行动者/公共视图；行动者本人
   可见自己的两张材料实体ID”。
 
+R2 本地实现层面已关闭的事实（HISTORICAL/AS-OF，2026-08-12；R2 re-audit 已
+独立复审为 FAILED）：MB-B-001（缓存/live 分层、invalid live→failed artifact、
+stale cache 不阻塞 live run）、MB-M-005（`_trusted_provenance` 参数删除、
+TrustedFormalDuelConfiguration 类型分离）、MB-M-008（FINISHED transient
+inventory 52 字段＋seed 3 复现）、MB-M-009（65 项 targeted 测试）、MB-M-010
+（cp27 状态回填 committed）、R1-NEW-001（真实 SHA-256 50 条目）、R1-NEW-002
+（UTF-8 修复）、R1-NEW-003（根目录垃圾删除）。R2 完整 pytest 2118 passed。
+
 100-seed 正式验收（schema v2，seeds 0..99、formal profile、
 analysis_only=false、max_steps=2000、同局 record/replay + strict replay +
-final_state_hash）已重新运行：100/100 自然结束、failures=0；随后第二次
-determinism reproduction（新 session secrets）：winner/action_count/final
-canonical hash mismatch 均为 0。targeted tests、full pytest、compileall、
-source integrity、artifact 攻击矩阵、JSON/SHA/diff-check/unmerged 的最终
-计数见 `docs/CHECKPOINT_MANIFEST.json` 新增 checkpoint 的
-`final_verification`。
+final_state_hash）在 R1（2631.2s）与 R2（1269.5s）各重新运行一次：
+100/100 自然结束、failures=0；随后各做一次 determinism reproduction（新
+session secrets）：winner/action_count/final canonical hash mismatch 均为 0。
+R3 将再次重新运行（见 docs/CHECKPOINT_MANIFEST.json 新增 checkpoint 的
+`final_verification`）。
 
-独立审计尚未运行（`independent_audit_done=false`、
-`audit_conclusion=NOT_AUDITED_YET`），里程碑标签为 `null`；本轮不预写
-独立 reaudit PASSED。当前结论：`MILESTONE_B_AUDIT_REMEDIATION_1_PRECOMMIT_READY`
-（本地关闭，待独立复审）。
+独立审计状态（CURRENT）：R1 re-audit FAILED、R2 re-audit FAILED；Remediation
+3 尚未独立复审（`independent_audit_done=false`、
+`audit_conclusion=NOT_AUDITED_YET`、remediation_3_worktree_state=PRECOMMIT、
+`milestone_tag=null`），本轮不预写独立 reaudit PASSED；当前结论：
+`MILESTONE_B_AUDIT_REMEDIATION_3_PRECOMMIT_READY`（本地关闭，待独立复审，
+以本轮最终验证为准）。
 
 下方正文保留既有阶段、检查点、提交、测试与封存审计历史。凡旧快照（含
-2026-08-09 的 `MILESTONE_B_BLOCKED`、`all_cards_implemented=false`、
+
 `unsupported_rules=2`、acceptance=0 等）与本节 live 状态冲突，均为
 HISTORICAL/AS-OF 或 PRE-AUDIT SNAPSHOT，按原检查点时间解释；本节不改写
 original=`WHOLE_REPO_AUDIT_FAILED`、R1–R5 FAILED、

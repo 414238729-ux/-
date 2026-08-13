@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
@@ -32,6 +32,7 @@ from .production_cards import (
     WEAPON_SKILL_STATUS,
     FormalCardRegistry,
 )
+from ..sgs_hash_inventory import git_normalized_sha256
 
 
 ALLOWED_RULE_STATUS: frozenset[str] = frozenset(
@@ -57,6 +58,16 @@ _FORMAL_SOURCE_STATUSES: frozenset[str] = frozenset({"当前确认"})
 # 仍由 inspect_formal_duel_readiness 依据 100-seed 固定验收现场派生，不由
 # 任何调用方配置覆写。
 _FORMAL_EXECUTION_RELEASED = True
+
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+
+# MB-M-005（remediation-3）：trusted capability 必须是受控能力。
+# 只有本模块持有该 sentinel 对象身份；``TrustedFormalDuelConfiguration``
+# 的构造要求调用方传入该对象本身（``is`` 身份校验），普通公开调用方无法
+# 仅凭公开 canonical 值制造 trusted 实例。replay 只序列化 profile value，
+# 不保存该 token；strict re-execution 通过 from_canonical_profile_value
+# 由当前内部 factory 重建 trusted 配置。
+_TRUSTED_FORMAL_CAPABILITY: object = object()
 
 _ACCEPTANCE_ARTIFACT = (
     Path(__file__).resolve().parents[2]
@@ -260,6 +271,7 @@ class FormalDuelConfiguration:
                     CharacterGender.NONE,
                 ),
             ),
+            _capability_token=_TRUSTED_FORMAL_CAPABILITY,
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -424,15 +436,31 @@ class TrustedFormalDuelConfiguration(FormalDuelConfiguration):
     构造均只能得到 untrusted 的普通配置（``source_confirmed=False``），
     不能自我授予 formal eligibility。
 
+    remediation-3（MB-M-005）收紧：``_capability_token`` 必须是模块私有
+    ``_TRUSTED_FORMAL_CAPABILITY`` sentinel 的同一对象（``is`` 身份校验）。
+    公开调用方即使 import 本类型并手工提供全部 canonical values，也拿不到
+    sentinel 对象身份，直接构造会失败关闭；copy/deepcopy 由显式实现降级为
+    重新调用内部 canonical factory，replace 篡改在 ``__post_init__`` 处失败
+    关闭。正式会话还额外校验真实 capability identity，而不是只依赖
+    ``isinstance``。
+
     本类型不可被篡改：``__post_init__`` 强制当前值必须与 canonical
     formal profile 精确一致；任何 ``dataclasses.replace`` 修改字段都会
     在校验处失败关闭，从而无法用 trusted 类型包装非 canonical 值。
     """
 
+    _capability_token: object = field(default=None, repr=False, compare=False)
+
     def __post_init__(self) -> None:
         # frozen+slots dataclass 子类中零参数 super() 会失败（CPython
         # slots 交互限制），显式调用父类校验。
         FormalDuelConfiguration.__post_init__(self)
+        if self._capability_token is not _TRUSTED_FORMAL_CAPABILITY:
+            raise FormalDuelConfigurationError(
+                "TrustedFormalDuelConfiguration 只能由内部 canonical factory "
+                "以模块私有 capability token 构造；公开调用方不能仅凭公开 "
+                "值自我授予 trusted provenance（MB-M-005）"
+            )
         if self.to_dict() != _canonical_formal_profile_value():
             raise FormalDuelConfigurationError(
                 "TrustedFormalDuelConfiguration 必须精确等于项目 canonical "
@@ -442,6 +470,23 @@ class TrustedFormalDuelConfiguration(FormalDuelConfiguration):
     @property
     def source_confirmed(self) -> bool:
         return True
+
+    def __copy__(self) -> "TrustedFormalDuelConfiguration":
+        # 复制合法 trusted 对象也通过内部 canonical factory 重建，不依赖
+        # 拷贝状态携带 capability；公开调用方无法借此制造新 trusted。
+        return FormalDuelConfiguration.formal_profile()
+
+    def __deepcopy__(
+        self, memo: dict[int, object]
+    ) -> "TrustedFormalDuelConfiguration":
+        del memo
+        return FormalDuelConfiguration.formal_profile()
+
+    @property
+    def trusted_capability_held(self) -> bool:
+        """真实内部 capability identity 是否成立（会话的最终防线）。"""
+
+        return self._capability_token is _TRUSTED_FORMAL_CAPABILITY
 
 
 class FormalNoSkillDuelSession(ProductionBasicCardBatch):
@@ -466,16 +511,22 @@ class FormalNoSkillDuelSession(ProductionBasicCardBatch):
             raise TypeError("正式单挑会话必须接收FormalDuelConfiguration")
         if not isinstance(analysis_only, bool):
             raise TypeError("analysis_only必须是布尔值")
-        if not analysis_only and not isinstance(
-            configuration, TrustedFormalDuelConfiguration
+        if not analysis_only and (
+            type(configuration) is not TrustedFormalDuelConfiguration
+            or getattr(configuration, "_capability_token", None)
+            is not _TRUSTED_FORMAL_CAPABILITY
         ):
-            # MB-M-005：正式结果只能由内部 canonical factory 返回的
+            # MB-M-005（remediation-3）：正式结果只能由内部 canonical
+            # factory 返回、且真实持有模块私有 capability token 的
             # TrustedFormalDuelConfiguration 产生；普通构造、from_dict、
-            # replace、copy/deepcopy、JSON roundtrip 或数值完全等于
-            # canonical 的调用方配置均不能自我授予 trusted provenance。
+            # replace、copy/deepcopy、JSON roundtrip、数值完全等于
+            # canonical 的调用方配置，乃至 import 类型后手工传入全部
+            # canonical values 的直接构造，均不能自我授予 trusted
+            # provenance（capability identity 校验，不只是 isinstance）。
             raise FormalDuelConfigurationError(
                 "正式单挑结果只接受内部 canonical factory 返回的 "
-                "TrustedFormalDuelConfiguration；调用方配置不能自我授权"
+                "TrustedFormalDuelConfiguration（capability token 身份校验）；"
+                "调用方配置不能自我授权"
             )
         if configuration.source_confirmed and not _FORMAL_EXECUTION_RELEASED:
             raise FormalDuelConfigurationError(
@@ -831,17 +882,7 @@ def inspect_formal_duel_readiness() -> FormalDuelReadiness:
         item.natural_end for item in cached_results
     )
     cached_acceptance_failure_count = sum(
-        not (
-            item.natural_end
-            and item.formal_result_eligible
-            and item.reexecution_verified
-            and item.winner in {"p1", "p2"}
-            and item.deck_count == 160
-            and item.unsupported_rules == 0
-            and item.approximation_count == 0
-            and not item.safety_cap_triggered
-            and item.exception_type is None
-        )
+        0 if validate_formal_live_result(item)[0] else 1
         for item in cached_results
     )
     cached_fixed_seed_acceptance_passed = (
@@ -1014,34 +1055,55 @@ def _is_sha256_hex(value: object) -> bool:
     )
 
 
-def _implementation_source_files() -> tuple[Path, ...]:
-    """返回构成当前正式实现身份的全部源码文件（按仓库相对路径排序）。"""
+FORMAL_SIMULATION_TRANSITIVE_INPUT_INVENTORY: tuple[str, ...] = (
+    # 生产引擎源码（scripts/sgs_engine/**/*.py 由 _implementation_source_files
+    # 动态收集）；以下为引擎目录之外、正式模拟真实运行时读取的语义依赖。
+    "scripts/sgs_engine_gate.py",
+    "scripts/sgs_formal_runner.py",
+    "scripts/sgs_formal_milestone_b_acceptance.py",
+    "scripts/deck_data.py",
+    "knowledge/三国杀牌堆数据.csv",
+    "knowledge/三国杀卡牌结构化数据.csv",
+)
 
-    root = Path(__file__).resolve().parents[2]
+
+def _implementation_source_files(root: Path | None = None) -> tuple[Path, ...]:
+    """返回构成当前正式实现身份的全部输入文件（按仓库相对路径排序）。
+
+    remediation-3（MB-B-001）修复：identity 必须覆盖正式模拟真实运行时
+    读取的全部语义依赖——生产引擎源码、formal duel 源码、runner/gate 语义
+    代码、card registry、deck source/data（scripts/deck_data.py）、
+    牌堆 CSV 与结构化卡牌/规则 CSV（其中含武器攻击范围，青龙偃月刀攻击
+    范围变化必须改变 identity）。接受方（acceptance artifact）、可变
+    CURRENT docs、audit report、manifest 自身与输出文件一律排除。
+    """
+
+    root = _REPOSITORY_ROOT if root is None else Path(root)
     engine_dir = root / "scripts" / "sgs_engine"
     files = list(engine_dir.rglob("*.py"))
     files.extend(
-        (
-            root / "scripts" / "sgs_engine_gate.py",
-            root / "scripts" / "sgs_formal_runner.py",
-            root / "scripts" / "sgs_formal_milestone_b_acceptance.py",
-        )
+        root / relative for relative in FORMAL_SIMULATION_TRANSITIVE_INPUT_INVENTORY
     )
     return tuple(sorted({path.resolve(strict=False) for path in files}, key=str))
 
 
-def implementation_identity() -> str:
-    """当前实现身份：核心引擎/门禁/正式入口源码的确定性 SHA-256。"""
+def implementation_identity(root: Path | None = None) -> str:
+    """当前实现身份：正式模拟全部语义依赖的确定性 SHA-256。
 
+    每项输入使用唯一 canonical helper ``git_normalized_sha256``（UTF-8、
+    去 BOM、CRLF→LF 归一），因此仅行尾变化不会改变 identity，内容语义
+    变化必然改变 identity；docs/审计/manifest/artifact 变化不改变 identity。
+    """
+
+    root = _REPOSITORY_ROOT if root is None else Path(root)
     entries: list[str] = []
-    root = Path(__file__).resolve().parents[2]
-    for path in _implementation_source_files():
+    for path in _implementation_source_files(root):
         if not path.is_file():
             raise FormalDuelConfigurationError(
                 f"实现身份所需源码文件缺失：{path}"
             )
         relative = path.relative_to(root).as_posix()
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        digest = git_normalized_sha256(path)
         entries.append(f"{relative}:{digest}")
     return hashlib.sha256(
         "\n".join(entries).encode("utf-8")
@@ -1065,53 +1127,136 @@ def rules_profile_identity() -> str:
 def deck_identity() -> str:
     """正式 160 张牌堆 CSV 的确定性身份。"""
 
-    deck = (
-        Path(__file__).resolve().parents[2]
-        / "knowledge"
-        / "三国杀牌堆数据.csv"
-    )
-    return hashlib.sha256(deck.read_bytes()).hexdigest()
+    deck = _REPOSITORY_ROOT / "knowledge" / "三国杀牌堆数据.csv"
+    return git_normalized_sha256(deck)
 
 
-def _seed_ok(result: FormalDuelSeedResult) -> tuple[bool, str]:
-    """逐 seed 正式验收资格检查（与 acceptance 脚本共用）。"""
+def validate_formal_live_result(
+    result: FormalDuelSeedResult,
+) -> tuple[bool, str]:
+    """唯一 canonical 逐 seed live-result validator（MB-B-001 remediation-3）。
 
-    required = (
-        result.natural_end
-        and result.formal_result_eligible
-        and result.reexecution_verified
-        and result.winner in {"p1", "p2"}
-        and result.deck_count == 160
-        and result.unsupported_rules == 0
-        and result.approximation_count == 0
-        and not result.safety_cap_triggered
-        and result.exception_type is None
-        and _is_sha256_hex(result.final_state_hash)
-    )
-    if required:
-        return True, ""
+    所有需要判断一次真实执行是否成功的入口——acceptance generator、formal
+    runner、live result writer、readiness cached consumer——必须复用本函数，
+    不得复制多套部分 if 判断。每个 seed result 至少验证：
+    seed 为预期整数；winner∈{p1,p2}；natural_end=true；strict
+    reexecution=true；unsupported_rules=0；approximation_count=0；
+    deck_count=160；action_count>0；turn_count>0；final_state_hash 为
+    精确 64 位小写十六进制；finished invariants 已通过（sweep 中
+    assert_finished_state_invariants 失败会登记为 exception）；结果确实
+    来自 formal profile 且 analysis_only=false（formal_result_eligible）。
+    """
+
     problems: list[str] = []
-    if not result.natural_end:
-        problems.append("not_natural_end")
-    if not result.formal_result_eligible:
-        problems.append("formal_result_not_eligible")
-    if not result.reexecution_verified:
-        problems.append("reexecution_not_verified")
+    if isinstance(result.seed, bool) or not isinstance(result.seed, int):
+        problems.append("seed_invalid")
     if result.winner not in {"p1", "p2"}:
         problems.append("winner_missing")
+    if result.natural_end is not True:
+        problems.append("not_natural_end")
+    if result.formal_result_eligible is not True:
+        problems.append("formal_result_not_eligible")
+    if result.reexecution_verified is not True:
+        problems.append("reexecution_not_verified")
     if result.deck_count != 160:
         problems.append("deck_count")
+    if (
+        isinstance(result.action_count, bool)
+        or not isinstance(result.action_count, int)
+        or result.action_count <= 0
+    ):
+        problems.append("action_count_zero")
+    if (
+        isinstance(result.turn_count, bool)
+        or not isinstance(result.turn_count, int)
+        or result.turn_count <= 0
+    ):
+        problems.append("turn_count_zero")
     if result.unsupported_rules != 0:
         problems.append("unsupported_rules")
     if result.approximation_count != 0:
         problems.append("approximation_count")
-    if result.safety_cap_triggered:
+    if result.safety_cap_triggered is not False:
         problems.append("safety_cap")
     if result.exception_type is not None:
         problems.append(f"exception:{result.exception_type}")
     if not _is_sha256_hex(result.final_state_hash):
         problems.append("final_state_hash_invalid")
-    return False, ",".join(problems)
+    if problems:
+        return False, ",".join(problems)
+    return True, ""
+
+
+@dataclass(frozen=True, slots=True)
+class FormalLiveResultSetSummary:
+    """100-seed（或给定 seed 集合）集合级 live-result 验证汇总。
+
+    ``all_valid`` 是唯一权威判定：只有 seed 集合精确等于预期、无重复、
+    数量一致且全部逐 seed 通过时才为 True。``failures`` 与
+    ``failure_count`` 由 details 重新派生，绝不信任输入中声明的
+    ``passed``／``failure_count`` 字段（MB-B-001 remediation-3）。
+    """
+
+    all_valid: bool
+    expected_seed_count: int
+    seed_count: int
+    seed_set_exact: bool
+    seed_unique: bool
+    natural_end_count: int
+    reexecution_verified_count: int
+    failure_count: int
+    failures: tuple[dict[str, object], ...]
+
+
+def validate_formal_live_result_set(
+    results: Sequence[FormalDuelSeedResult],
+    *,
+    expected_seeds: Sequence[int] = tuple(range(100)),
+) -> FormalLiveResultSetSummary:
+    """集合级 live-result 验证：数量、精确 seed 集合、唯一性、逐 seed 全通过。
+
+    正式 full acceptance 必须用本函数重新派生 detail count、seed 集合、
+    failures 与 passed；禁止信任输入中已有的 ``passed=true``，也禁止出现
+    ``artifact.passed=false`` 但 runner 输出 ``status=passed``。
+    """
+
+    prepared = tuple(results)
+    expected = tuple(expected_seeds)
+    seen: list[int] = []
+    seed_unique = True
+    for item in prepared:
+        if item.seed in seen:
+            seed_unique = False
+        seen.append(item.seed)
+    seed_set_exact = tuple(item.seed for item in prepared) == expected
+    failures: list[dict[str, object]] = []
+    natural_end_count = 0
+    reexecution_verified_count = 0
+    for item in prepared:
+        if item.natural_end is True:
+            natural_end_count += 1
+        if item.reexecution_verified is True:
+            reexecution_verified_count += 1
+        ok, reason = validate_formal_live_result(item)
+        if not ok:
+            failures.append({"seed": item.seed, "reason": reason})
+    all_valid = (
+        len(prepared) == len(expected)
+        and seed_set_exact
+        and seed_unique
+        and not failures
+    )
+    return FormalLiveResultSetSummary(
+        all_valid=all_valid,
+        expected_seed_count=len(expected),
+        seed_count=len(prepared),
+        seed_set_exact=seed_set_exact,
+        seed_unique=seed_unique,
+        natural_end_count=natural_end_count,
+        reexecution_verified_count=reexecution_verified_count,
+        failure_count=len(failures),
+        failures=tuple(failures),
+    )
 
 
 def build_formal_acceptance_artifact(
@@ -1138,7 +1283,7 @@ def build_formal_acceptance_artifact(
     seed_records: list[dict[str, object]] = []
     failures: list[dict[str, object]] = []
     for result in prepared:
-        ok, reason = _seed_ok(result)
+        ok, reason = validate_formal_live_result(result)
         seed_records.append(
             {
                 "seed": result.seed,
@@ -1352,27 +1497,46 @@ def _load_acceptance_evidence(
         final_state_hash = item.get("final_state_hash")
         if not _is_sha256_hex(final_state_hash):
             return False, ()
-        results.append(
-            FormalDuelSeedResult(
-                seed=seed,
-                deck_count=160,
-                winner=winner,
-                action_count=item["action_count"],
-                turn_count=item["turn_count"],
-                draw_pile_count=0,
-                reshuffle_count=item["reshuffle_count"],
-                unsupported_rules=0,
-                approximation_count=0,
-                safety_cap_triggered=False,
-                exception_type=None,
-                exception_message=None,
-                reached_card_keys=(),
-                natural_end=True,
-                formal_result_eligible=True,
-                reexecution_verified=True,
-                final_state_hash=final_state_hash,
-            )
+        constructed = FormalDuelSeedResult(
+            seed=seed,
+            deck_count=160,
+            winner=winner,
+            action_count=item["action_count"],
+            turn_count=item["turn_count"],
+            draw_pile_count=0,
+            reshuffle_count=item["reshuffle_count"],
+            unsupported_rules=0,
+            approximation_count=0,
+            safety_cap_triggered=False,
+            exception_type=None,
+            exception_message=None,
+            reached_card_keys=(),
+            natural_end=True,
+            formal_result_eligible=True,
+            reexecution_verified=True,
+            final_state_hash=final_state_hash,
         )
+        # MB-B-001（remediation-3）：逐 seed 判定必须复用唯一 canonical
+        # validator；这里构造出的结果若不被 validator 接受则缓存无效。
+        ok, _reason = validate_formal_live_result(constructed)
+        if not ok:
+            return False, ()
+        results.append(constructed)
+    # 集合级：failures/passed/natural_end/reexecution 必须由 details 重新
+    # 派生并与声明值一致；禁止信任输入中声明的 passed/failure_count。
+    summary = validate_formal_live_result_set(results)
+    if not summary.all_valid:
+        return False, ()
+    if summary.natural_end_count != payload.get("natural_end_count"):
+        return False, ()
+    if summary.reexecution_verified_count != payload.get(
+        "reexecution_verified_count"
+    ):
+        return False, ()
+    if summary.failure_count != payload.get("failure_count"):
+        return False, ()
+    if summary.failure_count != 0 or payload.get("failures") != []:
+        return False, ()
     return True, tuple(results)
 
 

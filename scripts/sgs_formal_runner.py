@@ -29,6 +29,7 @@ from .sgs_engine.formal_duel import (
     build_formal_acceptance_artifact,
     inspect_formal_duel_readiness,
     run_formal_duel_seed_sweep,
+    validate_formal_live_result_set,
 )
 from .sgs_engine.production_batch import FORMAL_NO_SKILL_DUEL_MODE
 from .sgs_engine_gate import (
@@ -503,18 +504,16 @@ def run_formal_simulation(
         max_steps=max_steps,
     )
     elapsed = time.time() - started
-    if len(seed_results) != len(prepared_seeds) or any(
-        item.natural_end is not True
-        or item.formal_result_eligible is not True
-        or item.reexecution_verified is not True
-        or item.winner not in {"p1", "p2"}
-        or item.unsupported_rules != 0
-        or item.approximation_count != 0
-        or item.safety_cap_triggered
-        or item.exception_type is not None
-        or not isinstance(item.final_state_hash, str)
-        for item in seed_results
-    ):
+    # MB-B-001（remediation-3）：live-result 判定必须复用唯一 canonical
+    # validator（逐 seed：seed 整数、winner、natural_end、strict replay、
+    # unsupported/approximation=0、deck_count=160、action_count>0、
+    # turn_count>0、final_state_hash 64-hex；集合级：数量、精确 seed 集合、
+    # 唯一性、failures/passed 由 details 重新派生）。runner 不得存在
+    # “既然跑完了就 passed”的隐式逻辑，也不得覆写 validator 结论。
+    live_summary = validate_formal_live_result_set(
+        seed_results, expected_seeds=prepared_seeds
+    )
+    if not live_summary.all_valid:
         # MB-B-001：live execution 已真实发生（simulation_executed=true），
         # 但结果失败——必须写出 failed artifact，绝不能输出 passed。
         failed_payload: dict[str, object] = {
@@ -528,10 +527,22 @@ def run_formal_simulation(
             "analysis_only": False,
             "max_steps": max_steps,
             "seed_results": [item.to_dict() for item in seed_results],
+            "validation": {
+                "seed_count": live_summary.seed_count,
+                "expected_seed_count": live_summary.expected_seed_count,
+                "seed_set_exact": live_summary.seed_set_exact,
+                "seed_unique": live_summary.seed_unique,
+                "natural_end_count": live_summary.natural_end_count,
+                "reexecution_verified_count": (
+                    live_summary.reexecution_verified_count
+                ),
+                "failure_count": live_summary.failure_count,
+                "failures": list(live_summary.failures),
+            },
             "note": (
                 "正式 run 命令确实现场执行了 seeds；live 结果存在失败项，"
                 "status=failed。simulation_executed=true 只表示执行已发生，"
-                "不表示执行成功（MB-B-001）。"
+                "不表示执行成功（MB-B-001；唯一 canonical validator 判定）。"
             ),
         }
         _atomic_write_json(output, failed_payload)
@@ -541,6 +552,39 @@ def run_formal_simulation(
         payload = build_formal_acceptance_artifact(
             seed_results, elapsed_seconds=elapsed
         )
+        # 防御纵深：artifact 的 passed 必须由同一 validator 重新派生；
+        # 即使 builder 被注入 passed=false 也不得输出 status=passed。
+        if payload.get("passed") is not True:
+            failed_payload = {
+                "schema": "SGS_FORMAL_DUEL_RUN_FAILED_v1",
+                "schema_version": FORMAL_RESULT_SCHEMA_VERSION,
+                "status": "failed",
+                "simulation_executed": True,
+                "result_source": "live_execution",
+                "mode": FORMAL_NO_SKILL_DUEL_MODE,
+                "seeds": list(prepared_seeds),
+                "analysis_only": False,
+                "max_steps": max_steps,
+                "seed_results": [item.to_dict() for item in seed_results],
+                "validation": {
+                    "seed_count": live_summary.seed_count,
+                    "expected_seed_count": live_summary.expected_seed_count,
+                    "seed_set_exact": live_summary.seed_set_exact,
+                    "seed_unique": live_summary.seed_unique,
+                    "natural_end_count": live_summary.natural_end_count,
+                    "reexecution_verified_count": (
+                        live_summary.reexecution_verified_count
+                    ),
+                    "failure_count": live_summary.failure_count,
+                    "failures": list(live_summary.failures),
+                },
+                "note": (
+                    "live 逐 seed 全部通过，但验收 artifact 的 passed 被判定"
+                    "为 false（由 details 重新派生）；runner 不得覆写为 passed"
+                ),
+            }
+            _atomic_write_json(output, failed_payload)
+            raise FormalSimulationExecutionFailedError(failed_payload)
     else:
         # 测试专用 seed 子集：仍真实执行并逐 seed 记录，但不是正式验收
         # artifact（gate 只接受精确 0..99 + 全部 provenance 绑定）。

@@ -1,6 +1,6 @@
 {
   "schema_version": "1.1",
-  "generated_on": "2026-08-11",
+  "generated_on": "2026-08-13",
   "git": {
     "available": true,
     "implementation_branch": "deepseek-single-target-tricks",
@@ -14,23 +14,63 @@
     },
     "historical_note": "CP-01至CP-04的原始哈希检查点已收入Git基线；里程碑A另有独立代码提交",
     "current_milestone_b_development": {
-      "objective": "MILESTONE_B_FORMAL_160_CARD_NO_SKILL_DUEL_ADVANCEMENT",
-      "branch": "sol-ultra-milestone-b-formal-duel",
-      "baseline_commit": "4c8c4466f1950740c69767a01a0b24cab723b310",
-      "baseline_commit_message": "docs: correct finalization governance residuals",
-      "initial_worktree_clean": true,
-      "initial_unmerged_empty": true,
-      "current_head": "4c8c4466f1950740c69767a01a0b24cab723b310",
-      "current_branch_verified": true,
-      "current_head_verified": true,
-      "current_unmerged_empty": true,
-      "current_worktree_clean": false,
-      "commit": null,
-      "commit_status": "pending",
-      "milestone_tag": null,
-      "git_writes_performed": false,
-      "sealed_audit_chain_unchanged": true,
-      "remediation_7_created": false
+      "current_live": {
+        "as_of": "2026-08-13",
+        "branch": "sol-ultra-milestone-b-formal-duel",
+        "head": "0793c819ad45cc21328fad7d8afa6882d6197613",
+        "head_message": "fix: close milestone B remediation 2 correctness gaps",
+        "parent": "8ce497064fbb4686177cf63cca5265e902037129",
+        "worktree_clean_at_start": true,
+        "unmerged_empty_at_start": true,
+        "commit_status": "committed",
+        "worktree_commit_pending": false,
+        "remediation_1_reaudit": "MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED",
+        "remediation_2_reaudit": "MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED",
+        "remediation_3_worktree_state": "PRECOMMIT",
+        "remediation_3_independent_audit_done": false,
+        "remediation_3_audit_conclusion": "NOT_AUDITED_YET"
+      },
+      "historical_precommit_snapshot": {
+        "current_live": {
+          "as_of": "2026-08-13",
+          "branch": "sol-ultra-milestone-b-formal-duel",
+          "head": "0793c819ad45cc21328fad7d8afa6882d6197613",
+          "head_message": "fix: close milestone B remediation 2 correctness gaps",
+          "parent": "8ce497064fbb4686177cf63cca5265e902037129",
+          "worktree_clean_at_start": true,
+          "unmerged_empty_at_start": true,
+          "commit_status": "committed",
+          "worktree_commit_pending": false,
+          "remediation_1_reaudit": "MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED",
+          "remediation_2_reaudit": "MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED",
+          "remediation_3_worktree_state": "PRECOMMIT",
+          "remediation_3_independent_audit_done": false,
+          "remediation_3_audit_conclusion": "NOT_AUDITED_YET"
+        },
+        "historical_precommit_snapshot": {
+          "objective": "MILESTONE_B_FORMAL_160_CARD_NO_SKILL_DUEL_ADVANCEMENT",
+          "branch": "sol-ultra-milestone-b-formal-duel",
+          "baseline_commit": "4c8c4466f1950740c69767a01a0b24cab723b310",
+          "baseline_commit_message": "docs: correct finalization governance residuals",
+          "initial_worktree_clean": true,
+          "initial_unmerged_empty": true,
+          "current_head": "4c8c4466f1950740c69767a01a0b24cab723b310",
+          "current_branch_verified": true,
+          "current_head_verified": true,
+          "current_unmerged_empty": true,
+          "current_worktree_clean": false,
+          "commit": null,
+          "commit_status": "pending",
+          "milestone_tag": null,
+          "git_writes_performed": false,
+          "sealed_audit_chain_unchanged": true,
+          "remediation_7_created": false,
+          "layer": "HISTORICAL/AS-OF（PRECOMMIT SNAPSHOT）",
+          "as_of": "2026-08-11（MILESTONE_B_FORMAL_160_CARD_NO_SKILL_DUEL_ADVANCEMENT 工作树）"
+        },
+        "layer": "HISTORICAL/AS-OF（PRECOMMIT SNAPSHOT）",
+        "as_of": "2026-08-11（MILESTONE_B_FORMAL_160_CARD_NO_SKILL_DUEL_ADVANCEMENT 工作树）"
+      }
     },
     "milestone_b1_commit": "bffe5516322452b90b7b150d7c4ae35c5b690a0b",
     "milestone_b2_trick_slice_worktree_commit": "0ff3f8a",
@@ -827,11 +867,11 @@
       "commit": "8ce497064fbb4686177cf63cca5265e902037129",
       "commit_status": "committed",
       "independent_audit_done": true,
-      "audit_conclusion": "REMEDIATION_1_REAUDIT_FAILED",
+      "audit_conclusion": "MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED",
       "milestone_tag": null,
       "worktree_commit_pending": false,
       "generated_on": "2026-08-11",
-      "commit_note": "【CURRENT LIVE】MILESTONE_B_AUDIT_REMEDIATION_1：独立敌对式总审计 MILESTONE_B_FORMAL_160_CARD_NO_SKILL_DUEL_INDEPENDENT_ADVERSARIAL_AUDIT 结论为 MILESTONE_B_AUDIT_FAILED（4 BLOCKING／6 MAJOR／3 MINOR，含 RULE_SOURCE_GAP 类共13项 finding）；定向修复实现提交 8ce497064fbb4686177cf63cca5265e902037129（fix: remediate milestone B formal duel audit findings，父提交 ebd656754ed2a528e0d08cd5175b68385fdb8140）已由用户在外部PowerShell提交；审计分支 sol-ultra-audit-milestone-b-formal-duel 冻结于 ebd6567...，remediation-1 re-audit 分支 sol-ultra-audit-milestone-b-remediation-1 冻结于 8ce4970...。修复内容：MB-B-001（acceptance provenance／gate／run 语义：artifact 是缓存报告不是执行凭证，status 不伪装 simulation_executed，run 必须真实执行 0..99 seeds 并生成 v2 artifact，绑定 implementation/rules-profile/deck identity）；MB-B-002（丈八 DYING 生命周期：Slash root finalizer 在闪／伤害／防止／game over 路径统一清理，材料 PROCESSING→DISCARD）；MB-B-003（session secret 确定性：同一 seed 不同 session secret 的决策 ID／acceptance 记录／replay 确定性一致）；MB-B-004（作用域分层：formal_duel_no_skill_ready=true 不等于完整引擎，authoritative_full_game_core=false、multi_player_production_proven=false、milestone_b_complete=false、global_all_cards_implemented=false、duel_scope_all_cards_sufficient=true，方天画戟保持 global PARTIAL）；MB-M-005（trusted provenance 只能由 canonical factory／from_canonical_profile_value 产生，普通 from_dict 与 analysis／untrusted 配置不能自我提升）；MB-M-006（CharacterMetadata.intrinsic_gender＋effective_gender 分离，当前生效性别按 effective 处理）；MB-M-007（事件顺序：闪响应 Jink／cancelled／finalize 顺序与事件契约）；MB-M-008（assert_resolution_invariants／assert_finished_state_invariants 在 replay／acceptance／runner 全程生效）；MB-M-009（正式 run 必须真实执行，禁止用缓存 artifact 冒充现场执行；same seed／different secret 双确定性运行）；MB-M-010（manifest／docs CURRENT 状态分层：blocked／0 seeds 等写 HISTORICAL/AS-OF 与 PRE-AUDIT SNAPSHOT；独立审计状态 independent_audit_done、audit_conclusion 不得预写 reaudit PASSED）；MB-N-011（amount／amount_override 注入防护与测试子类覆写防线）；MB-N-012（authoritative_private 隐私边界）；MB-N-013（隐藏句柄 handle-only 原则与可见性）。【HISTORICAL/AS-OF（PRE-AUDIT SNAPSHOT，2026-08-11）：本条目最初记录于修复工作树，当时 status=worktree_pending、commit=null、independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET；随后实现提交已由用户创建，remediation-1 targeted independent re-audit 结论为 MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED（CURRENT），不得改写为 PASSED；Remediation 2 尚未独立审计（NOT_AUDITED_YET）。】验证证据见 final_verification；machine_state 为修复工作树时的机器状态快照。",
+      "commit_note": "【CURRENT LIVE】MILESTONE_B_AUDIT_REMEDIATION_1：独立敌对式总审计 MILESTONE_B_FORMAL_160_CARD_NO_SKILL_DUEL_INDEPENDENT_ADVERSARIAL_AUDIT 结论为 MILESTONE_B_AUDIT_FAILED（4 BLOCKING／6 MAJOR／3 MINOR，含 RULE_SOURCE_GAP 类共13项 finding）；定向修复实现提交 8ce497064fbb4686177cf63cca5265e902037129（fix: remediate milestone B formal duel audit findings，父提交 ebd656754ed2a528e0d08cd5175b68385fdb8140）已由用户在外部PowerShell提交；审计分支 sol-ultra-audit-milestone-b-formal-duel 冻结于 ebd6567...，remediation-1 re-audit 分支 sol-ultra-audit-milestone-b-remediation-1 冻结于 8ce4970...。修复内容：MB-B-001（acceptance provenance／gate／run 语义：artifact 是缓存报告不是执行凭证，status 不伪装 simulation_executed，run 必须真实执行 0..99 seeds 并生成 v2 artifact，绑定 implementation/rules-profile/deck identity）；MB-B-002（丈八 DYING 生命周期：Slash root finalizer 在闪／伤害／防止／game over 路径统一清理，材料 PROCESSING→DISCARD）；MB-B-003（session secret 确定性：同一 seed 不同 session secret 的决策 ID／acceptance 记录／replay 确定性一致）；MB-B-004（作用域分层：formal_duel_no_skill_ready=true 不等于完整引擎，authoritative_full_game_core=false、multi_player_production_proven=false、milestone_b_complete=false、global_all_cards_implemented=false、duel_scope_all_cards_sufficient=true，方天画戟保持 global PARTIAL）；MB-M-005（trusted provenance 只能由 canonical factory／from_canonical_profile_value 产生，普通 from_dict 与 analysis／untrusted 配置不能自我提升）；MB-M-006（CharacterMetadata.intrinsic_gender＋effective_gender 分离，当前生效性别按 effective 处理）；MB-M-007（事件顺序：闪响应 Jink／cancelled／finalize 顺序与事件契约）；MB-M-008（assert_resolution_invariants／assert_finished_state_invariants 在 replay／acceptance／runner 全程生效）；MB-M-009（正式 run 必须真实执行，禁止用缓存 artifact 冒充现场执行；same seed／different secret 双确定性运行）；MB-M-010（manifest／docs CURRENT 状态分层：blocked／0 seeds 等写 HISTORICAL/AS-OF 与 PRE-AUDIT SNAPSHOT；独立审计状态 independent_audit_done、audit_conclusion 不得预写 reaudit PASSED）；MB-N-011（amount／amount_override 注入防护与测试子类覆写防线）；MB-N-012（authoritative_private 隐私边界）；MB-N-013（隐藏句柄 handle-only 原则与可见性）。【HISTORICAL/AS-OF（PRE-AUDIT SNAPSHOT，2026-08-11）：本条目最初记录于修复工作树，当时 status=worktree_pending、commit=null、independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET；随后实现提交已由用户创建，remediation-1 targeted independent re-audit 结论为 MILESTONE_B_MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED（CURRENT），不得改写为 PASSED；Remediation 2 尚未独立审计（NOT_AUDITED_YET）。】验证证据见 final_verification；machine_state 为修复工作树时的机器状态快照。",
       "machine_state": {
         "formal_duel_no_skill_ready": true,
         "formal_run_ready": true,
@@ -859,6 +899,56 @@
         "hash_mismatch": 0,
         "runner_full_run": "python -m scripts.sgs_formal_runner run --mode formal_160_card_no_skill_duel --output <temp>/formal_milestone_b_run_result.json -> exit 0; schema=FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE_v2, status=passed, simulation_executed=true, result_source=live_execution, 100/100, failures=0, 2648s",
         "remediation_2_local_close": "2026-08-12 本地修复：MB-B-001/MB-M-005/MB-M-008/MB-M-009/MB-M-010/R1-NEW-001/R1-NEW-002/R1-NEW-003 八项均本地关闭；完整 pytest 2118 passed；FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE 重跑 100/100（1269.5s）；正式 runner live 100-seed status=passed/simulation_executed=true（1277.7s）；第二确定性运行 winner/action_count/final_state_hash mismatch=0/0/0（2554.6s）；Remediation 2 尚未独立审计（NOT_AUDITED_YET）。"
+      }
+    },
+    {
+      "checkpoint_id": "MILESTONE_B_AUDIT_REMEDIATION_2",
+      "batch_name": "MILESTONE_B_AUDIT_REMEDIATION_2",
+      "status": "committed_pending_audit",
+      "commit": "0793c819ad45cc21328fad7d8afa6882d6197613",
+      "commit_status": "committed",
+      "independent_audit_done": true,
+      "audit_conclusion": "MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED",
+      "milestone_tag": null,
+      "worktree_commit_pending": false,
+      "checkpoint_commit": null,
+      "generated_on": "2026-08-13",
+      "commit_note": "【CURRENT LIVE】MILESTONE_B_AUDIT_REMEDIATION_2 实现提交 0793c819ad45cc21328fad7d8afa6882d6197613（fix: close milestone B remediation 2 correctness gaps，父提交 8ce497064fbb4686177cf63cca5265e902037129）已由用户在外部PowerShell提交；remediation-2 targeted independent re-audit 结论为 MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED（CURRENT），唯一失败原因：MB-B-001 BLOCKING（live-result 汇总不严格：malformed final hash／deck_count=159／action_count=0／turn_count=0 仍可 status=passed；full 100-seed 分支忽略 acceptance artifact 的 passed=false 而无条件写 status=passed；implementation bundle digest 未覆盖 structured rule CSV 与 scripts/deck_data.py）、MB-M-005 MAJOR（TrustedFormalDuelConfiguration 可被公开 import 后直接构造并以 canonical values 自我授予 trusted）、MB-M-009 MAJOR（上述真实缺陷的测试缺失）、MB-M-010 MAJOR（manifest/docs current 状态互斥或过时：旧 HEAD／commit=null/pending／dirty、ready 与 blocked 并存、R1 仍写 NOT_AUDITED_YET/PRECOMMIT_READY、Remediation 2 未提交写成 CURRENT）、R2-NEW-001 MINOR（execution hash 未覆盖 damage_card_already_finished／pending_slash_choice／pending_discard_two／pending_hanbing_discard 四个 runtime 字段）。【HISTORICAL/AS-OF（PRECOMMIT SNAPSHOT）】R2 文档回填时 status=worktree_pending、commit=null、independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET；随后实现提交已由用户创建且 re-audit 已进行并失败，不得改写为 PASSED。",
+      "final_verification": {
+        "targeted_tests": "tests/test_sgs_audit_remediation_2.py 65 项（provenance、FINISHED inventory 52 字段负例矩阵、seed 3、缓存≠live、invalid live→failed、stale cache 不阻塞、SHA-256 清单、根卫生、same seed/不同 secret 确定性）。",
+        "pytest": "2118 passed, 0 failed, 0 skipped, 0 xfailed, 823.97s",
+        "compileall": "python -m compileall -q scripts tests -> exit 0",
+        "source_integrity": "scanned_file_count=129, audit_item_count=128, defect_count=0",
+        "formal_100_seed_acceptance": "100/100 PASSED, failures=0, 1269.5s; schema=FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE_v2; natural_end=100; reexecution=100; unsupported=0; approximation=0",
+        "formal_runner_live": "正式 runner live 100-seed status=passed, simulation_executed=true, result_source=live_execution, 1277.7s",
+        "second_determinism_run": "fresh session secrets, seeds 0..99 两次：winner_mismatch=0, action_count_mismatch=0, final_state_hash_mismatch=0, 2554.6s",
+        "remediation_2_local_close": "2026-08-12 本地修复：MB-B-001/MB-M-005/MB-M-008/MB-M-009/MB-M-010/R1-NEW-001/R1-NEW-002/R1-NEW-003 八项均本地关闭；完整 pytest 2118 passed；FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE 重跑 100/100（1269.5s）；正式 runner live 100-seed status=passed/simulation_executed=true（1277.7s）；第二确定性运行 winner/action_count/final_state_hash mismatch=0/0/0（2554.6s）；Remediation 2 随后独立复审结论 MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED。"
+      }
+    },
+    {
+      "checkpoint_id": "MILESTONE_B_AUDIT_REMEDIATION_3",
+      "batch_name": "MILESTONE_B_AUDIT_REMEDIATION_3",
+      "status": "worktree_pending_precommit",
+      "commit": null,
+      "commit_status": "pending",
+      "independent_audit_done": false,
+      "audit_conclusion": "NOT_AUDITED_YET",
+      "milestone_tag": null,
+      "worktree_commit_pending": true,
+      "checkpoint_commit": null,
+      "remediation_3_worktree_state": "PRECOMMIT",
+      "generated_on": "2026-08-13",
+      "commit_note": "【CURRENT（工作树）】MILESTONE_B_AUDIT_REMEDIATION_3 本地修复：MB-B-001（唯一 canonical live-result validator；runner 不覆写；implementation bundle 纳入 structured CSV 与 deck_data.py）、MB-M-005（trusted capability 私有 sentinel）、MB-M-009（runner 验证矩阵／provenance／identity 依赖／execution hash mutation 测试）、MB-M-010（machine/docs 收口）、R2-NEW-001（execution snapshot 覆盖四个 runtime 字段＋pending_slash_choice 一致性）。尚未提交（remediation_3_worktree_state=PRECOMMIT），尚未独立复审（NOT_AUDITED_YET），不预写 R3 PASSED；提交后由用户产生新的 Git SHA，下一轮审计以 Git 身份为准。",
+      "final_verification": {
+        "targeted_tests": "tests/test_sgs_audit_remediation_3.py 40 项：runner live-result 验证矩阵（malformed/uppercase hash、deck_count=159、action_count=0、turn_count=0、strict=false、natural=false、unsupported、approximation、illegal winner、exception、missing/duplicate seed、artifact passed=false 不覆写、集合级 failures 由 details 重算）、provenance（直接构造无 token/forged token 失败、replace 不能丢/伪造capability、copy/deepcopy 仅经 canonical factory、session 拒绝 untrusted/子类、replay value 不恢复 capability）、identity 依赖（production 源码/structured CSV/deck_data/deck CSV 变化改变 digest；docs/artifact/行尾变化不改变）、execution hash mutation（boosted/damage_card_already_finished/pending_discard_two/pending_hanbing_discard、分叉 fail-closed、inventory 全序列化）、machine/docs consistency（R1/R2 FAILED 保持、R3 NOT_AUDITED_YET、scope flags 唯一）。",
+        "pytest": "2158 passed, 0 failed, 0 skipped, 0 xfailed, 751.65s",
+        "compileall": "python -m compileall -q scripts tests -> exit 0",
+        "source_integrity": "scanned_file_count=130, audit_item_count=126, defect_count=0 (defect_count=0 ???????)",
+        "formal_100_seed_acceptance": "100/100 PASSED, failures=0, 1154.7s; schema=FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE_v2; natural_end=100; reexecution=100; unsupported=0; approximation=0; 统一 validator 全程参与",
+        "formal_runner_live": "正式 runner live 100-seed status=passed, simulation_executed=true, result_source=live_execution, schema=FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE_v2, 1188.77s",
+        "second_determinism_run": "fresh session secrets, seeds 0..99 两次：winner_mismatch=0, action_count_mismatch=0, final_state_hash_mismatch=0, second natural_end=100, reexecution=100, 2304.5s",
+        "execution_hash_mutation": "6 项专项（pending_slash_choice.boosted false/true hash 不同且伤害基数 1/2 由同一字段决定、damage_card_already_finished、pending_discard_two、pending_hanbing_discard、重复 root 分叉 fail-closed、EXECUTION_HASH_RUNTIME_INVENTORY 全序列化）——全部通过（随 full pytest）",
+        "invalid_live_result_regression": "runner 验证矩阵 11 项非法 live result + missing/duplicate seed + artifact passed=false 全部 status=failed、simulation_executed=true（随 full pytest）"
       }
     }
   ],
@@ -980,13 +1070,19 @@
       "acceptance_seed_count_impact": 0,
       "non_rule_seed_blockers_observed": 0
     },
-    "milestone_b_blockers": [
-      "FORMAL_DUEL_RULE_PROFILE_NOT_CONFIRMED：平台/版本、160张牌堆适用、初始手牌与体力、先手/首回合、同将/手气卡以及参与者选择尚无权威来源",
-      "CIXIONG_CHARACTER_METADATA_SOURCE_NOT_AVAILABLE：雌雄双股剑通用状态机已COMPLETE，但formal参与者角色key与性别不能按座次猜测",
-      "VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP：丈八两材料是A(HAND→PROCESSING→结算后DISCARD)还是B(使用/打出开始即HAND→DISCARD且不进PROCESSING)待确认；通用VirtualCardReference foundation已完成，具体材料区域转换只在规则确认后接线",
-      "FORMAL_EXECUTION_RELEASE_GUARD_CLOSED_PENDING_PREREQUISITES：runner future-ready分支已实现逐seed复检与原子输出，但当前规则/卡牌/100-seed前置条件未关闭，live gate在接触输出路径前拒绝",
-      "FORMAL_FIXED_SEED_ACCEPTANCE_NOT_RUN：正式seeds 0..99逐seed验收记录为0，不得以analysis-only sweep替代"
-    ],
+    "milestone_b_blockers": {
+      "layer": "HISTORICAL/AS-OF（2026-08-09 之前；全部 blocker 已由 USER_CONFIRMED_PROJECT_FORMAL_PROFILE／USER_CONFIRMED_RULE（2026-08-09）关闭）",
+      "blockers": {
+        "layer": "HISTORICAL/AS-OF（2026-08-09 之前；全部 blocker 已由 USER_CONFIRMED_PROJECT_FORMAL_PROFILE／USER_CONFIRMED_RULE（2026-08-09）关闭）",
+        "blockers": [
+          "FORMAL_DUEL_RULE_PROFILE_NOT_CONFIRMED：平台/版本、160张牌堆适用、初始手牌与体力、先手/首回合、同将/手气卡以及参与者选择尚无权威来源",
+          "CIXIONG_CHARACTER_METADATA_SOURCE_NOT_AVAILABLE：雌雄双股剑通用状态机已COMPLETE，但formal参与者角色key与性别不能按座次猜测",
+          "VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP：丈八两材料是A(HAND→PROCESSING→结算后DISCARD)还是B(使用/打出开始即HAND→DISCARD且不进PROCESSING)待确认；通用VirtualCardReference foundation已完成，具体材料区域转换只在规则确认后接线",
+          "FORMAL_EXECUTION_RELEASE_GUARD_CLOSED_PENDING_PREREQUISITES：runner future-ready分支已实现逐seed复检与原子输出，但当前规则/卡牌/100-seed前置条件未关闭，live gate在接触输出路径前拒绝",
+          "FORMAL_FIXED_SEED_ACCEPTANCE_NOT_RUN：正式seeds 0..99逐seed验收记录为0，不得以analysis-only sweep替代"
+        ]
+      }
+    },
     "not_configured": [
       "mypy",
       "ruff",
@@ -1784,7 +1880,8 @@
         "git_diff_check_note": "only LF-to-CRLF warnings"
       },
       "sealed_audit_chain_unchanged": true,
-      "remediation_7_created": false
+      "remediation_7_created": false,
+      "layer": "HISTORICAL/AS-OF（PRECOMMIT SNAPSHOT，2026-08-09/2026-08-11；blocked_pending_user_rule_confirmation 与 0 seeds 均为提交前工作树快照）"
     },
     "milestone_b_audit_remediation_1": {
       "targeted_tests": "新增 targeted 测试：formal_duel artifact 验证攻击矩阵（24项全部fail-closed）、zhangba DYING 生命周期（四条路径：闪后／伤害后／防止后／终局清理）、zhangba DYING chain／prevented_zero 边界、cixiong 性别、hidden_handle 隐私、engine_gate／model／actions／session 契约、milestone finished／full-core 边界；完整 pytest 回归。",
@@ -1797,16 +1894,58 @@
       "winner_mismatch": 0,
       "action_count_mismatch": 0,
       "hash_mismatch": 0
+    },
+    "milestone_b_audit_remediation_2": {
+      "implementation_commit": "0793c819ad45cc21328fad7d8afa6882d6197613",
+      "implementation_parent": "8ce497064fbb4686177cf63cca5265e902037129",
+      "audit_conclusion": "MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED",
+      "independent_audit_done": true,
+      "findings_open": {
+        "MB-B-001": "BLOCKING",
+        "MB-M-005": "MAJOR",
+        "MB-M-009": "MAJOR",
+        "MB-M-010": "MAJOR",
+        "R2-NEW-001": "MINOR"
+      },
+      "findings_closed_no_regression": [
+        "MB-B-002",
+        "MB-B-003",
+        "MB-B-004",
+        "MB-M-006",
+        "MB-M-007",
+        "MB-M-008",
+        "MB-N-011",
+        "MB-N-012",
+        "MB-N-013",
+        "R1-NEW-001",
+        "R1-NEW-002",
+        "R1-NEW-003"
+      ],
+      "reason": "MB-B-001 BLOCKING（live-result 汇总不严格：malformed final hash／deck_count=159／action_count=0／turn_count=0 仍可 status=passed；full 100-seed 分支忽略 acceptance artifact 的 passed=false 而无条件写 status=passed；implementation bundle digest 未覆盖 structured rule CSV 与 scripts/deck_data.py）、MB-M-005 MAJOR（TrustedFormalDuelConfiguration 可被公开 import 后直接构造并以 canonical values 自我授予 trusted）、MB-M-009 MAJOR（上述真实缺陷的测试缺失）、MB-M-010 MAJOR（manifest/docs current 状态互斥或过时：旧 HEAD／commit=null/pending／dirty、ready 与 blocked 并存、R1 仍写 NOT_AUDITED_YET/PRECOMMIT_READY、Remediation 2 未提交写成 CURRENT）、R2-NEW-001 MINOR（execution hash 未覆盖 damage_card_already_finished／pending_slash_choice／pending_discard_two／pending_hanbing_discard 四个 runtime 字段）"
+    },
+    "milestone_b_audit_remediation_3": {
+      "worktree_state": "PRECOMMIT",
+      "independent_audit_done": false,
+      "audit_conclusion": "NOT_AUDITED_YET",
+      "implementation_commit": null,
+      "implementation_parent": "0793c819ad45cc21328fad7d8afa6882d6197613",
+      "local_fixes": {
+        "MB-B-001": "唯一 canonical live-result validator；runner 不覆写；implementation bundle 纳入 structured CSV 与 deck_data.py",
+        "MB-M-005": "trusted capability 私有 sentinel；公开构造失败关闭",
+        "MB-M-009": "runner 验证矩阵／provenance／identity 依赖／hash mutation 测试",
+        "MB-M-010": "machine/docs CURRENT/HISTORICAL 收口",
+        "R2-NEW-001": "execution snapshot 覆盖四个 runtime 字段＋一致性 invariant"
+      }
     }
   },
   "sha256": {
-    "docs/ENGINE_STATUS.md": "b141cbdda03984f612f83a6528fe3dc46550634eeeef7ec8960f173a41eb0df4",
-    "docs/IMPLEMENTATION_MATRIX.md": "6a80220411609e59fbe96b930ed078594ff8fb7965d5adea2c7d93a7d9dad359",
+    "docs/ENGINE_STATUS.md": "70e1aa8953a768b54dbed83d0c1f8e8db6373861330736c81ab030ea57b4ef76",
+    "docs/IMPLEMENTATION_MATRIX.md": "09f9e367e9b2fe9a085a509859f161566b888ab8ef5ef577838e5dce02b24194",
     "docs/LEGACY_RESULTS_INVALID.md": "267d51329b65b4435ed770b9fe90a0d53148d17cc9b0dae3e6d3406b06c0c0cc",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "6cbf14c2f4d63cd142b4f038a22b9b404ac3e141a91a9ccac69f04920527927a",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "4e0c0003086226d930b23af148eb6bbaa167bcac6e07a69063a5fe525f77fa7c",
     "docs/MILESTONE_B_ANALYSIS_SEED_DIAGNOSTIC.json": "a70ae21cbcfd6f2257dbeeb0f167dcc09dee47cd73fb616e2a6a71f2c18054cf",
-    "docs/MILESTONE_B_DEPENDENCY_GRAPH.md": "4bd3f39506baa9b34123f55938d04254fa22bbbfbf708094149f7063b0e76e4b",
-    "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "ec27eee6850a429199562ce00e009a2412fbc8458828ef2225b52da83e6e532f",
+    "docs/MILESTONE_B_DEPENDENCY_GRAPH.md": "1e65ead08ff41faa87f8950922144b683836bd656d2ff9a8f24415d0660ab420",
+    "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "e4bf99f9acc42be9e06f4fdaf18ec33ee7798efe3b682edd1a407cb45d04cc4b",
     "knowledge/三国杀卡牌效果.md": "6bdeedccad12d3a16fc4d9663aec98f7546bc5dadc42ec66a74eb9b3aa470989",
     "knowledge/三国杀牌堆数据.csv": "e490631698e6b7695c6a9b3ad0c355e421ccfafab696e5b3a97418c9ec80f38b",
     "scripts/sgs_dev_runner.py": "6f88baa78fc9c22106188defda7190cd2a4412325db46f3964d217fd0e61c755",
@@ -1816,15 +1955,15 @@
     "scripts/sgs_engine/duel_replay.py": "fdb0d659d05121edf22e6d9390b3eb21f21f333547c5321ced52fe7f861fa011",
     "scripts/sgs_engine/engine.py": "b0c80b72ac548a2f24a1b6259d1338e7576c6213bf7c0ac2242e16e86b4d5b3b",
     "scripts/sgs_engine/events.py": "be11edff8512fd23c72160b31c78c5e31c18120aec39f088af27e6a800c62439",
-    "scripts/sgs_engine/formal_duel.py": "b6d74148214155b1516daa5daf2890e38c6cd855cbcdbc5250263fba7071ac21",
+    "scripts/sgs_engine/formal_duel.py": "fe5b05715d89eeaf8a614f27a0d514afb5b0ff09c2068d431d3ac674f6ea2bfc",
     "scripts/sgs_engine/model.py": "28e7913b08766b1949a60747bebf5a36c01a3427ce02c1bb8632a4ec83531a84",
-    "scripts/sgs_engine/production_batch.py": "97431558ba21400c9104351d18d2bf7334c43e809629b0066e3d5a43fbe11c5a",
+    "scripts/sgs_engine/production_batch.py": "d8311feafb852bf73fa38e99997ae5f478d8b197d55a8cb45f24f72331b8dfb9",
     "scripts/sgs_engine/production_cards.py": "d8b2f2dd4a7abb8624459119acc477938c12f02ad2f5fb8a9caab03709b59718",
     "scripts/sgs_engine/production_replay.py": "b519a2ac02f72e7957e1b2c9b1f5d003088d1998a39a736efd66215574be25da",
     "scripts/sgs_engine/replay.py": "27cd09a98e9ea09d03a6de3542d13abc94341fde4d33a5fdc5e8bdc5497580b1",
     "scripts/sgs_engine/rng.py": "3cb67017556535802c2b323e8002217961955ffee7ff161de85d804d86d5ead6",
     "scripts/sgs_engine_gate.py": "cb012d873b6fbcc0d31dddeaefde2df6c44d01c523171d1e6ae91501ebd1d9a8",
-    "scripts/sgs_formal_runner.py": "a02c7eb5d415ff72e2ae096aa81e555901954ef59305aa25716bbce272cc1eba",
+    "scripts/sgs_formal_runner.py": "6179f0ae893641b1791e326c7e29eeeff9b548a1fa856bac92d8af7d13940573",
     "scripts/sgs_source_integrity_audit.py": "046aa2a68ed3c3da6df0e8ee9389fe27f8ff4120bc4475f8317fec5a899d8909",
     "tests/test_sgs_engine_actions.py": "066853c3b5d7adff75bd7bcbb191051de3ad31ff7fcd294567c7aaeb4e5abdc3",
     "tests/test_sgs_engine_events.py": "87088fad12c086c5b3bd6dbc7f27363a27d558471d71ccf5b7d38c4ef74ef94e",
@@ -1847,10 +1986,10 @@
     "tests/test_sgs_production_turn_cycle_discard.py": "cc64a178cd4dea4ede6a614c4502fb6e5eb065a7c2718e9ddd797743dec23646",
     "tests/test_sgs_production_weapon_skills.py": "192f3a304e5e0d8efeb9542555f1286fa5d992136cfc1a1ba7e94b9e64deec2e",
     "tests/test_sgs_production_zone_target_tricks.py": "16cf70dfd8c8dbe88486fbedccf25fb0fb89270cf2ffcaf6c264b8602403bef2",
-    "hash_note": "本表为当前工作树文件的 canonical SHA-256 清单（64位小写十六进制；规范：UTF-8原始内容、去除UTF-8 BOM、CRLF统一为LF后计算，统一helper=scripts/sgs_hash_inventory.py::git_normalized_sha256，R1-NEW-001）。docs/CHECKPOINT_MANIFEST.json 自身不进入本表（self_excluded=true），避免自引用不可能条件。历史40位Git blob SHA-1值已全部替换为真实SHA-256；如需Git blob身份请单独使用命名为SHA-1/Git blob ID的字段。2026-08-12 MILESTONE_B_AUDIT_REMEDIATION_2 重算：mismatch=0（现场重算一致）。",
-    "scripts/sgs_formal_milestone_b_acceptance.py": "15d20a3beebd640742ae65361e9d7ea2a0d1f9f124b8413fd7832aeeaae0e962",
+    "hash_note": "本表为当前工作树文件的 canonical SHA-256 清单（64位小写十六进制；规范：UTF-8原始内容、去除UTF-8 BOM、CRLF统一为LF后计算，统一helper=scripts/sgs_hash_inventory.py::git_normalized_sha256，R1-NEW-001）。docs/CHECKPOINT_MANIFEST.json 自身不进入本表（self_excluded=true），避免自引用不可能条件。历史40位Git blob SHA-1值已全部替换为真实SHA-256；如需Git blob身份请单独使用命名为SHA-1/Git blob ID的字段。2026-08-13 MILESTONE_B_AUDIT_REMEDIATION_3 重算：mismatch=0（现场重算一致）。",
+    "scripts/sgs_formal_milestone_b_acceptance.py": "3fdd0ec9ca135c977722f9f028eee42c11497940a5557b45e24dd7f14bc41ed4",
     "tests/test_sgs_milestone_b_advancement.py": "3d4f626e1f409a1894719615553950d6f908c52abd74f6fb6c45c3ff60631732",
-    "docs/FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE.json": "cc67b6871d6fa41e98d3e6978f502dfee192c874c2859f3e0330e255ee59dc20",
+    "docs/FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE.json": "715b6c27d1de0e2403103812d69a4b73b97677170560d49310a19c99a0e0ac47",
     "self_excluded": true
   },
   "source_integrity": {
