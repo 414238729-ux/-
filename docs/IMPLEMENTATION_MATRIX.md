@@ -1,25 +1,22 @@
 # 三国杀正式实现矩阵
 
-## MILESTONE_B 当前矩阵（2026-08-14，CURRENT）
+## MILESTONE_B 持久化项目矩阵（2026-08-14，PERSISTED PROJECT STATE）
 
-本节记录 `MILESTONE_B_AUDIT_REMEDIATION_4` 当前事实。
-【CURRENT LIVE】MILESTONE_B_AUDIT_REMEDIATION_3 实现提交
-5d970560e306b84af518798e11db12c2a42dfc44（fix: close milestone B remediation
-3 correctness gaps，父提交 0793c819ad45cc21328fad7d8afa6882d6197613）已由
-用户创建；audit branch `sol-ultra-audit-milestone-b-formal-duel` 保持冻结于
-ebd6567...、remediation-1 re-audit branch 冻结于 8ce4970...、remediation-2
-re-audit branch `sol-ultra-audit-milestone-b-remediation-2` 冻结于 0793c819...、
-remediation-3 re-audit branch `sol-ultra-audit-milestone-b-remediation-3`
-冻结于 5d97056...；
-remediation-1 targeted independent re-audit 结论 MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED；
-remediation-2 targeted independent re-audit 结论 MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED
-（MB-B-001 BLOCKING／MB-M-005 MAJOR／MB-M-009 MAJOR／MB-M-010 MAJOR／
-R2-NEW-001 MINOR）；R3 V4-Pro pre-audit=
-MILESTONE_B_REMEDIATION_3_PRE_AUDIT_FAILED（3 MINOR new findings：
-R3-NEW-001/002/003 + DOC-OBS-001；QA evidence，不是 Sol Ultra final
-independent re-audit）；Remediation 4 工作树本地修复中、
-remediation_4_worktree_state=PRECOMMIT、independent_audit_done=false、
-audit_conclusion=NOT_AUDITED_YET（不预写 R4 PASSED）。
+R4 冻结 target 为 `3df02b5cfae9af436ba77d8f1c19a7b9959022b1`，parent 为
+`5d970560e306b84af518798e11db12c2a42dfc44`。R4 Sol final independent
+re-audit=`MILESTONE_B_REMEDIATION_4_FINAL_REAUDIT_FAILED`，仅因
+R4-NEW-001/R4-NEW-002 两项 MINOR；R3-NEW-001/002/003 与 DOC-OBS-001
+均 CLOSED。initial independent audit、R1、R2、R3 与 R4 的 FAILED 历史均保留。
+R5 从该固定 R4 target 历史基线开始，只记
+`independent_audit_done=false`、`audit_conclusion=NOT_YET_PERFORMED`；不写未来 SHA。
+
+R4 形成时的 `PRECOMMIT`、`NOT_AUDITED_YET`、`commit=null` 是
+HISTORICAL R4 CANDIDATE FORMATION SNAPSHOT，不是 persisted current。
+LIVE GIT STATE 只能在运行时由 Git 命令 runtime-derived，不由本文档硬编码。
+
+`A committed documentation snapshot must not require knowing the SHA of the commit that contains the snapshot.`
+
+`A precommit Git worktree state must never be labelled persistent CURRENT state.`
 【HISTORICAL/AS-OF（PRECOMMIT SNAPSHOT）】R1 开始 HEAD=`ebd656754ed2a528e0d08cd5175b68385fdb8140`，当时工作树尚未提交（`commit=null`、`pending`）、独立复审尚未运行：
 `independent_audit_done=false`、`audit_conclusion=NOT_AUDITED_YET`；R2 开始
 HEAD=`8ce4970...`，R2 工作树当时未提交。二者都不是
@@ -40,7 +37,7 @@ HEAD=`8ce4970...`，R2 工作树当时未提交。二者都不是
 | formal replay／隐私 | `reexecution_replay_supported=true` | 同一 session 现场执行并同步 record decisions，再 strict replay 同一份 record；player-visible 与 omniscient 分层 |
 | formal runner | 实现已接线；`run` 确实现场执行 | status 现场派生 readiness（`simulation_executed=false`）；run 命令现场执行 seeds 0..99、same-game record/replay 并写出带 provenance 的 v2 artifact；绝不把复制缓存称为 `simulation_executed=true`（MB-B-001；R3：唯一 canonical live-result validator，非法 live result 一律 status=failed，runner 不得覆写） |
 | formal gate | 现场派生、保持关闭 | artifact 只是缓存证据：必须绑定当前 implementation/rules-profile/deck identity 且全部关键字段严格验证；调用方 payload／manifest 布尔值不能授予准入；静态执行资格不依赖缓存 artifact（stale 不阻塞新 live run） |
-| implementation identity | `FORMAL_SIMULATION_TRANSITIVE_INPUT_INVENTORY` | R3：digest 覆盖生产引擎源码、runner/gate 语义代码、card registry、scripts/deck_data.py、牌堆 CSV、结构化卡牌/规则 CSV（含武器攻击范围）；Git-normalized SHA-256，行尾归一；docs／manifest／acceptance artifact 排除 |
+| implementation identity | explicit enumerated dependency inventory（不是自动 transitive closure） | R5 修复范围明确加入 `scripts/__init__.py` 及其在当前正式 package import 路径中 eager 执行的 28 项 local-import 闭包；继续覆盖引擎、runner/gate、acceptance generator、deck data/CSV、structured rule CSV、validation/hash helper，Git-normalized SHA-256 归一行尾，docs/manifest/acceptance artifact 排除。此 R5 修复尚未独立复审 |
 | 正式 100 固定 seed | `PASSED`（R1/R2 各重新运行；R3 再次运行） | seeds 0..99、formal profile、analysis_only=false、max_steps=2000、每局 strict replay + final_state_hash：R1 100/100（2631.2s）、R2 100/100（1269.5s）、failures=0；各自随后做 determinism reproduction（新 session secrets）winner/action_count/final hash mismatch=0 |
 | 本地回归／完整性 | 见 manifest final_verification | targeted tests、full pytest、compileall、source integrity（以 R3 最终执行为准）、JSON/SHA/diff-check/unmerged 均记录于 docs/CHECKPOINT_MANIFEST.json |
 | 最终门禁 | `formal_duel_no_skill_ready=true`、`formal_run_ready=true` | 只证明正式160张无技能两人单挑范围（duel-scope）；`authoritative_full_game_core=false`、`multi_player_production_proven=false`、`milestone_b_complete=false` 保持（MB-B-004）；full-game 正式入口继续失败关闭，与 duel-scope ready 不互斥——前者描述整局引擎，后者描述本模式范围 |

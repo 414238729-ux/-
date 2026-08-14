@@ -2,18 +2,39 @@
 
 ## 文档身份与固定基线
 
-本文件是 `MILESTONE_B_FORMAL_160_CARD_NO_SKILL_DUEL_ADVANCEMENT` 的当前状态依赖图。它不是 whole-repo audit 的续写，不是 `remediation-7`，也不改变任何已封存审计结论。
+本文件是 `MILESTONE_B_FORMAL_160_CARD_NO_SKILL_DUEL_ADVANCEMENT` 的持久化项目状态依赖图。它不是 live Git 状态快照，不是 whole-repo audit 的续写，不是 `remediation-7`，也不改变任何已封存审计结论。
 
-| 字段 | 当前事实 |
+| 字段 | PERSISTED PROJECT STATE |
 |---|---|
-| 开发分支 | `sol-ultra-milestone-b-formal-duel` |
-| 本轮实现基线 | `2ed9627ba816e9ab5023bd3017ce7cca90ec0022`（`feat: advance formal 160-card duel infrastructure`，已创建并推送远程） |
-| 开始时工作树 | clean |
-| 开始时 unmerged | empty |
-| 当前 Git 写入状态 | 【CURRENT LIVE】R3 实现提交 5d970560e306b84af518798e11db12c2a42dfc44（fix: close milestone B remediation 3 correctness gaps，父提交 0793c819...）已提交；【Remediation 4 工作树】本轮修复未提交（PRECOMMIT） |
-| 当前里程碑状态 | `formal_duel_no_skill_ready=true`（静态执行资格）；`MILESTONE_B=PASSED`（正式160张无技能单挑范围）；remediation-1 re-audit=`MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED`；remediation-2 re-audit=`MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED`；R3 pre-audit=`MILESTONE_B_REMEDIATION_3_PRE_AUDIT_FAILED`（QA evidence）；Remediation 4 工作树=`PRECOMMIT`、`NOT_AUDITED_YET` |
+| R4 固定审计记录 | target=`3df02b5cfae9af436ba77d8f1c19a7b9959022b1`，parent=`5d970560e306b84af518798e11db12c2a42dfc44`；Sol final independent re-audit=`MILESTONE_B_REMEDIATION_4_FINAL_REAUDIT_FAILED`，仅 R4-NEW-001/R4-NEW-002 两项 MINOR 未关闭；R3-NEW-001/002/003 与 DOC-OBS-001 均 CLOSED |
+| R5 persisted state | 从固定 R4 target 历史基线开始；`independent_audit_done=false`、`audit_conclusion=NOT_YET_PERFORMED`；不写未来 SHA，不持久化 worktree pending/clean/dirty |
+| 里程碑范围 | `formal_duel_no_skill_ready=true`、`duel_scope_all_cards_sufficient=true`；`authoritative_full_game_core=false`、`multi_player_production_proven=false`、`milestone_b_complete=false`、`global_all_cards_implemented=false` |
+
+| 字段 | HISTORICAL/AS-OF R5 REMEDIATION START SNAPSHOT |
+|---|---|
+| 固定起点分支 | `sol-ultra-milestone-b-formal-duel` |
+| 固定起点 commit | `3df02b5cfae9af436ba77d8f1c19a7b9959022b1` |
+| 起点工作树核对 | clean |
+| 起点 unmerged 核对 | empty |
+| 早期 Milestone B infrastructure lineage | `2ed9627ba816e9ab5023bd3017ce7cca90ec0022`（`feat: advance formal 160-card duel infrastructure`） |
+
+上表只记录 R5 工作开始时已经发生的历史核对，不表示文档提交后或任意审计时刻的 live 分支、HEAD、worktree 或 unmerged 状态。
 
 永久封存边界不变：original whole-repo audit 为 `WHOLE_REPO_AUDIT_FAILED`；R1 至 R5 为对应 remediation re-audit FAILED；R6 为 `REMEDIATION_6_REAUDIT_PASSED`；finalization correction verification 为 PASSED。不创建 R7，不移动旧审计分支或标签，不把 original FAILED 改写为 PASSED。
+
+R4 形成时的 `PRECOMMIT`、`NOT_AUDITED_YET`、`commit=null` 是
+HISTORICAL R4 CANDIDATE FORMATION SNAPSHOT，不是 persistent current。
+LIVE GIT STATE 只能在审计时通过 `git branch --show-current`、
+`git rev-parse HEAD`、`git status --short`、`git ls-files -u` runtime-derived。
+
+`A committed documentation snapshot must not require knowing the SHA of the commit that contains the snapshot.`
+
+`A precommit Git worktree state must never be labelled persistent CURRENT state.`
+
+R5 的 implementation identity 修复范围包含 `scripts/__init__.py` 及它在
+当前正式 package import 路径中 eager 执行的 28 项 local-import 闭包。
+此 inventory 为 explicit enumerated dependency inventory，不是自动完整 transitive
+closure，且 R5 独立复审尚未进行。
 
 ## 用户新确认规则（2026-08-09）
 
@@ -106,4 +127,7 @@ flowchart TD
 
 1. 方天画戟 global PARTIAL（MULTIPLAYER/MULTI_TARGET_INFRASTRUCTURE_GAP）保持；duel-scope 为 NOT_APPLICABLE_TO_DUEL，不得虚报 global COMPLETE。
 2. 正式整局入口（authoritative_full_game_core）仍未完成；完整里程碑的全局语义仍需后续批次。
-3. 【CURRENT LIVE】R3 实现提交 5d97056... 已提交；remediation-1 re-audit=`MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED`、remediation-2 re-audit=`MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED`、R3 pre-audit=`MILESTONE_B_REMEDIATION_3_PRE_AUDIT_FAILED`（QA evidence）；Remediation 4 工作树=`PRECOMMIT`、`NOT_AUDITED_YET`；不得预写 Remediation 4 审计 PASSED、未来 commit SHA 或 milestone tag；Remediation 4 工作树修改未提交。
+3. 【HISTORICAL R4 CANDIDATE FORMATION SNAPSHOT】R4 形成时为
+`PRECOMMIT`/`NOT_AUDITED_YET`；随后冻结 target=3df02b5... 的 R4 final re-audit
+结论为 FAILED。R5 尚未独立复审（`NOT_YET_PERFORMED`），不预写 R5
+PASSED、未来 commit SHA 或 milestone tag。

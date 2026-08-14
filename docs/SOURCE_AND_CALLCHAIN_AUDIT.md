@@ -522,10 +522,37 @@ formal session 继续使用同一 `GameState`、唯一 `CardInstance`、统一�
 
 本轮本地验证结果为：full pytest `2024 passed, 1 warning in 830.59s`（唯一 warning 是 `.pytest_cache` WinError5）；compileall exit0；source integrity exit0并扫描125个 Python 文件、117项 finding／audit item（formal source56、test code61）、`defect_count=0`；manifest与诊断JSON解析通过，诊断seed IDs严格为0..99；Git-normalized SHA-256表47个文件条目全部匹配；`git diff --check` exit0。runner status exit0并现场派生 deck160／registered38、global36/158、duel37/159、unsupported2、approximation0、runtime reachable true、mode/cards false、replay true、acceptance0、ready false。runner 的 future-ready 消费／复检／原子输出链已经实现；当前失败关闭来自 live prerequisites 与模块私有 release guard，而不是无条件拒绝占位。因此本节证明 production formal 薄层、现场门禁、诊断执行和 runner 结果路径已经接线并通过本地回归，不证明 Milestone B PASSED，也不是独立审计。旧审计链保持 original `WHOLE_REPO_AUDIT_FAILED`、R1–R5 各自 FAILED、R6 `REMEDIATION_6_REAUDIT_PASSED`、finalization correction verification PASSED；未创建 remediation-7，也未移动旧 audit branch 或 milestone tag。
 
-## 12. MILESTONE_B_AUDIT_REMEDIATION_1/2/3/4（2026-08-11 起；CURRENT 状态见下方）
+## 12. MILESTONE_B_AUDIT_REMEDIATION_1/2/3/4/5（PERSISTED PROJECT STATE）
 
-【CURRENT LIVE】`MILESTONE_B_AUDIT_REMEDIATION_1` 实现提交 8ce497064fbb4686177cf63cca5265e902037129（fix: remediate milestone B formal duel audit findings，父提交 ebd656754ed2a528e0d08cd5175b68385fdb8140）已由用户创建；audit branch `sol-ultra-audit-milestone-b-formal-duel` 冻结于 ebd6567...，remediation-1 re-audit branch `sol-ultra-audit-milestone-b-remediation-1` 冻结于 8ce4970...；remediation-1 targeted independent re-audit 结论为 MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED；Remediation 2 targeted independent re-audit=MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED（MB-B-001 BLOCKING／MB-M-005 MAJOR／MB-M-009 MAJOR／MB-M-010 MAJOR／R2-NEW-001 MINOR）；Remediation 3 实现提交 5d970560e306b84af518798e11db12c2a42dfc44 已由用户创建，V4-Pro pre-audit=`MILESTONE_B_REMEDIATION_3_PRE_AUDIT_FAILED`（3 MINOR new findings + DOC-OBS-001；QA evidence，不是 Sol Ultra final independent re-audit）；Remediation 4 工作树本地修复中、尚未 pre-audit（NOT_AUDITED_YET，remediation_4_worktree_state=PRECOMMIT）。
-【HISTORICAL/AS-OF（PRECOMMIT SNAPSHOT）】开始 HEAD=`ebd656754ed2a528e0d08cd5175b68385fdb8140`；当时工作树尚未提交，`commit=null`、`pending`；独立 Ultra 复审尚未运行：`independent_audit_done=false`、`audit_conclusion=NOT_AUDITED_YET`，不预写当时 reaudit PASSED。
+已封存的 Milestone B 审计链为：initial independent audit=FAILED；
+R1=`MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED`；
+R2=`MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED`；
+R3 pre-audit=`MILESTONE_B_REMEDIATION_3_PRE_AUDIT_FAILED`；R4 冻结 target
+`3df02b5cfae9af436ba77d8f1c19a7b9959022b1`（parent
+`5d970560e306b84af518798e11db12c2a42dfc44`）的 Sol final independent re-audit
+=`MILESTONE_B_REMEDIATION_4_FINAL_REAUDIT_FAILED`。R4 仅余
+R4-NEW-001/R4-NEW-002 两项 MINOR；R3-NEW-001/002/003 与 DOC-OBS-001
+均 CLOSED。
+
+R5 从该固定 R4 target 历史基线开始；持久化审计状态为
+`independent_audit_done=false`、`audit_conclusion=NOT_YET_PERFORMED`，不写未来 SHA。
+R5 implementation identity 范围明确加入 `scripts/__init__.py` 及它在当前
+正式 package import 路径中 eager 执行的 28 项 local-import 闭包。这是
+explicit enumerated dependency inventory，不是自动完整 transitive closure；R5
+独立复审尚未进行，验证结果仅以实际运行记录为准。
+
+【HISTORICAL R4 CANDIDATE FORMATION SNAPSHOT】R4 形成时的
+`PRECOMMIT`、`NOT_AUDITED_YET`、`commit=null`、worktree pending 只表达
+当时未提交工作树，不表达 persisted current。
+
+【LIVE GIT STATE / runtime-derived policy】branch、HEAD、parent、clean/dirty 与
+unmerged 必须由现场 Git 命令派生；本签入文档不将它们硬编码为
+`CURRENT LIVE`。
+
+`A committed documentation snapshot must not require knowing the SHA of the commit that contains the snapshot.`
+
+`A precommit Git worktree state must never be labelled persistent CURRENT state.`
+【HISTORICAL/AS-OF（R1 PRECOMMIT SNAPSHOT）】开始 HEAD=`ebd656754ed2a528e0d08cd5175b68385fdb8140`；当时工作树尚未提交，`commit=null`、`pending`；独立 Ultra 复审尚未运行：`independent_audit_done=false`、`audit_conclusion=NOT_AUDITED_YET`，不预写当时 reaudit PASSED。
 
 ### 12.1 正式单挑调用链
 

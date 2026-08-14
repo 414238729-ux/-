@@ -17,6 +17,7 @@ from __future__ import annotations
 import dataclasses
 import json
 from pathlib import Path
+import shutil
 from types import MappingProxyType
 
 import pytest
@@ -288,16 +289,36 @@ _DECLARED_INPUTS: tuple[str, ...] = tuple(
 )
 
 
+@pytest.fixture(scope="module")
+def isolated_identity_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """在隔离副本执行全 inventory mutation，绝不临时改写审计仓库。"""
+
+    root = tmp_path_factory.mktemp("r4-identity-root")
+    for path in _implementation_source_files():
+        relative = path.relative_to(REPOSITORY_ROOT)
+        destination = root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(path, destination)
+    return root
+
+
 @pytest.mark.parametrize("relative", _DECLARED_INPUTS, ids=lambda p: p.replace("/", "_"))
-def test_each_declared_input_mutation_changes_identity(relative: str) -> None:
+def test_each_declared_input_mutation_changes_identity(
+    relative: str, isolated_identity_root: Path
+) -> None:
     """inventory 中每个登记文件都必须真正进入 digest。"""
 
-    before = implementation_identity()
-    with _FileMutation(relative) as mutation:
-        mutation.write(mutation.original + b"\n# remediation-4 digest mutation\n")
-        after = implementation_identity()
+    # 隔离复制树避免 Windows 句柄竞争导致真实审计仓库恢复失败。
+    before = implementation_identity(isolated_identity_root)
+    path = isolated_identity_root / relative
+    original = path.read_bytes()
+    try:
+        path.write_bytes(original + b"\n# remediation-4 digest mutation\n")
+        after = implementation_identity(isolated_identity_root)
+    finally:
+        path.write_bytes(original)
     assert after != before
-    assert implementation_identity() == before
+    assert implementation_identity(isolated_identity_root) == before
 
 
 def test_identity_unchanged_on_line_ending_change_of_new_dependency() -> None:
@@ -459,14 +480,19 @@ def test_r3_pre_audit_history_recorded_not_final_reaudit() -> None:
     pre = r3.get("pre_audit", {})
     assert isinstance(pre, dict)
     assert pre.get("conclusion") == "MILESTONE_B_REMEDIATION_3_PRE_AUDIT_FAILED"
-    assert r3["audit_conclusion"] == "NOT_AUDITED_YET"
+    assert r3["audit_conclusion"] == "NO_FINAL_SOL_INDEPENDENT_REAUDIT_PERFORMED"
     assert r3["independent_audit_done"] is False
 
 
-def test_r4_precommit_not_audited_yet() -> None:
+def test_r4_precommit_is_historical_and_final_reaudit_failed() -> None:
     r4 = _checkpoints()["MILESTONE_B_AUDIT_REMEDIATION_4"]
-    assert r4["status"] == "worktree_pending_precommit"
-    assert r4["audit_conclusion"] == "NOT_AUDITED_YET"
-    assert r4["independent_audit_done"] is False
+    assert r4["commit"] == "3df02b5cfae9af436ba77d8f1c19a7b9959022b1"
+    assert r4["audit_conclusion"] == "MILESTONE_B_REMEDIATION_4_FINAL_REAUDIT_FAILED"
+    assert r4["independent_audit_done"] is True
+    development = _manifest()["git"]["current_milestone_b_development"]
+    snapshot = development["historical_candidate_formation_snapshots"]["remediation_4"]
+    assert "HISTORICAL" in snapshot["layer"]
+    assert snapshot["worktree_state_at_formation"] == "PRECOMMIT"
+    assert snapshot["independent_reaudit_status_at_formation"] == "NOT_AUDITED_YET"
     text = json.dumps(_manifest(), ensure_ascii=False)
     assert "MILESTONE_B_AUDIT_REMEDIATION_4_REAUDIT_PASSED" not in text

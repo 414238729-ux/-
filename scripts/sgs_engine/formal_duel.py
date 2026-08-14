@@ -1096,10 +1096,41 @@ def _is_sha256_hex(value: object) -> bool:
 
 FORMAL_SIMULATION_TRANSITIVE_INPUT_INVENTORY: tuple[str, ...] = (
     # 生产引擎源码（scripts/sgs_engine/**/*.py 由 _implementation_source_files
-    # 动态收集）；以下为引擎目录之外、正式模拟真实运行时读取的语义依赖的
-    # explicit enumerated inventory。本清单是人工维护的显式清单，不宣称
-    # “自动覆盖全部 transitive imports/data dependencies”——新增正式
-    # 运行时依赖必须显式登记（remediation-4，R3-NEW-002）。
+    # 动态收集）；以下为引擎目录之外、正式模拟 fresh process 启动或运行时
+    # 真实执行/读取的语义依赖的 explicit enumerated inventory。Python 在
+    # 导入 scripts.* 正式入口前会先执行 scripts/__init__.py，因此该父包
+    # initializer 及其当前 eager local import 闭包也必须显式登记。清单是
+    # 人工维护的显式清单，不宣称“自动覆盖全部 transitive imports/data
+    # dependencies”——新增或移除正式运行时依赖必须同步登记并测试
+    # （remediation-4 R3-NEW-002；remediation-5 R4-NEW-001）。
+    "scripts/__init__.py",
+    "scripts/card_draw.py",
+    "scripts/damage.py",
+    "scripts/monte_carlo.py",
+    "scripts/ranking.py",
+    "scripts/sgs_ai_strategy_v22.py",
+    "scripts/sgs_ai_strategy_v24.py",
+    "scripts/sgs_card_rules.py",
+    "scripts/sgs_card_strategy.py",
+    "scripts/sgs_chain_strategy.py",
+    "scripts/sgs_extended_rules.py",
+    "scripts/sgs_focus_strategy.py",
+    "scripts/sgs_general_ai_v21.py",
+    "scripts/sgs_general_rules.py",
+    "scripts/sgs_general_strategy.py",
+    "scripts/sgs_incremental_generals.py",
+    "scripts/sgs_incremental_mechanics.py",
+    "scripts/sgs_jink_response.py",
+    "scripts/sgs_limited_identity_variant.py",
+    "scripts/sgs_mode_evaluation.py",
+    "scripts/sgs_modes.py",
+    "scripts/sgs_skill_framework.py",
+    "scripts/sgs_special_general_rules.py",
+    "scripts/sgs_structured_data.py",
+    "scripts/sgs_team_strategy.py",
+    "scripts/sgs_v24_generals.py",
+    "scripts/summary.py",
+    "scripts/trigger.py",
     "scripts/sgs_engine_gate.py",
     "scripts/sgs_formal_runner.py",
     "scripts/sgs_formal_milestone_b_acceptance.py",
@@ -1114,10 +1145,12 @@ FORMAL_SIMULATION_TRANSITIVE_INPUT_INVENTORY: tuple[str, ...] = (
 def _implementation_source_files(root: Path | None = None) -> tuple[Path, ...]:
     """返回 explicit enumerated 正式模拟依赖清单的文件集合（按路径排序）。
 
-    remediation-3（MB-B-001）修复 + remediation-4（R3-NEW-002）补齐：
+    remediation-3（MB-B-001）修复 + remediation-4（R3-NEW-002）+
+    remediation-5（R4-NEW-001）补齐：
     identity 覆盖当前已确认的正式模拟语义输入——生产引擎源码、formal
     duel 源码、runner/gate 语义代码、card registry、deck source/data
-    （scripts/deck_data.py）、deck 加载校验 helper（scripts/_validation.py）、
+    （scripts/deck_data.py）、父包 initializer 及其 fresh-process eager local
+    import 闭包、deck 加载校验 helper（scripts/_validation.py）、
     identity 归一化 helper（scripts/sgs_hash_inventory.py）、牌堆 CSV 与
     结构化卡牌/规则 CSV（其中含武器攻击范围，青龙偃月刀攻击范围变化必须
     改变 identity）。接受方（acceptance artifact）、可变 CURRENT docs、

@@ -17,7 +17,6 @@ from __future__ import annotations
 import copy
 import dataclasses
 import json
-import re
 from pathlib import Path
 
 import pytest
@@ -643,12 +642,15 @@ def _manifest() -> dict[str, object]:
 def test_manifest_current_milestone_b_state_consistent() -> None:
     manifest = _manifest()
     dev = manifest["git"]["current_milestone_b_development"]
-    # CURRENT LIVE 分层必须存在且不能是 commit=null/pending。
-    current = dev.get("current_live", {})
-    assert current.get("branch") == "sol-ultra-milestone-b-formal-duel"
-    assert re.fullmatch(r"[0-9a-f]{40}", str(current.get("head")))
-    assert current.get("commit_status") == "committed"
-    assert current.get("worktree_commit_pending") is False
+    # remediation-5：持久状态不再保存会在 commit/checkout 后立即陈旧的
+    # HEAD/worktree scalar；LIVE GIT STATE 必须现场派生。
+    persisted = dev.get("persisted_project_state", {})
+    assert persisted.get("layer") == "PERSISTED PROJECT STATE"
+    assert "head" not in persisted
+    assert "worktree_commit_pending" not in persisted
+    live_policy = dev.get("live_git_state_policy", {})
+    assert live_policy.get("source") == "runtime_derived"
+    assert live_policy.get("persisted") is False
     # R1/R2 已审计失败，不得再写 NOT_AUDITED_YET。
     checkpoints = manifest["checkpoints"]
     by_id = {
@@ -660,11 +662,15 @@ def test_manifest_current_milestone_b_state_consistent() -> None:
     assert r2["commit"] == "0793c819ad45cc21328fad7d8afa6882d6197613"
     assert r2["audit_conclusion"] == "MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED"
     assert r2["worktree_commit_pending"] is False
-    # R3 当前只能 NOT_AUDITED_YET（工作树 precommit）。
+    # R3 的 PRECOMMIT/NOT_AUDITED_YET 只能是历史候选形成快照；真实固定
+    # pre-audit target 为 5d970560...，且没有 Sol final re-audit。
     r3 = by_id["MILESTONE_B_AUDIT_REMEDIATION_3"]
-    assert r3["status"] == "worktree_pending_precommit"
+    assert r3["commit"] == "5d970560e306b84af518798e11db12c2a42dfc44"
     assert r3["independent_audit_done"] is False
-    assert r3["audit_conclusion"] == "NOT_AUDITED_YET"
+    assert r3["audit_conclusion"] == "NO_FINAL_SOL_INDEPENDENT_REAUDIT_PERFORMED"
+    snapshot = dev["historical_candidate_formation_snapshots"]["remediation_3"]
+    assert "HISTORICAL" in snapshot["layer"]
+    assert snapshot["independent_reaudit_status_at_formation"] == "NOT_AUDITED_YET"
 
 
 def test_manifest_no_r3_passed_claim() -> None:
@@ -686,7 +692,7 @@ def test_manifest_current_scope_flags_unique_and_correct() -> None:
     assert feature_status["formal_duel_duel_scope_all_cards_sufficient"] is True
 
 
-def test_four_docs_current_remediation_3_state() -> None:
+def test_four_docs_preserve_remediation_history_without_future_pass_claim() -> None:
     for name in (
         "ENGINE_STATUS.md",
         "IMPLEMENTATION_MATRIX.md",
@@ -694,6 +700,7 @@ def test_four_docs_current_remediation_3_state() -> None:
         "MILESTONE_B_DEPENDENCY_GRAPH.md",
     ):
         text = (REPOSITORY_ROOT / "docs" / name).read_text(encoding="utf-8")
-        assert "MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED" in text, name
-        assert "NOT_AUDITED_YET" in text, name
+        assert "MILESTONE_B_REMEDIATION_4_FINAL_REAUDIT_FAILED" in text, name
+        assert "NOT_YET_PERFORMED" in text, name
+        assert "PERSISTED PROJECT STATE" in text, name
         assert "MILESTONE_B_REMEDIATION_3_REAUDIT_PASSED" not in text, name

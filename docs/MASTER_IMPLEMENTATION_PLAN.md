@@ -1,6 +1,35 @@
 # 三国杀统一模拟项目总实施计划
 
-## MILESTONE_B 当前推进状态（2026-08-14，CURRENT）
+## MILESTONE_B 持久化项目状态（2026-08-14，PERSISTED PROJECT STATE）
+
+R4 已形成冻结审计 target
+`3df02b5cfae9af436ba77d8f1c19a7b9959022b1`，parent=
+`5d970560e306b84af518798e11db12c2a42dfc44`。R4 Sol final independent
+re-audit 结论为 `MILESTONE_B_REMEDIATION_4_FINAL_REAUDIT_FAILED`；只因新发现
+R4-NEW-001/R4-NEW-002 两项 MINOR。R3-NEW-001/002/003 与 DOC-OBS-001
+均 CLOSED，不得因 R4-NEW-001 的新 package initializer 漏项将 R3-NEW-002
+回写为 OPEN。initial independent audit=FAILED、R1=FAILED、R2=FAILED、
+R3 pre-audit=FAILED、R4 final re-audit=FAILED 保持不变。
+
+R5 从上述固定 R4 target 的历史基线开始；持久化状态仅为
+`independent_audit_done=false`、`audit_conclusion=NOT_YET_PERFORMED`。不写未来
+commit SHA，不把 precommit worktree 状态当作 persistent current。
+
+R4 形成时的 `PRECOMMIT`、`NOT_AUDITED_YET`、`commit=null`、
+worktree pending 是 HISTORICAL R4 CANDIDATE FORMATION SNAPSHOT。LIVE GIT STATE
+（branch/HEAD/parent/clean/unmerged）由审计时 Git 命令 runtime-derived，不签入为
+`CURRENT LIVE`。
+
+`A committed documentation snapshot must not require knowing the SHA of the commit that contains the snapshot.`
+
+`A precommit Git worktree state must never be labelled persistent CURRENT state.`
+
+R5 implementation identity 修复范围为：在 explicit enumerated dependency
+inventory 中加入 `scripts/__init__.py` 及它在当前正式 package import
+路径中 eager 执行的 28 项 local-import 闭包。该清单是人工显式 inventory，
+不是自动完整 transitive closure；R5 独立复审尚未进行，验证结果仅以实际运行记录为准。
+
+### HISTORICAL R4 CANDIDATE FORMATION SNAPSHOT
 
 本精确目标为 `MILESTONE_B_AUDIT_REMEDIATION_4`：针对
 `MILESTONE_B_REMEDIATION_3_PRE_AUDIT_FAILED`（V4-Pro pre-audit，QA evidence）
@@ -15,13 +44,13 @@ ebd6567...，remediation-1 re-audit branch 冻结于 8ce4970...，remediation-2
 re-audit branch `sol-ultra-audit-milestone-b-remediation-2` 冻结于 0793c819...，
 remediation-3 re-audit branch `sol-ultra-audit-milestone-b-remediation-3`
 冻结于 5d97056...，均未移动。
-【CURRENT LIVE】remediation-1 targeted independent re-audit=
+【HISTORICAL/AS-OF：R4 candidate 形成时记录】remediation-1 targeted independent re-audit=
 MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED；remediation-2 targeted independent
 re-audit=MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED（MB-B-001 BLOCKING／
 MB-M-005 MAJOR／MB-M-009 MAJOR／MB-M-010 MAJOR／R2-NEW-001 MINOR）；
 R3 V4-Pro pre-audit=`MILESTONE_B_REMEDIATION_3_PRE_AUDIT_FAILED`（3 MINOR
 new findings + DOC-OBS-001；QA evidence，不是 Sol Ultra final independent
-re-audit）；Remediation 4 工作树本地修复中：
+re-audit）；Remediation 4 当时工作树本地修复中：
 remediation_4_worktree_state=PRECOMMIT、
 independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET，不预写 R4
 PASSED；提交后由用户产生新的 Git SHA，下一轮审计以 Git 身份为准。
@@ -89,17 +118,17 @@ session secrets）：winner/action_count/final canonical hash mismatch 均为 0�
 R3 将再次重新运行（见 docs/CHECKPOINT_MANIFEST.json 新增 checkpoint 的
 `final_verification`）。
 
-独立审计状态（CURRENT）：R1 re-audit FAILED、R2 re-audit FAILED；R3 V4-Pro
+独立审计状态（HISTORICAL/AS-OF：R4 candidate 形成时）：R1 re-audit FAILED、R2 re-audit FAILED；R3 V4-Pro
 pre-audit=`MILESTONE_B_REMEDIATION_3_PRE_AUDIT_FAILED`（QA evidence）；
-Remediation 4 尚未 pre-audit（`independent_audit_done=false`、
+Remediation 4 在该历史快照中尚未 pre-audit（`independent_audit_done=false`、
 `audit_conclusion=NOT_AUDITED_YET`、remediation_4_worktree_state=PRECOMMIT、
-`milestone_tag=null`），本轮不预写独立 reaudit PASSED；当前结论：
+`milestone_tag=null`），当时不预写独立 reaudit PASSED；当时结论：
 `MILESTONE_B_AUDIT_REMEDIATION_4_PRECOMMIT_READY`（本地关闭，待 pre-audit，
-以本轮最终验证为准）。
+以当时最终验证为准）。
 
 下方正文保留既有阶段、检查点、提交、测试与封存审计历史。凡旧快照（含
 
-`unsupported_rules=2`、acceptance=0 等）与本节 live 状态冲突，均为
+`unsupported_rules=2`、acceptance=0 等）与上方 persisted project state 冲突，均为
 HISTORICAL/AS-OF 或 PRE-AUDIT SNAPSHOT，按原检查点时间解释；本节不改写
 original=`WHOLE_REPO_AUDIT_FAILED`、R1–R5 FAILED、
 R6=`REMEDIATION_6_REAUDIT_PASSED` 或 finalization correction
