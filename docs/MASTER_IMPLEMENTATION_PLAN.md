@@ -11,9 +11,12 @@ R4-NEW-001/R4-NEW-002 两项 MINOR。R3-NEW-001/002/003 与 DOC-OBS-001
 回写为 OPEN。initial independent audit=FAILED、R1=FAILED、R2=FAILED、
 R3 pre-audit=FAILED、R4 final re-audit=FAILED 保持不变。
 
-R5 从上述固定 R4 target 的历史基线开始；持久化状态仅为
-`independent_audit_done=false`、`audit_conclusion=NOT_YET_PERFORMED`。不写未来
-commit SHA，不把 precommit worktree 状态当作 persistent current。
+R5 从上述固定 R4 target 的历史基线开始；R5 已由 Sol final independent
+re-audit 复审：`MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED`
+（R4-NEW-001=CLOSED、唯一未关闭项 R4-NEW-002）。R6 候选
+（`MILESTONE_B_AUDIT_REMEDIATION_6`）尚未独立复审
+（`NOT_YET_PERFORMED`）。不写未来 commit SHA，不把 precommit worktree 状态当作
+persistent current。
 
 R4 形成时的 `PRECOMMIT`、`NOT_AUDITED_YET`、`commit=null`、
 worktree pending 是 HISTORICAL R4 CANDIDATE FORMATION SNAPSHOT。LIVE GIT STATE

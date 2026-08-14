@@ -17,15 +17,16 @@
       "persisted_project_state": {
         "layer": "PERSISTED PROJECT STATE",
         "formal_duel_capability": "formal 160-card no-skill two-player duel only",
-        "latest_completed_independent_reaudit": "MILESTONE_B_REMEDIATION_4_FINAL_REAUDIT_FAILED",
-        "next_candidate": "MILESTONE_B_AUDIT_REMEDIATION_5",
+        "latest_completed_independent_reaudit": "MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED",
+        "next_candidate": "MILESTONE_B_AUDIT_REMEDIATION_6",
         "next_candidate_independent_reaudit": "NOT_YET_PERFORMED",
         "historical_audit_chain": [
           "MILESTONE_B_INITIAL_INDEPENDENT_AUDIT_FAILED",
           "MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED",
           "MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED",
           "MILESTONE_B_REMEDIATION_3_PRE_AUDIT_FAILED",
-          "MILESTONE_B_REMEDIATION_4_FINAL_REAUDIT_FAILED"
+          "MILESTONE_B_REMEDIATION_4_FINAL_REAUDIT_FAILED",
+          "MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED"
         ],
         "r3_finding_status": {
           "R3-NEW-001": "CLOSED",
@@ -34,9 +35,11 @@
           "DOC-OBS-001": "CLOSED"
         },
         "r4_open_findings": [
-          "R4-NEW-001",
           "R4-NEW-002"
         ],
+        "r4_closed_findings": {
+          "R4-NEW-001": "CLOSED"
+        },
         "implementation_identity_policy": "Explicit enumerated production dependency inventory; docs, manifest and acceptance artifacts are excluded; no automatic transitive-closure claim."
       },
       "historical_candidate_formation_snapshots": {
@@ -47,6 +50,19 @@
           "base_commit": "4c8c4466f1950740c69767a01a0b24cab723b310",
           "worktree_state_at_formation": "PRECOMMIT",
           "candidate_commit_at_formation": null
+        },
+        "remediation_1": {
+          "layer": "HISTORICAL/AS-OF R1 CANDIDATE FORMATION PRECOMMIT SNAPSHOT",
+          "as_of": "2026-08-11",
+          "objective": "MILESTONE_B_AUDIT_REMEDIATION_1",
+          "branch_at_formation": "sol-ultra-milestone-b-formal-duel",
+          "base_commit": "ebd656754ed2a528e0d08cd5175b68385fdb8140",
+          "audit_branch_at_formation": "sol-ultra-audit-milestone-b-formal-duel",
+          "audit_branch_frozen_at": "ebd656754ed2a528e0d08cd5175b68385fdb8140",
+          "git_writes_performed": false,
+          "worktree_state_at_formation": "PRECOMMIT",
+          "candidate_commit_at_formation": null,
+          "candidate_commit_status_at_formation": "pending"
         },
         "remediation_3": {
           "layer": "HISTORICAL/AS-OF R3 CANDIDATE FORMATION PRECOMMIT SNAPSHOT",
@@ -72,6 +88,17 @@
           "branch_at_start": "sol-ultra-milestone-b-formal-duel",
           "base_commit": "3df02b5cfae9af436ba77d8f1c19a7b9959022b1",
           "note": "固定起点事实；不表示提交后的实时 HEAD，也不是未来 R5 commit SHA。"
+        },
+        "remediation_6": {
+          "layer": "HISTORICAL/AS-OF R6 CANDIDATE FORMATION PRECOMMIT SNAPSHOT",
+          "as_of": "2026-08-14",
+          "branch_at_formation": "sol-ultra-milestone-b-formal-duel",
+          "base_commit": "c283aa4e049b9a0dc728735d5695302c346901c7",
+          "parent_commit_at_formation": "3df02b5cfae9af436ba77d8f1c19a7b9959022b1",
+          "note": "固定起点事实；不表示提交后的实时 HEAD，也不是未来 R6 commit SHA。",
+          "worktree_state_at_formation": "PRECOMMIT",
+          "candidate_commit_at_formation": null,
+          "independent_reaudit_status_at_formation": "NOT_AUDITED_YET"
         }
       },
       "live_git_state_policy": {
@@ -150,17 +177,7 @@
     "wr_audit_remediation_5_worktree_branch": "deepseek-whole-repo-audit-remediation-5",
     "wr_audit_remediation_5_worktree_branch_note": "本批（整仓敌对式总审计定向修复第五轮/单点最终收尾，WHOLE_REPO_AUDIT_REMEDIATION_5）实现所在分支；基线/R4文档收口提交 bf5d83c4b1fa0cecb1994d918f66eb82387b4f99（docs: record fourth whole-repo audit remediation checkpoint）；实现提交 2c28cf0404f4b7bbc0752fa75594580fafef1256（docs: resolve final audit status contradiction，父提交 bf5d83c...）已由用户在外部PowerShell创建；checkpoint 文档提交尚未产生，不得虚构提交哈希；独立 re-audit 尚未进行（NOT_AUDITED_YET）。",
     "wr_audit_remediation_6_worktree_branch": "deepseek-whole-repo-audit-remediation-6",
-    "wr_audit_remediation_6_worktree_branch_note": "本批（整仓敌对式总审计定向修复第六轮/manifest-only 单字段治理收尾，WHOLE_REPO_AUDIT_REMEDIATION_6）实现所在分支；基线/R5文档收口提交 f83848881e6f1ff03621f5383b00f3580d230283（docs: record fifth whole-repo audit remediation checkpoint）；实现提交 2a075580484fadf3a2e4b7b76f4e4ad918af66e3（docs: normalize G-002 machine-readable audit state，父提交 f838488...）已由用户在外部PowerShell创建；【HISTORICAL/AS-OF：这是 R6 implementation commit 后、R6 checkpoint/re-audit 尚未发生时的工作树快照——checkpoint 文档提交尚未产生，不得虚构提交哈希；独立 re-audit 尚未进行（NOT_AUDITED_YET）。CURRENT LIVE REF：R6 checkpoint 后已进行 independent targeted re-audit，结论 REMEDIATION_6_REAUDIT_PASSED；最终 audit_result_commit=0e023694df7ea123c41c2b415784532c9d185d26；worktree_commit_pending=false。】",
-    "milestone_b_audit_remediation_1": {
-      "objective": "MILESTONE_B_AUDIT_REMEDIATION_1",
-      "branch": "sol-ultra-milestone-b-formal-duel",
-      "start_head": "ebd656754ed2a528e0d08cd5175b68385fdb8140",
-      "audit_branch": "sol-ultra-audit-milestone-b-formal-duel",
-      "audit_branch_frozen_at": "ebd656754ed2a528e0d08cd5175b68385fdb8140",
-      "git_writes_performed": false,
-      "commit": null,
-      "commit_status": "pending"
-    }
+    "wr_audit_remediation_6_worktree_branch_note": "本批（整仓敌对式总审计定向修复第六轮/manifest-only 单字段治理收尾，WHOLE_REPO_AUDIT_REMEDIATION_6）实现所在分支；基线/R5文档收口提交 f83848881e6f1ff03621f5383b00f3580d230283（docs: record fifth whole-repo audit remediation checkpoint）；实现提交 2a075580484fadf3a2e4b7b76f4e4ad918af66e3（docs: normalize G-002 machine-readable audit state，父提交 f838488...）已由用户在外部PowerShell创建；【HISTORICAL/AS-OF：这是 R6 implementation commit 后、R6 checkpoint/re-audit 尚未发生时的工作树快照——checkpoint 文档提交尚未产生，不得虚构提交哈希；独立 re-audit 尚未进行（NOT_AUDITED_YET）。CURRENT LIVE REF：R6 checkpoint 后已进行 independent targeted re-audit，结论 REMEDIATION_6_REAUDIT_PASSED；最终 audit_result_commit=0e023694df7ea123c41c2b415784532c9d185d26；worktree_commit_pending=false。】"
   },
   "feature_status": {
     "authoritative_core_foundation": true,
@@ -576,7 +593,7 @@
       "independent_audit_done": true,
       "audit_conclusion": "REMEDIATION_REAUDIT_FAILED",
       "milestone_tag": null,
-      "worktree_commit_pending": true,
+      "worktree_commit_pending": false,
       "evidence": "scripts/sgs_engine/production_batch.py、scripts/sgs_engine/production_cards.py、scripts/sgs_engine/__init__.py、tests/test_sgs_production_weapon_skills.py、tests/test_sgs_production_mount_distance.py、knowledge/三国杀卡牌效果.md；整仓敌对式总审计定向修复批次",
       "scope": "formal；G-001死亡座次距离修复（alive-seat ring、dead target拒绝）、麒麟弓时序修正（Qilin先于HP扣减/DAMAGE）、丈八统一fail-closed（不再split-brain）、G-004/G-005 live docs/comments清理；不构成完整多人生产证明、正式单挑完成或里程碑B完成",
       "implementation_commit": "f1731b95199165a3449f1a0ce84d9facfc1b41c5",
@@ -611,7 +628,7 @@
       "independent_audit_done": true,
       "audit_conclusion": "REMEDIATION_2_REAUDIT_FAILED",
       "milestone_tag": null,
-      "worktree_commit_pending": true,
+      "worktree_commit_pending": false,
       "evidence": "scripts/sgs_engine/production_batch.py、scripts/sgs_engine/production_cards.py、scripts/sgs_engine/__init__.py、tests/test_sgs_production_weapon_skills.py、tests/test_sgs_production_mount_distance.py、knowledge/三国杀卡牌效果.md、knowledge/三国杀基础术语与通用机制.md、knowledge/三国杀武将规则补充.md、knowledge/三国杀牌堆数据.csv、knowledge/三国杀卡牌结构化数据.csv；整仓敌对式总审计定向修复第二轮",
       "scope": "formal；G-001 dead-self 统一fail-closed、R1-NEW-001 Qilin resolved final amount 跨pending保存、R1-NEW-002 Qinggang cleanup 绑定真正damage completion、G-003丈八fail-closed保持、G-004/G-005清理、【杀】family通则与8项游戏内正式文本source同步、G-002本地source gap清零（HISTORICAL/AS-OF：R2 实现完成、独立 re-audit 尚未发生时本地状态为 G-002_SOURCE_GAP_LOCALLY_RESOLVED_PENDING_INDEPENDENT_REAUDIT；CURRENT：R2 targeted independent re-audit 已确认 G-002=CLOSED）；不构成完整多人生产证明、正式单挑完成或里程碑B完成",
       "implementation_commit": "e63b40ac1690e03315fd3e0734d5723fb80d5182",
@@ -647,7 +664,7 @@
       "independent_audit_done": true,
       "audit_conclusion": "REMEDIATION_3_REAUDIT_FAILED",
       "milestone_tag": null,
-      "worktree_commit_pending": true,
+      "worktree_commit_pending": false,
       "evidence": "scripts/sgs_engine/production_batch.py、scripts/sgs_engine/production_cards.py、tests/test_sgs_production_weapon_skills.py、tests/test_sgs_production_turn_cycle_discard.py、docs/CHECKPOINT_MANIFEST.json、docs/ENGINE_STATUS.md、docs/IMPLEMENTATION_MATRIX.md、docs/MASTER_IMPLEMENTATION_PLAN.md；整仓敌对式总审计定向修复第三轮/最小收尾",
       "scope": "formal；G-004 CP-04L ba64历史引用全部分层为HISTORICAL/AS-OF且current live ref统一fc3df952...（tag未移动）、G-005当前非历史stale清理（Zhuque borrowed/weapon test header/ignore_armor caller/turn-cycle discard header）、R2-NEW-001 weapon_choice annotation统一tuple[str,str]|None（无gameplay变化）；R2已确认CLOSED项（G-001/G-002/G-003/QILIN_TIMING_BUG/R1-NEW-001/R1-NEW-002）保持；不构成完整多人生产证明、正式单挑完成或里程碑B完成",
       "implementation_commit": "9c63496e7f34430d8aff3c23e9afc5b5c4482557",
@@ -683,7 +700,7 @@
       "independent_audit_done": true,
       "audit_conclusion": "REMEDIATION_4_REAUDIT_FAILED",
       "milestone_tag": null,
-      "worktree_commit_pending": true,
+      "worktree_commit_pending": false,
       "evidence": "docs/CHECKPOINT_MANIFEST.json、docs/ENGINE_STATUS.md、docs/IMPLEMENTATION_MATRIX.md、docs/MASTER_IMPLEMENTATION_PLAN.md；整仓敌对式总审计定向修复第四轮/docs-only 治理收尾",
       "scope": "docs-only；G-004 ENGINE_STATUS §8 CP-04L tag-target 漏项修正（ba64 全部 HISTORICAL/AS-OF、current live ref 统一 fc3df952...、tag 未移动）、R3-NEW-001 G-002 状态分层（历史 pending 保留、current G-002=CLOSED）；R3 已确认 CLOSED/NO_REGRESSION 项保持；无 runtime/gameplay 修改；不构成完整多人生产证明、正式单挑完成或里程碑B完成",
       "implementation_commit": "5eb367599e9d7deb26220cfff8b81144d0d88eff",
@@ -719,7 +736,7 @@
       "independent_audit_done": true,
       "audit_conclusion": "REMEDIATION_5_REAUDIT_FAILED",
       "milestone_tag": null,
-      "worktree_commit_pending": true,
+      "worktree_commit_pending": false,
       "evidence": "docs/ENGINE_STATUS.md；整仓敌对式总审计定向修复第五轮/单点最终收尾",
       "scope": "docs-only；R4-NEW-001／R3-NEW-001 residual——ENGINE_STATUS 顶部>状态：总述中 R2 G-002 子句双层分层（HISTORICAL/AS-OF 保留 pending 历史、CURRENT 统一 G-002=CLOSED、R2 整体 REMEDIATION_2_REAUDIT_FAILED 保持）；R4 已确认 CLOSED/STILL_CLOSED/NO_REGRESSION 项保持；无 runtime/gameplay 修改；不构成完整多人生产证明、正式单挑完成或里程碑B完成",
       "implementation_commit": "2c28cf0404f4b7bbc0752fa75594580fafef1256",
@@ -789,14 +806,23 @@
       "status": "committed_pending_audit",
       "commit": "8ce497064fbb4686177cf63cca5265e902037129",
       "commit_note": "【CURRENT LIVE】MILESTONE_B_FORMAL_160_CARD_NO_SKILL_DUEL_ADVANCEMENT 的 Milestone B 推进已由用户随 MILESTONE_B_AUDIT_REMEDIATION_1 实现提交 8ce497064fbb4686177cf63cca5265e902037129 一起提交（该提交同时承载 remediation-1 修复）；本条目 commit=8ce4970...、status=committed_pending_audit、worktree_commit_pending=false、audit_conclusion=REMEDIATION_1_REAUDIT_FAILED（见 MILESTONE_B_AUDIT_REMEDIATION_1 条目）。\n【HISTORICAL/AS-OF（PRECOMMIT SNAPSHOT，2026-08-09 工作树）】本批最初在固定基线 2ed9627ba816e9ab5023bd3017ce7cca90ec0022（feat: advance formal 160-card duel infrastructure）之后完成，当时尚未提交、commit=null/pending。用户新确认规则：①丈八蛇矛材料生命周期 USER_CONFIRMED_RULE（2026-08-09）——HAND→PROCESSING→DISCARD，VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP 已关闭，丈八蛇矛恢复 COMPLETE（global 37/159、duel 38/160）；②formal soldier profile USER_CONFIRMED_PROJECT_FORMAL_PROFILE（2026-08-09）——双方士兵（soldier）无技能、max_hp=4/initial_hp=4/初始手牌4、唯一 DeterministicRNG 先手、DRAW 正常摸2、无手气卡/身份奖励、正式160牌、死亡胜负，effective gender=NONE（雌雄不因“异性”发动）。gender 模型新增 CharacterGender.NONE（无性别有效状态），与资料未确认（None）严格区分。正式100-seed验收（FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE，seeds 0..99、formal profile、analysis_only=false、每局 strict replay reexecution + final_state_hash）100/100 通过、failures=0、safety-cap 0、unsupported 0、approximation 0；artifact=docs/FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE.json。live gate 现场派生：mode_implemented=true、all_cards_implemented=true（duel-scope）、unsupported_rules=0、fixed_seed_acceptance_passed=true、formal_duel_no_skill_ready=true、formal_run_ready=true、blockers=[]。全局门禁保持：authoritative_full_game_core=false（正式整局引擎仍未完成）、multi_player_production_proven=false、unsupported_rules=1（完整整局哨兵）。本地全量验证：pytest 2041 passed（0 failed/0 skipped/0 xfailed）、compileall exit0、source integrity、JSON/SHA/diff-check 通过。Remediation 2 工作树未提交（本轮）；Milestone B 独立审计状态见 MILESTONE_B_AUDIT_REMEDIATION_1 条目（remediation-1 re-audit FAILED，remediation-2 NOT_AUDITED_YET）；未创建 remediation-7。",
-      "independent_audit_done": false,
-      "audit_conclusion": "NOT_AUDITED_YET",
+      "independent_audit_done": true,
+      "audit_conclusion": "REMEDIATION_1_REAUDIT_FAILED",
       "milestone_tag": null,
       "worktree_commit_pending": false,
+      "historical_precommit_snapshot": {
+        "layer": "HISTORICAL/AS-OF PRECOMMIT SNAPSHOT (2026-08-09 worktree)",
+        "baseline_commit_at_formation": "2ed9627ba816e9ab5023bd3017ce7cca90ec0022",
+        "worktree_state_at_formation": "PRECOMMIT",
+        "candidate_commit_at_formation": null,
+        "candidate_commit_status_at_formation": "pending",
+        "independent_audit_done": false,
+        "audit_conclusion": "NOT_AUDITED_YET"
+      },
       "evidence": "docs/MILESTONE_B_DEPENDENCY_GRAPH.md、docs/FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE.json、scripts/sgs_engine/formal_duel.py、scripts/sgs_engine/production_batch.py、scripts/sgs_engine/production_cards.py、scripts/sgs_engine/production_replay.py、scripts/sgs_engine_gate.py、scripts/sgs_formal_runner.py、tests/test_sgs_milestone_b_advancement.py及相关生产测试",
       "scope": "正式160张无技能双人单挑的依赖审计与非规则阻塞推进；不重开或续写WHOLE_REPO_AUDIT_REMEDIATION_1...6，不创建remediation-7，不修改旧审计结论、分支或标签",
       "baseline_commit": "2ed9627ba816e9ab5023bd3017ce7cca90ec0022",
-      "implementation_commit": null,
+      "implementation_commit": "8ce497064fbb4686177cf63cca5265e902037129",
       "checkpoint_commit": null,
       "final_doc_commit": null,
       "audit_gap_fix_commit": null,
@@ -891,7 +917,8 @@
       "worktree_commit_pending": false,
       "generated_on": "2026-08-11",
       "commit_note": "【CURRENT LIVE】MILESTONE_B_AUDIT_REMEDIATION_1：独立敌对式总审计 MILESTONE_B_FORMAL_160_CARD_NO_SKILL_DUEL_INDEPENDENT_ADVERSARIAL_AUDIT 结论为 MILESTONE_B_AUDIT_FAILED（4 BLOCKING／6 MAJOR／3 MINOR，含 RULE_SOURCE_GAP 类共13项 finding）；定向修复实现提交 8ce497064fbb4686177cf63cca5265e902037129（fix: remediate milestone B formal duel audit findings，父提交 ebd656754ed2a528e0d08cd5175b68385fdb8140）已由用户在外部PowerShell提交；审计分支 sol-ultra-audit-milestone-b-formal-duel 冻结于 ebd6567...，remediation-1 re-audit 分支 sol-ultra-audit-milestone-b-remediation-1 冻结于 8ce4970...。修复内容：MB-B-001（acceptance provenance／gate／run 语义：artifact 是缓存报告不是执行凭证，status 不伪装 simulation_executed，run 必须真实执行 0..99 seeds 并生成 v2 artifact，绑定 implementation/rules-profile/deck identity）；MB-B-002（丈八 DYING 生命周期：Slash root finalizer 在闪／伤害／防止／game over 路径统一清理，材料 PROCESSING→DISCARD）；MB-B-003（session secret 确定性：同一 seed 不同 session secret 的决策 ID／acceptance 记录／replay 确定性一致）；MB-B-004（作用域分层：formal_duel_no_skill_ready=true 不等于完整引擎，authoritative_full_game_core=false、multi_player_production_proven=false、milestone_b_complete=false、global_all_cards_implemented=false、duel_scope_all_cards_sufficient=true，方天画戟保持 global PARTIAL）；MB-M-005（trusted provenance 只能由 canonical factory／from_canonical_profile_value 产生，普通 from_dict 与 analysis／untrusted 配置不能自我提升）；MB-M-006（CharacterMetadata.intrinsic_gender＋effective_gender 分离，当前生效性别按 effective 处理）；MB-M-007（事件顺序：闪响应 Jink／cancelled／finalize 顺序与事件契约）；MB-M-008（assert_resolution_invariants／assert_finished_state_invariants 在 replay／acceptance／runner 全程生效）；MB-M-009（正式 run 必须真实执行，禁止用缓存 artifact 冒充现场执行；same seed／different secret 双确定性运行）；MB-M-010（manifest／docs CURRENT 状态分层：blocked／0 seeds 等写 HISTORICAL/AS-OF 与 PRE-AUDIT SNAPSHOT；独立审计状态 independent_audit_done、audit_conclusion 不得预写 reaudit PASSED）；MB-N-011（amount／amount_override 注入防护与测试子类覆写防线）；MB-N-012（authoritative_private 隐私边界）；MB-N-013（隐藏句柄 handle-only 原则与可见性）。【HISTORICAL/AS-OF（PRE-AUDIT SNAPSHOT，2026-08-11）：本条目最初记录于修复工作树，当时 status=worktree_pending、commit=null、independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET；随后实现提交已由用户创建，remediation-1 targeted independent re-audit 结论为 MILESTONE_B_MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED（CURRENT），不得改写为 PASSED；Remediation 2 尚未独立审计（NOT_AUDITED_YET）。】验证证据见 final_verification；machine_state 为修复工作树时的机器状态快照。",
-      "machine_state": {
+      "historical_pre_audit_machine_state": {
+        "layer": "HISTORICAL/AS-OF R1 PRE-AUDIT SNAPSHOT (2026-08-11)",
         "formal_duel_no_skill_ready": true,
         "formal_run_ready": true,
         "duel_scope_all_cards_sufficient": true,
@@ -1028,10 +1055,16 @@
       "checkpoint_id": "MILESTONE_B_AUDIT_REMEDIATION_5",
       "batch_name": "MILESTONE_B_AUDIT_REMEDIATION_5",
       "state_model": "PERSISTED PROJECT STATE",
-      "status": "candidate_pending_independent_reaudit",
-      "independent_reaudit_status": "NOT_YET_PERFORMED",
-      "audit_conclusion": "NOT_YET_PERFORMED",
-      "latest_completed_independent_reaudit": "MILESTONE_B_REMEDIATION_4_FINAL_REAUDIT_FAILED",
+      "status": "independent_reaudit_failed",
+      "independent_audit_done": true,
+      "audit_conclusion": "MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED",
+      "latest_completed_independent_reaudit": "MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED",
+      "closed_findings": {
+        "R4-NEW-001": "CLOSED"
+      },
+      "open_findings": [
+        "R4-NEW-002"
+      ],
       "remediation_scope": [
         "R4-NEW-001",
         "R4-NEW-002"
@@ -1039,7 +1072,7 @@
       "historical_base_reference": "git.current_milestone_b_development.historical_candidate_formation_snapshots.remediation_5_start",
       "candidate_identity_policy": "R5 future commit SHA and live worktree state are runtime-derived and intentionally not persisted.",
       "implementation_note": "R4-NEW-001：FORMAL_SIMULATION_TRANSITIVE_INPUT_INVENTORY 显式纳入 scripts/__init__.py 及其当前 fresh-process eager local import 闭包；保留 Git-normalized SHA-256 与 explicit-not-automatic 依赖模型。R4-NEW-002：持久项目事实、历史候选形成快照、实时 Git 状态三层分离；不再签入无条件 CURRENT HEAD/worktree scalar。",
-      "independent_reaudit_note": "R5 尚未独立复审，不预写 PASSED；提交形成后也无需回填包含本文档的 commit SHA 才能保持本记录为真。",
+      "independent_reaudit_note": "R5 已由 Sol Ultra final independent re-audit 复审：MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED（R4-NEW-001=CLOSED，唯一未关闭项 R4-NEW-002）。R6 尚未独立复审，不预写 R6 PASSED 或未来 R6 commit SHA。",
       "precommit_verification": {
         "layer": "HISTORICAL/AS-OF R5 REMEDIATION PRECOMMIT VERIFICATION",
         "evidence_scope": "R5 implementation worktree verification; not an independent re-audit result and not live Git state",
@@ -1053,6 +1086,22 @@
         "fresh_secret_determinism": "REPRESENTATIVE seed 7，两组 fresh session secret：winner=p2、action_count=162、turn_count=17、canonical final_state_hash=15a584787cd3fc05ea1ab5e04907d0ec5de30362b24abe486159aabf17c6f980；winner/action_count/turn_count/final_state_hash mismatch 全部为 0。",
         "integrity": "strict UTF-8 text files=158、JSON parse=3、U+FFFD/NUL/连续问号损坏=0；SHA-256 inventory 55 entries mismatch=0；root hygiene、git diff --check exit 0、unmerged 为空，均最终现场核验。"
       }
+    },
+    {
+      "checkpoint_id": "MILESTONE_B_AUDIT_REMEDIATION_6",
+      "batch_name": "MILESTONE_B_AUDIT_REMEDIATION_6",
+      "state_model": "PERSISTED PROJECT STATE",
+      "status": "candidate_pending_independent_reaudit",
+      "independent_reaudit_status": "NOT_YET_PERFORMED",
+      "audit_conclusion": "NOT_YET_PERFORMED",
+      "latest_completed_independent_reaudit": "MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED",
+      "remediation_scope": [
+        "R4-NEW-002"
+      ],
+      "historical_base_reference": "git.current_milestone_b_development.historical_candidate_formation_snapshots.remediation_6",
+      "candidate_identity_policy": "R6 future commit SHA and live worktree state are runtime-derived and intentionally not persisted.",
+      "implementation_note": "R4-NEW-002：CHECKPOINT_MANIFEST.json 全部对象按 persisted/historical/live 三层模型治理——branch/head/start_head/commit=null/commit_status=pending/worktree pending 类 Git 状态只出现在显式 HISTORICAL/AS-OF/PRECOMMIT SNAPSHOT 祖先之下；CURRENT 节点只保存持久项目事实；实时 Git 状态保持 runtime-derived、persisted=false。",
+      "independent_reaudit_note": "R6 尚未独立复审，不预写 R6 PASSED；提交形成后也无需回填包含本文档的 commit SHA 才能保持本记录为真。"
     }
   ],
   "final_verification": {
@@ -1064,7 +1113,7 @@
       "xfailed": 0,
       "warning": "无（使用 -p no:cacheprovider 避免 .pytest_cache Windows WinError 5 权限提示）",
       "elapsed_seconds": 3877.37,
-      "note": "MILESTONE_B_AUDIT_REMEDIATION_1 修复后完整 pytest 2052 passed；随后补充 test_formal_seed_sweep 相关后为 2053 passed（0 failed/0 skipped/0 xfailed）。 MILESTONE_B_AUDIT_REMEDIATION_2（2026-08-12）：关闭 MB-B-001（artifact 为缓存报告，static eligibility/cached report validity/live result 三层分离，run 前置不依赖缓存，invalid live results 强制 failed 且 simulation_executed=true 只表示执行已发生）、MB-M-005（TrustedFormalDuelConfiguration 仅内部 canonical factory 产生，普通构造/from_dict/replace/copy/JSON roundtrip/exact canonical values 均不能自我提升）、MB-M-008（FINISHED_TRANSIENT_RUNTIME_FIELDS 完整 inventory，seed 3 自然结束残留修复，52 项负例矩阵）、MB-M-009（fabricated evidence/invalid live results/FINISHED negative matrix/stale cache 不阻塞 live run 等测试）、MB-M-010（docs CURRENT/HISTORICAL-AS-OF/PRECOMMIT-SNAPSHOT 分层）、R1-NEW-001（sha256 清单改为真实64位SHA-256，统一 helper scripts/sgs_hash_inventory.py::git_normalized_sha256，self_excluded=true）、R1-NEW-002（manifest/SOURCE_AND_CALLCHAIN_AUDIT 编码损坏恢复为正确UTF-8中文）、R1-NEW-003（删除根目录Git warning垃圾文件并增加hygiene回归）。完整 pytest 2118 passed（0 failed/0 skipped/0 xfailed）；FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE 重跑 100/100；正式 runner live 100-seed 路径 status=passed/simulation_executed=true；第二确定性运行（fresh session secrets）winner/action_count/final_state_hash mismatch 全部为 0。Remediation 1 re-audit = MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED 保持；Remediation 2 = NOT_AUDITED_YET。R3（2026-08-13）：完整 pytest 2158 passed；R4（2026-08-14）：完整 pytest 2220 passed（0 failed/0 skipped/0 xfailed，1501.04s；新增 tests/test_sgs_audit_remediation_4.py 62 项 targeted）；R5（2026-08-14）precommit verification：最终完整 pytest 2291 passed（0 failed/0 skipped/0 xfailed/0 warnings；分两段运行 A=1040/3368.28s + B=1251/509.09s，合计 3877.37s），R5 independent re-audit 仍为 NOT_YET_PERFORMED。"
+      "note": "MILESTONE_B_AUDIT_REMEDIATION_1 修复后完整 pytest 2052 passed；随后补充 test_formal_seed_sweep 相关后为 2053 passed（0 failed/0 skipped/0 xfailed）。 MILESTONE_B_AUDIT_REMEDIATION_2（2026-08-12）：关闭 MB-B-001（artifact 为缓存报告，static eligibility/cached report validity/live result 三层分离，run 前置不依赖缓存，invalid live results 强制 failed 且 simulation_executed=true 只表示执行已发生）、MB-M-005（TrustedFormalDuelConfiguration 仅内部 canonical factory 产生，普通构造/from_dict/replace/copy/JSON roundtrip/exact canonical values 均不能自我提升）、MB-M-008（FINISHED_TRANSIENT_RUNTIME_FIELDS 完整 inventory，seed 3 自然结束残留修复，52 项负例矩阵）、MB-M-009（fabricated evidence/invalid live results/FINISHED negative matrix/stale cache 不阻塞 live run 等测试）、MB-M-010（docs CURRENT/HISTORICAL-AS-OF/PRECOMMIT-SNAPSHOT 分层）、R1-NEW-001（sha256 清单改为真实64位SHA-256，统一 helper scripts/sgs_hash_inventory.py::git_normalized_sha256，self_excluded=true）、R1-NEW-002（manifest/SOURCE_AND_CALLCHAIN_AUDIT 编码损坏恢复为正确UTF-8中文）、R1-NEW-003（删除根目录Git warning垃圾文件并增加hygiene回归）。完整 pytest 2118 passed（0 failed/0 skipped/0 xfailed）；FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE 重跑 100/100；正式 runner live 100-seed 路径 status=passed/simulation_executed=true；第二确定性运行（fresh session secrets）winner/action_count/final_state_hash mismatch 全部为 0。Remediation 1 re-audit = MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED 保持；Remediation 2 = NOT_AUDITED_YET。R3（2026-08-13）：完整 pytest 2158 passed；R4（2026-08-14）：完整 pytest 2220 passed（0 failed/0 skipped/0 xfailed，1501.04s；新增 tests/test_sgs_audit_remediation_4.py 62 项 targeted）；R5（2026-08-14）precommit verification：最终完整 pytest 2291 passed（0 failed/0 skipped/0 xfailed/0 warnings；分两段运行 A=1040/3368.28s + B=1251/509.09s，合计 3877.37s），R5 independent re-audit 已进行且结论为 MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED（R4-NEW-001=CLOSED、R4-NEW-002=OPEN）；R6 尚未独立复审（NOT_YET_PERFORMED）。"
     },
     "compileall": {
       "command": ".\\\\.venv\\\\Scripts\\\\python.exe -m compileall -q scripts tests",
@@ -1907,7 +1956,7 @@
       "unsupported_rules": 1,
       "approximation_count": 0
     },
-    "milestone_b_formal_duel_advancement": {
+    "historical_milestone_b_formal_duel_advancement_precommit_snapshot": {
       "status": "blocked_pending_user_rule_confirmation",
       "baseline_commit": "4c8c4466f1950740c69767a01a0b24cab723b310",
       "branch": "sol-ultra-milestone-b-formal-duel",
@@ -2043,13 +2092,13 @@
     }
   },
   "sha256": {
-    "docs/ENGINE_STATUS.md": "7f94296d5e05ff16dec3fc9336811cae739ee040f25f5f51ea2c0ee9d5c37858",
-    "docs/IMPLEMENTATION_MATRIX.md": "a6e8fe741b99ba40626d5613a773d6955fed090ad41cfda525f907ab2521c2ee",
+    "docs/ENGINE_STATUS.md": "00081c507adc9b2d9fab6ca20e2f4494adf76e5aad5795e7414ee12febfe2044",
+    "docs/IMPLEMENTATION_MATRIX.md": "eaed1f77bf0986e6c5162957da57308f24f9d6305951347e28e34b72cc5e6e1b",
     "docs/LEGACY_RESULTS_INVALID.md": "267d51329b65b4435ed770b9fe90a0d53148d17cc9b0dae3e6d3406b06c0c0cc",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "70f52435308f3fb46a4b9b1ffaf5b4b150194fc5206bfb9f082be608415ed63f",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "fa15f655a8fcaf9aed910363f9b263bed6a6e7fbb4c5f007e1b15d30e6f56bc4",
     "docs/MILESTONE_B_ANALYSIS_SEED_DIAGNOSTIC.json": "a70ae21cbcfd6f2257dbeeb0f167dcc09dee47cd73fb616e2a6a71f2c18054cf",
-    "docs/MILESTONE_B_DEPENDENCY_GRAPH.md": "63f792433a62f25b060755f8e63766d2c548f36fe2e855bf424c6b5a579d128f",
-    "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "afb58d64fa8ee73b8342cd02f82c0ed22eff182b6ad85955b68073fbaedc9351",
+    "docs/MILESTONE_B_DEPENDENCY_GRAPH.md": "58775c4c6704f42e40c17afae6b4292bbb524319ca8a65024fc087c9437979e0",
+    "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "ac34d9ed23a5367f6666573c5e1b55efc7d0266d5089d18d158c7ffd670501da",
     "knowledge/三国杀卡牌效果.md": "6bdeedccad12d3a16fc4d9663aec98f7546bc5dadc42ec66a74eb9b3aa470989",
     "knowledge/三国杀牌堆数据.csv": "e490631698e6b7695c6a9b3ad0c355e421ccfafab696e5b3a97418c9ec80f38b",
     "scripts/sgs_dev_runner.py": "6f88baa78fc9c22106188defda7190cd2a4412325db46f3964d217fd0e61c755",
@@ -2090,14 +2139,15 @@
     "tests/test_sgs_production_turn_cycle_discard.py": "cc64a178cd4dea4ede6a614c4502fb6e5eb065a7c2718e9ddd797743dec23646",
     "tests/test_sgs_production_weapon_skills.py": "192f3a304e5e0d8efeb9542555f1286fa5d992136cfc1a1ba7e94b9e64deec2e",
     "tests/test_sgs_production_zone_target_tricks.py": "16cf70dfd8c8dbe88486fbedccf25fb0fb89270cf2ffcaf6c264b8602403bef2",
-    "hash_note": "本表为持久化项目文件的 canonical SHA-256 清单（64位小写十六进制；规范：UTF-8原始内容、去除UTF-8 BOM、CRLF统一为LF后计算，统一helper=scripts/sgs_hash_inventory.py::git_normalized_sha256，R1-NEW-001）。docs/CHECKPOINT_MANIFEST.json 自身不进入本表（self_excluded=true），避免自引用不可能条件；本表不持久化 live Git HEAD/worktree。2026-08-14 MILESTONE_B_AUDIT_REMEDIATION_5 重算：新增 tests/test_sgs_audit_remediation_3.py、tests/test_sgs_audit_remediation_5.py，更新 formal identity 源码、五份状态文档与正式 acceptance artifact；所有登记文件最终现场重算必须 mismatch=0。",
+    "hash_note": "本表为持久化项目文件的 canonical SHA-256 清单（64位小写十六进制；规范：UTF-8原始内容、去除UTF-8 BOM、CRLF统一为LF后计算，统一helper=scripts/sgs_hash_inventory.py::git_normalized_sha256，R1-NEW-001）。docs/CHECKPOINT_MANIFEST.json 自身不进入本表（self_excluded=true），避免自引用不可能条件；本表不持久化 live Git HEAD/worktree。2026-08-14 MILESTONE_B_AUDIT_REMEDIATION_6 重算：新增 tests/test_sgs_audit_remediation_6.py，更新 tests/test_sgs_audit_remediation_5.py 与五份状态文档；所有登记文件最终现场重算必须 mismatch=0。",
     "scripts/sgs_formal_milestone_b_acceptance.py": "3fdd0ec9ca135c977722f9f028eee42c11497940a5557b45e24dd7f14bc41ed4",
     "tests/test_sgs_milestone_b_advancement.py": "3d4f626e1f409a1894719615553950d6f908c52abd74f6fb6c45c3ff60631732",
     "scripts/_validation.py": "7c56f865fc3a7d72850c80717e37d7f3aa2a11e3ea0d2b9fb1094fd768bdefc1",
     "scripts/sgs_hash_inventory.py": "c6502cccfbb2d71d9474f2c448da66d522705443cedeb9446b57753fdc2b4400",
     "tests/test_sgs_audit_remediation_3.py": "db5a36ea3d9831503ac4095973e21ad4b25dfd43eb0359a54e1e67433e4095c0",
     "tests/test_sgs_audit_remediation_4.py": "dd0fe3e15d18b155d34f909287938402750d875722bbbd7c4bf69b5e671d6356",
-    "tests/test_sgs_audit_remediation_5.py": "9eddecfddab845d328f7594775140c2543ea610ac67411092460d21f69ab54e3",
+    "tests/test_sgs_audit_remediation_5.py": "c6712cd53876770a78abdd18cecc9f988fba7fb56fc0ae87f6a17f3aefa57ee8",
+    "tests/test_sgs_audit_remediation_6.py": "febfefb6cd492701fbdae38fe8e5772e48e8ba000c44171b066023fccf3d9c7a",
     "docs/FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE.json": "8fb694713f68f4da7e1f1b07e266168c476c7b1d14daa436b79b03c7b6f1c695",
     "self_excluded": true
   },

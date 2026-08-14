@@ -351,7 +351,7 @@ def test_dependency_graph_persisted_table_has_no_live_git_scalars() -> None:
     assert "起点 unmerged 核对" in historical
 
 
-def test_r4_failed_history_and_r5_not_yet_audited() -> None:
+def test_r4_failed_history_r5_failed_and_r6_not_yet_audited() -> None:
     checkpoints = _checkpoints()
     r4 = checkpoints["MILESTONE_B_AUDIT_REMEDIATION_4"]
     assert r4["commit"] == "3df02b5cfae9af436ba77d8f1c19a7b9959022b1"
@@ -366,9 +366,19 @@ def test_r4_failed_history_and_r5_not_yet_audited() -> None:
     }
 
     r5 = checkpoints["MILESTONE_B_AUDIT_REMEDIATION_5"]
-    assert r5["independent_reaudit_status"] == "NOT_YET_PERFORMED"
-    assert r5["audit_conclusion"] == "NOT_YET_PERFORMED"
+    assert r5["independent_audit_done"] is True
+    assert r5["audit_conclusion"] == "MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED"
+    assert r5["closed_findings"] == {"R4-NEW-001": "CLOSED"}
+    assert r5["open_findings"] == ["R4-NEW-002"]
     assert _all_keys(r5).isdisjoint(
+        {"head", "current_head", "commit", "worktree_commit_pending", "worktree_state"}
+    )
+
+    r6 = checkpoints["MILESTONE_B_AUDIT_REMEDIATION_6"]
+    assert r6["independent_reaudit_status"] == "NOT_YET_PERFORMED"
+    assert r6["audit_conclusion"] == "NOT_YET_PERFORMED"
+    assert r6["remediation_scope"] == ["R4-NEW-002"]
+    assert _all_keys(r6).isdisjoint(
         {"head", "current_head", "commit", "worktree_commit_pending", "worktree_state"}
     )
 
@@ -386,7 +396,7 @@ def test_commit_sha_independent_documentation_invariants_are_persisted() -> None
     )
 
 
-def test_six_docs_share_persisted_state_and_r5_audit_history() -> None:
+def test_six_docs_share_persisted_state_and_r6_audit_history() -> None:
     for name in (
         "CHECKPOINT_MANIFEST.json",
         "ENGINE_STATUS.md",
@@ -400,5 +410,7 @@ def test_six_docs_share_persisted_state_and_r5_audit_history() -> None:
         assert "HISTORICAL" in text and "R4 CANDIDATE FORMATION" in text, name
         assert "LIVE GIT STATE" in text and "runtime-derived" in text, name
         assert "MILESTONE_B_REMEDIATION_4_FINAL_REAUDIT_FAILED" in text, name
+        assert "MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED" in text, name
+        assert "MILESTONE_B_AUDIT_REMEDIATION_6" in text, name
         assert "R4-NEW-001" in text and "R4-NEW-002" in text, name
         assert "NOT_YET_PERFORMED" in text, name

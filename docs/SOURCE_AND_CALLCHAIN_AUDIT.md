@@ -534,12 +534,13 @@ R3 pre-audit=`MILESTONE_B_REMEDIATION_3_PRE_AUDIT_FAILED`；R4 冻结 target
 R4-NEW-001/R4-NEW-002 两项 MINOR；R3-NEW-001/002/003 与 DOC-OBS-001
 均 CLOSED。
 
-R5 从该固定 R4 target 历史基线开始；持久化审计状态为
-`independent_audit_done=false`、`audit_conclusion=NOT_YET_PERFORMED`，不写未来 SHA。
-R5 implementation identity 范围明确加入 `scripts/__init__.py` 及它在当前
-正式 package import 路径中 eager 执行的 28 项 local-import 闭包。这是
-explicit enumerated dependency inventory，不是自动完整 transitive closure；R5
-独立复审尚未进行，验证结果仅以实际运行记录为准。
+R5 从该固定 R4 target 历史基线开始；R5 已由 Sol final independent re-audit
+复审，结论为 `MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED`（唯一未关闭项
+R4-NEW-002；R4-NEW-001=CLOSED），不写未来 SHA。R5 implementation identity
+范围明确加入 `scripts/__init__.py` 及它在当前正式 package import 路径中 eager
+执行的 28 项 local-import 闭包。这是 explicit enumerated dependency inventory，
+不是自动完整 transitive closure；R6 候选（`MILESTONE_B_AUDIT_REMEDIATION_6`）尚未独立复审（`NOT_YET_PERFORMED`），
+验证结果仅以实际运行记录为准。
 
 【HISTORICAL R4 CANDIDATE FORMATION SNAPSHOT】R4 形成时的
 `PRECOMMIT`、`NOT_AUDITED_YET`、`commit=null`、worktree pending 只表达

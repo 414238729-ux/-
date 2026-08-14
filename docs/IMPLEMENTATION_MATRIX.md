@@ -7,8 +7,10 @@ R4 冻结 target 为 `3df02b5cfae9af436ba77d8f1c19a7b9959022b1`，parent 为
 re-audit=`MILESTONE_B_REMEDIATION_4_FINAL_REAUDIT_FAILED`，仅因
 R4-NEW-001/R4-NEW-002 两项 MINOR；R3-NEW-001/002/003 与 DOC-OBS-001
 均 CLOSED。initial independent audit、R1、R2、R3 与 R4 的 FAILED 历史均保留。
-R5 从该固定 R4 target 历史基线开始，只记
-`independent_audit_done=false`、`audit_conclusion=NOT_YET_PERFORMED`；不写未来 SHA。
+R5 从该固定 R4 target 历史基线开始；R5 已由 Sol final independent re-audit
+复审：`MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED`（R4-NEW-001=CLOSED、
+唯一未关闭项 R4-NEW-002）。R6 候选（`MILESTONE_B_AUDIT_REMEDIATION_6`）尚未独立复审（`NOT_YET_PERFORMED`）；
+不写未来 SHA。
 
 R4 形成时的 `PRECOMMIT`、`NOT_AUDITED_YET`、`commit=null` 是
 HISTORICAL R4 CANDIDATE FORMATION SNAPSHOT，不是 persisted current。

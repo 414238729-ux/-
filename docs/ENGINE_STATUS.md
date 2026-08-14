@@ -13,10 +13,12 @@ R3-NEW-003 与 DOC-OBS-001 在该复审中均为 CLOSED；其中
 R4-NEW-001 是新的父 package initializer 依赖漏项，不得回写成
 R3-NEW-002 仍 OPEN。
 
-R5 只是以上述固定 R4 target 为历史基线的 remediation candidate；
-`independent_audit_done=false`、`audit_conclusion=NOT_YET_PERFORMED`。本文档不写
-R5 未来 commit SHA，也不把 `commit=null`、worktree pending 或 clean/dirty 写成
-persisted current 事实。
+R5 以上述固定 R4 target 为历史基线的 remediation candidate 已完成 Sol final
+independent re-audit：`MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED`
+（R4-NEW-001=CLOSED；唯一未关闭项 R4-NEW-002）。R6 候选
+（`MILESTONE_B_AUDIT_REMEDIATION_6`）尚未独立复审
+（`NOT_YET_PERFORMED`）。本文档不写 R6 未来 commit SHA，也不把 `commit=null`、
+worktree pending 或 clean/dirty 写成 persisted current 事实。
 
 ### HISTORICAL R4 CANDIDATE FORMATION SNAPSHOT
 
