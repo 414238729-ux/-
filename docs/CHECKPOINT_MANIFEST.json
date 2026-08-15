@@ -1,24 +1,15 @@
 {
-  "schema_version": "1.2",
+  "schema_version": "1.3",
   "generated_on": "2026-08-14",
   "git": {
     "available": true,
-    "implementation_branch": "deepseek-single-target-tricks",
-    "implementation_branch_note": "检查点记录时的实现分支，不代表当前运行分支",
-    "baseline_commit": "858d6ced315dfa3df78636528c720c0117fdf3de",
-    "baseline_metadata_commit": "5eac686",
-    "milestone_a_commit": "455685d6eaa1c297e9ec48a0cfaeb803b81f3406",
-    "repository_local_identity": {
-      "name": "Codex Development",
-      "email": "codex-local@example.invalid"
-    },
-    "historical_note": "CP-01至CP-04的原始哈希检查点已收入Git基线；里程碑A另有独立代码提交",
     "current_milestone_b_development": {
       "persisted_project_state": {
+        "state_role": "persisted_current",
         "layer": "PERSISTED PROJECT STATE",
         "formal_duel_capability": "formal 160-card no-skill two-player duel only",
-        "latest_completed_independent_reaudit": "MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED",
-        "next_candidate": "MILESTONE_B_AUDIT_REMEDIATION_6",
+        "latest_completed_independent_reaudit": "MILESTONE_B_REMEDIATION_6_TARGETED_REAUDIT_FAILED",
+        "next_candidate": "MILESTONE_B_AUDIT_REMEDIATION_7",
         "next_candidate_independent_reaudit": "NOT_YET_PERFORMED",
         "historical_audit_chain": [
           "MILESTONE_B_INITIAL_INDEPENDENT_AUDIT_FAILED",
@@ -26,7 +17,8 @@
           "MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED",
           "MILESTONE_B_REMEDIATION_3_PRE_AUDIT_FAILED",
           "MILESTONE_B_REMEDIATION_4_FINAL_REAUDIT_FAILED",
-          "MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED"
+          "MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED",
+          "MILESTONE_B_REMEDIATION_6_TARGETED_REAUDIT_FAILED"
         ],
         "r3_finding_status": {
           "R3-NEW-001": "CLOSED",
@@ -40,10 +32,20 @@
         "r4_closed_findings": {
           "R4-NEW-001": "CLOSED"
         },
-        "implementation_identity_policy": "Explicit enumerated production dependency inventory; docs, manifest and acceptance artifacts are excluded; no automatic transitive-closure claim."
+        "implementation_identity_policy": "Explicit enumerated production dependency inventory; docs, manifest and acceptance artifacts are excluded; no automatic transitive-closure claim.",
+        "audit_history_reference": "git.current_milestone_b_development.audit_history",
+        "r6_finding_status": {
+          "R4-NEW-002": "OPEN",
+          "R6-NEW-001": "OPEN",
+          "R6-NEW-002": "OPEN"
+        }
       },
       "historical_candidate_formation_snapshots": {
+        "state_role": "historical_snapshot",
+        "snapshot_kind": "candidate_formation_snapshot_collection",
         "initial_milestone_b": {
+          "state_role": "historical_snapshot",
+          "snapshot_kind": "candidate_formation_precommit",
           "layer": "HISTORICAL/AS-OF INITIAL MILESTONE B CANDIDATE FORMATION PRECOMMIT SNAPSHOT",
           "as_of": "2026-08-11",
           "branch_at_formation": "sol-ultra-milestone-b-formal-duel",
@@ -52,6 +54,8 @@
           "candidate_commit_at_formation": null
         },
         "remediation_1": {
+          "state_role": "historical_snapshot",
+          "snapshot_kind": "candidate_formation_precommit",
           "layer": "HISTORICAL/AS-OF R1 CANDIDATE FORMATION PRECOMMIT SNAPSHOT",
           "as_of": "2026-08-11",
           "objective": "MILESTONE_B_AUDIT_REMEDIATION_1",
@@ -65,6 +69,8 @@
           "candidate_commit_status_at_formation": "pending"
         },
         "remediation_3": {
+          "state_role": "historical_snapshot",
+          "snapshot_kind": "candidate_formation_precommit",
           "layer": "HISTORICAL/AS-OF R3 CANDIDATE FORMATION PRECOMMIT SNAPSHOT",
           "as_of": "2026-08-13",
           "branch_at_formation": "sol-ultra-milestone-b-formal-duel",
@@ -74,6 +80,8 @@
           "independent_reaudit_status_at_formation": "NOT_AUDITED_YET"
         },
         "remediation_4": {
+          "state_role": "historical_snapshot",
+          "snapshot_kind": "candidate_formation_precommit",
           "layer": "HISTORICAL/AS-OF R4 CANDIDATE FORMATION PRECOMMIT SNAPSHOT",
           "as_of": "2026-08-13",
           "branch_at_formation": "sol-ultra-milestone-b-formal-duel",
@@ -83,6 +91,8 @@
           "independent_reaudit_status_at_formation": "NOT_AUDITED_YET"
         },
         "remediation_5_start": {
+          "state_role": "historical_snapshot",
+          "snapshot_kind": "remediation_start_snapshot",
           "layer": "HISTORICAL/AS-OF R5 REMEDIATION START SNAPSHOT",
           "as_of": "2026-08-14",
           "branch_at_start": "sol-ultra-milestone-b-formal-duel",
@@ -90,6 +100,8 @@
           "note": "固定起点事实；不表示提交后的实时 HEAD，也不是未来 R5 commit SHA。"
         },
         "remediation_6": {
+          "state_role": "historical_snapshot",
+          "snapshot_kind": "candidate_formation_precommit",
           "layer": "HISTORICAL/AS-OF R6 CANDIDATE FORMATION PRECOMMIT SNAPSHOT",
           "as_of": "2026-08-14",
           "branch_at_formation": "sol-ultra-milestone-b-formal-duel",
@@ -99,7 +111,21 @@
           "worktree_state_at_formation": "PRECOMMIT",
           "candidate_commit_at_formation": null,
           "independent_reaudit_status_at_formation": "NOT_AUDITED_YET"
-        }
+        },
+        "remediation_7": {
+          "state_role": "historical_snapshot",
+          "snapshot_kind": "candidate_formation_precommit",
+          "as_of": "2026-08-14",
+          "layer": "HISTORICAL/AS-OF R7 CANDIDATE FORMATION PRECOMMIT SNAPSHOT",
+          "branch_at_formation": "sol-ultra-milestone-b-formal-duel",
+          "base_commit": "758de61ad2fc984aabebb7f4f1fb4837ffb8f47b",
+          "parent_commit_at_formation": "c283aa4e049b9a0dc728735d5695302c346901c7",
+          "note": "固定起点事实；不表示提交后的实时 HEAD，也不是未来 R7 commit SHA。",
+          "worktree_state_at_formation": "PRECOMMIT",
+          "candidate_commit_at_formation": null,
+          "independent_reaudit_status_at_formation": "NOT_AUDITED_YET"
+        },
+        "as_of": "2026-08-14"
       },
       "live_git_state_policy": {
         "layer": "LIVE GIT STATE",
@@ -115,71 +141,161 @@
       },
       "documentation_invariants": [
         "A committed documentation snapshot must not require knowing the SHA of the commit that contains the snapshot.",
-        "A precommit Git worktree state must never be labelled persistent CURRENT state."
-      ]
-    },
-    "milestone_b1_commit": "bffe5516322452b90b7b150d7c4ae35c5b690a0b",
-    "milestone_b2_trick_slice_worktree_commit": "0ff3f8a",
-    "milestone_b2_trick_slice_commit": "18fb9916796a34a60b62fd490529d80bd9eb75ef",
-    "milestone_b2_trick_slice_commit_note": "最小普通锦囊垂直切片（【无中生有】、【无懈可击】）已由用户在外部PowerShell提交，实现提交哈希 18fb9916796a34a60b62fd490529d80bd9eb75ef（feat: implement production single-target trick slice）；milestone_b2_trick_slice_worktree_commit=0ff3f8a 保留原含义，指工作树实现验证所基于的基线提交，不代表实现提交",
-    "milestone_b2_zone_target_trick_batch_commit": "2a73e5c3b3d17dab87bb13168db6e0e4e05a5130",
-    "milestone_b2_zone_target_trick_batch_commit_note": "目标区域选牌批次（【过河拆桥】、【顺手牵羊】）已由用户在外部PowerShell提交，实现提交哈希 2a73e5c3b3d17dab87bb13168db6e0e4e05a5130（feat: implement production zone-target trick slice）",
-    "milestone_b2_zone_target_handle_hmac_fix_commit": "1b5e125ad0baa129458b42043aac08b18dcfad96",
-    "milestone_b2_zone_target_handle_hmac_fix_commit_note": "隐藏手牌句柄HMAC安全修复已由用户在外部PowerShell提交，提交哈希 1b5e125ad0baa129458b42043aac08b18dcfad96（fix: secure hidden hand choice handles）",
-    "duel_fire_attack_worktree_branch": "deepseek-duel-fire-attack",
-    "duel_fire_attack_worktree_branch_note": "本批（【决斗】、【火攻】）实现所在分支；该分支上的本批代码已由用户在外部PowerShell提交，实现提交哈希 b3587912da97825871ae91ea8a88b3e95c39fdde（feat: implement production duel and fire attack slice），当前 HEAD 已为该实现提交",
-    "milestone_b2_duel_fire_attack_batch_commit": "b3587912da97825871ae91ea8a88b3e95c39fdde",
-    "milestone_b2_duel_fire_attack_batch_commit_note": "伤害型普通锦囊批次（【决斗】、【火攻】）已由用户在外部PowerShell提交，实现提交哈希 b3587912da97825871ae91ea8a88b3e95c39fdde（feat: implement production duel and fire attack slice）",
-    "duel_fire_attack_audit_close_note": "伤害型普通锦囊批次（【决斗】、【火攻】）已通过独立只读审计（AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，2026-08-03）；审计收尾真实提交 9c2070017fe624295ebd735bf5163f48a6ac2207（test: close duel and fire attack audit gaps），里程碑标签 milestone-b2-duel-fire-attack-audited 已建立；本文档的最终状态回填由用户提交后移动标签",
-    "duel_fire_attack_audit_close_commit": "9c2070017fe624295ebd735bf5163f48a6ac2207",
-    "group_target_trick_worktree_branch": "deepseek-group-target-tricks",
-    "group_target_trick_worktree_branch_note": "本批（【南蛮入侵】、【万箭齐发】、【桃园结义】）实现所在分支；基线提交 7414b0661a5cd7599d392f5ae5b287a7147438ac（docs: finalize duel and fire attack audit milestone）；实现提交 5f2fbf27b7041bbf3010636de37306eea5da6256（feat: implement production group-target trick slice）；检查点提交 8d68231e336dbe213ffad1c5aaa3101896fe5f2f（docs: record group-target trick checkpoint）；首次审计问题修复提交 ef98245aef32848468c7b2c4a7821ec9ae65146b（test: close group-target trick audit gaps）；最终独立复审收尾提交 d2e4f49925c0bb285d44092821c3a85c496571ef（test: complete group-target trick reaudit closure）；分支名只代表工作流程，提交哈希才是权威依据",
-    "milestone_b2_group_target_trick_batch_commit": "5f2fbf27b7041bbf3010636de37306eea5da6256",
-    "milestone_b2_group_target_trick_batch_commit_note": "群体普通锦囊批次（【南蛮入侵】、【万箭齐发】、【桃园结义】）已由用户在外部PowerShell提交，实现提交哈希 5f2fbf27b7041bbf3010636de37306eea5da6256（feat: implement production group-target trick slice）",
-    "group_target_trick_audit_close_note": "群体普通锦囊批次（【南蛮入侵】、【万箭齐发】、【桃园结义】）已完成最终独立复审：初次独立只读审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES（2026-08-03），首次审计问题修复提交 ef98245aef32848468c7b2c4a7821ec9ae65146b（test: close group-target trick audit gaps）；最终独立复审在专用复审分支上执行，结论 AUDIT_PASSED，复审残项关闭真实提交 d2e4f49925c0bb285d44092821c3a85c496571ef（test: complete group-target trick reaudit closure）；里程碑标签待用户提交文档后建立",
-    "group_target_trick_audit_close_commit": "d2e4f49925c0bb285d44092821c3a85c496571ef",
-    "remaining_ordinary_tricks_worktree_branch": "deepseek-remaining-ordinary-tricks",
-    "remaining_ordinary_tricks_worktree_branch_note": "本批（【五谷丰登】完整生产语义＋【铁索连环】牌本体）实现所在分支；基线提交 6af30432993d908546d7cec114fd78ae62798ad5（docs: finalize group-target trick audit milestone，里程碑标签 milestone-b2-group-target-tricks-audited 为该提交的注解标签）；实现与文档提交由用户在外部提交后回填，不在此虚构提交哈希",
-    "remaining_ordinary_tricks_implement_commit": "20cb1b1f766529a88aa5f3346a4761b77eca66b7",
-    "remaining_ordinary_tricks_implement_commit_note": "剩余普通锦囊批次（CP-04I：【五谷丰登】完整生产语义＋【铁索连环】牌本体）已由用户在外部PowerShell提交，提交信息为 feat: implement wugu and tiesuo card-body slice，完整提交哈希为 20cb1b1f766529a88aa5f3346a4761b77eca66b7；2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED；审计问题关闭提交 5b1c2c15b6a8e21563aab02d8a5c181c553e4967，最终措辞修正提交 b2d4ffca18092938437d15826efdaddba8a0a689；里程碑标签 milestone-b2-wugu-tiesuo-card-body-audited 由用户在本次最终文档提交后立即建立（本轮未执行 git tag、未验证标签已存在）；remaining_ordinary_tricks_worktree_branch 保留原含义，指工作树实现验证所基于的分支",
-    "chain_damage_infrastructure_implement_commit": "c094bff5dab127917e8d0b9a2d3422e3ab736783",
-    "chain_damage_infrastructure_implement_commit_note": "属性伤害传导生产基础设施（CP-04J）已由用户在外部PowerShell创建真实实现提交：提交信息为 feat: implement production chain damage infrastructure，完整提交哈希为 c094bff5dab127917e8d0b9a2d3422e3ab736783；检查点文档提交 55228c9d464daac6eb061ba356b0497ec814eba6（docs: record chain damage infrastructure checkpoint）；审计残项关闭提交 68e419b79e379184c1f1cc7ad650039771530f89（fix: close chain damage audit gaps）；2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED，审计残项 N1-N4 已由审计残项关闭提交正式关闭",
-    "chain_damage_infrastructure_checkpoint_commit": "55228c9d464daac6eb061ba356b0497ec814eba6",
-    "chain_damage_infrastructure_audit_close_commit": "68e419b79e379184c1f1cc7ad650039771530f89",
-    "chain_damage_infrastructure_audit_close_note": "CP-04J 最终独立复审结论 AUDIT_PASSED（2026-08-04）；初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES；审计残项 N1-N4 已由提交 68e419b79e379184c1f1cc7ad650039771530f89（fix: close chain damage audit gaps）正式关闭；里程碑标签 milestone-b2-chain-damage-infrastructure-audited 为本次最终文档提交后由用户立即建立的标签名称（本轮未执行 git tag、未验证标签已存在）",
-    "cp04k_worktree_branch": "deepseek-borrowed-sword-weapon-system",
-    "cp04k_worktree_branch_note": "本批（【借刀杀人】＋11种武器牌本体，CP-04K）实现所在分支；实现提交 75c596b12f34a6222d972b2190148386bb670653（feat: implement borrowed sword and weapon card-body system，amend替代旧提交 7456377f...）；检查点文档提交 f0008b571f502e0d6b7cc1800de9c2a8e39074e3；审计残项关闭提交 79acc6ff514af4900acfe87507374fc8d696ec97（fix: close borrowed sword weapon audit gaps）；最终独立复审结论 AUDIT_PASSED；里程碑标签 milestone-b2-borrowed-sword-weapon-system-audited 由用户在本次最终文档提交后立即建立（本轮未执行 git tag、未验证标签已存在）",
-    "milestone_b2_borrowed_sword_weapon_system_commit": "75c596b12f34a6222d972b2190148386bb670653",
-    "milestone_b2_borrowed_sword_weapon_system_commit_note": "【借刀杀人】＋11种武器牌本体批次（CP-04K）已由用户在外部PowerShell提交，实现提交哈希 75c596b12f34a6222d972b2190148386bb670653（feat: implement borrowed sword and weapon card-body system；amend 替代旧提交 7456377f5fdc94588f6e872be6505b4e0159c803）；检查点文档提交 f0008b571f502e0d6b7cc1800de9c2a8e39074e3；2026-08-05 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED；审计残项关闭提交 79acc6ff514af4900acfe87507374fc8d696ec97；里程碑标签 milestone-b2-borrowed-sword-weapon-system-audited 由用户在本次最终文档提交后立即建立（本轮未执行 git tag、未验证标签已存在）",
-    "borrowed_sword_weapon_system_checkpoint_commit": "f0008b571f502e0d6b7cc1800de9c2a8e39074e3",
-    "borrowed_sword_weapon_system_audit_close_commit": "79acc6ff514af4900acfe87507374fc8d696ec97",
-    "borrowed_sword_weapon_system_audit_close_note": "CP-04K 最终独立复审结论 AUDIT_PASSED（2026-08-05）；初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES；非阻塞问题 N1-N3 已由提交 79acc6ff514af4900acfe87507374fc8d696ec97（fix: close borrowed sword weapon audit gaps）正式关闭；里程碑标签 milestone-b2-borrowed-sword-weapon-system-audited 为本次最终文档提交后由用户立即建立的标签名称（本轮未执行 git tag、未验证标签已存在）",
-    "cp04l_worktree_branch": "deepseek-delayed-trick-infrastructure",
-    "cp04l_worktree_branch_note": "本批（【乐不思蜀】＋【兵粮寸断】＋【闪电】＋判定与阶段基础设施，CP-04L）实现所在分支；基线提交 185cc555324b077d0e81bef10a4518ba2dae3748（docs: finalize borrowed sword and weapon system audit milestone，里程碑标签 milestone-b2-borrowed-sword-weapon-system-audited 指向该基线）；实现提交 35c06bd50a431a62e7c3ad01d10384bf6884c403（feat: implement delayed tricks and judgment infrastructure）、检查点文档提交 4f2c9b61fccb4337a8e84ae560835d705be65bda、第一次审计修复提交 96f536e1f392fd97faf61518a849a0d515b6a82e（fix: close delayed trick audit gaps）与最终修复提交 eeeaf558cdaeeea0eb90456f907f83dce52286f3（fix: harden player-visible replay privacy）均在此分支历史；2026-08-05 第一次独立审计 AUDIT_FAILED_BLOCKING_ISSUES（唯一阻塞项 B1：player_visible 未脱敏 reshuffle 事件），2026-08-06 第二次最终复审 AUDIT_FAILED_BLOCKING_ISSUES（B1-a／B1-b／B1-c 与两个复审观察项），最终修复后 Grok 网页端独立静态审计 STATIC_AUDIT_PASSED（经 GitHub 连接器读取精确目标提交 eeeaf558，未亲自运行 pytest／Git／本地虚拟环境；1733 passed 等运行结果来自本地修复会话），最终审计结论 AUDIT_PASSED（2026-08-06）；文档收口提交 ba64b750fabd99f2bfc93697cea83e1272216d02（docs: finalize delayed trick and judgment audit milestone）；里程碑标签 milestone-b2-delayed-trick-judgment-infrastructure-audited 已实际建立并推送。HISTORICAL/AS-OF：当时本地与 GitHub 远程标签均指向文档收口提交 ba64b750fabd99f2bfc93697cea83e1272216d02；CURRENT LIVE REF：用户随后将标签移动到承载最终仓库状态记录的提交，当前Git标签解析为 fc3df95202b23dccfd9abf5e476485a224d6fc2c，当前标签目标以Git标签解析结果为准。",
-    "delayed_trick_judgment_infrastructure_implement_commit": "35c06bd50a431a62e7c3ad01d10384bf6884c403",
-    "delayed_trick_judgment_infrastructure_implement_commit_note": "三种延时锦囊＋判定与阶段基础设施批次（CP-04L：【乐不思蜀】【兵粮寸断】【闪电】）已由用户在外部PowerShell提交，提交信息为 feat: implement delayed tricks and judgment infrastructure，完整提交哈希为 35c06bd50a431a62e7c3ad01d10384bf6884c403；基线提交 185cc555324b077d0e81bef10a4518ba2dae3748（里程碑标签 milestone-b2-borrowed-sword-weapon-system-audited 指向该基线）；检查点文档提交 4f2c9b61fccb4337a8e84ae560835d705be65bda（docs: record delayed trick and judgment checkpoint）；2026-08-05 第一次独立审计 AUDIT_FAILED_BLOCKING_ISSUES（唯一阻塞项 B1：player_visible 未脱敏 reshuffle 事件），第一次审计修复提交 96f536e1f392fd97faf61518a849a0d515b6a82e（fix: close delayed trick audit gaps，完整 pytest 1724 passed）；2026-08-06 第二次最终复审 AUDIT_FAILED_BLOCKING_ISSUES（B1-a state_hash 等权威状态摘要旁路、B1-b legal_actions/chosen_action 泄露行动者完整手牌、B1-c tiesuo_recast 等隐藏摸牌泄漏，以及 N5 篡改测试结构、judgment_entry_indices 陈旧残留两个复审观察项）；最终修复提交 eeeaf558cdaeeea0eb90456f907f83dce52286f3（fix: harden player-visible replay privacy，本地修复会话完整 pytest 1733 passed）；Grok 网页端独立静态审计 STATIC_AUDIT_PASSED（经 GitHub 连接器读取精确目标提交 eeeaf558，完整读取18个强制生产、测试和状态文件，PARTIAL_READ=无、NOT_READ=无，未亲自运行 pytest／Git／本地虚拟环境）；最终审计结论 AUDIT_PASSED（2026-08-06，status=audited、independent_audit_done=true、audit_conclusion=AUDIT_PASSED、milestone_tag=已建立标签 milestone-b2-delayed-trick-judgment-infrastructure-audited（HISTORICAL/AS-OF：文档收口提交 ba64b750fabd99f2bfc93697cea83e1272216d02，当时本地与 GitHub 远程标签均已验证存在；CURRENT LIVE REF：标签当前Git解析为 fc3df95202b23dccfd9abf5e476485a224d6fc2c，当前标签目标以Git标签解析结果为准）、worktree_commit_pending=false）",
-    "cp04m_worktree_branch": "deepseek-armor-damage-prevention",
-    "cp04m_worktree_branch_note": "本批（四种防具＋伤害修正／防止基础设施，CP-04M）实现所在分支；基线提交 fc3df95202b23dccfd9abf5e476485a224d6fc2c（docs: mark delayed trick milestone repository state finalized，里程碑标签 milestone-b2-delayed-trick-judgment-infrastructure-audited 指向该基线）；实现提交 29ab73e006408e1e1582a300801e7aa6e04bd9c4（feat: implement armor and damage prevention infrastructure）已由用户在外部PowerShell提交；检查点文档提交 f0db82afcea9944143e224aed147d108c6eae061；2026-08-06 Grok 网页端独立静态审计最终结论 STATIC_AUDIT_PASSED；最终审计文档提交 2db702fde037b501190950687059d660c32b56da（docs: finalize armor and damage prevention audit milestone）已由用户在外部PowerShell提交；里程碑标签 milestone-b2-armor-damage-prevention-infrastructure-audited 已实际建立并推送，本地与 GitHub 远程标签均已由用户在外部PowerShell验证存在；标签在最终状态回填开始时指向 2db702fde037b501190950687059d660c32b56da，随后用户已将标签移动到承载最终仓库状态记录的提交；当前标签指向以Git标签解析结果为准。",
-    "cp04n_worktree_branch": "deepseek-mount-distance-infrastructure",
-    "cp04n_worktree_branch_note": "本批（正式坐骑＋距离／攻击范围基础设施，CP-04N）实现所在分支；基线提交 733940b4a5e278ae3eba11e5c6522b0f1832d6b4；实现提交 fd7d69f53e9827877b6a29d67c067012ead6a7af（feat: implement mounts and distance infrastructure）、检查点文档提交 3231adef9aa97cc152c7476195e9f169c3b14a15 与最终审计文档提交 fbeec9c5ad14e8f4b5da85672dab4a70f961bd4e（docs: finalize mount and distance audit milestone）均已由用户在外部PowerShell提交；2026-08-07 Grok 网页端独立静态审计最终结论 STATIC_AUDIT_PASSED；里程碑标签 milestone-b2-mount-distance-infrastructure-audited 已实际建立并推送（本地标签已由本轮亲自验证存在、GitHub 远程标签已由用户在外部PowerShell验证存在）。",
-    "cp04o_worktree_branch": "deepseek-turn-cycle-discard-infrastructure",
-    "cp04o_worktree_branch_note": "本批（正式弃牌阶段＋权威回合循环基础设施，CP-04O）实现所在分支；基线提交 f2eb98a03a56f57ddfd4d5d0a24c0ddb26176989（milestone-b2-mount-distance-infrastructure-audited）；实现提交 b1afb1a613a45c630ae1e42975d276d62915e76d（feat: implement turn cycle and discard infrastructure）、检查点文档提交 7aacd06cdfcf1725307061a3f5c03c233a2199f7（docs: record turn cycle and discard checkpoint）与最终审计文档提交 17246077776ef8a8c7f957706d60fd91e2c0a440（docs: finalize turn cycle and discard audit milestone）均已由用户在外部PowerShell提交；功能分支已推送至GitHub；提交前阻塞性修正：弃牌阶段由逐张弃置改为“选择＋一次性批量提交”正式语义（DISCARD_BATCH_SEMANTICS_FIXED），修正发生在任何implementation commit之前，不存在audit fix commit；2026-08-07 Grok 网页端独立只读静态审计最终结论 STATIC_AUDIT_PASSED（审计分支 deepseek-audit-turn-cycle-discard-infrastructure，精确目标 7aacd06cdfcf1725307061a3f5c03c233a2199f7；Grok 未亲自运行 pytest／Git／本地虚拟环境）；里程碑标签 milestone-b2-turn-cycle-discard-infrastructure-audited 已实际建立并推送（本地标签已由本轮亲自验证存在并在最终仓库状态回填开始时解析到 17246077776ef8a8c7f957706d60fd91e2c0a440；GitHub远程标签建立／推送事实来自用户外部PowerShell验证；当前标签目标以Git标签解析结果为准）。",
-    "cp04p_worktree_branch": "deepseek-weapon-skill-completion",
-    "cp04p_worktree_branch_note": "本批（正式武器技能完整化，CP-04P）实现所在分支；基线提交 ef340c42e180ab14832b291bc0fc83f449a771a6（milestone-b2-turn-cycle-discard-infrastructure-audited）；完整工作树实现与专项测试已在本轮完成（完整 pytest 1953 passed：57项武器专项＋7项借刀朱雀专项；8种武器COMPLETE——寒冰剑逐张弃置语义、朱雀羽扇借刀转火杀、青龙追杀不消耗普通出牌阶段杀额度、贯石斧自身不能作为代价、丈八蛇矛虚拟杀均为2026-08-08用户移动版实测确认/当前确认），实现提交 f0a50ce9ace71c5bf0a22540fbdca9e03aa918b3（feat: implement verified production weapon skills，父提交 ef340c42e180ab14832b291bc0fc83f449a771a6）已由用户在外部PowerShell创建；checkpoint 文档提交尚未产生，不得虚构提交哈希；独立审计尚未进行（NOT_AUDITED_YET）。",
-    "wr_audit_remediation_1_worktree_branch": "deepseek-whole-repo-audit-remediation-1",
-    "wr_audit_remediation_1_worktree_branch_note": "本批（整仓敌对式总审计定向修复，WHOLE_REPO_AUDIT_REMEDIATION_1）实现所在分支；基线/历史CP-04P最终稳定提交 398ea58c9006ee9141ea1acfba35f6d9c497be48；实现提交 f1731b95199165a3449f1a0ce84d9facfc1b41c5（fix: remediate whole-repo audit findings，父提交 398ea58c...）已由用户在外部PowerShell创建；checkpoint 文档提交尚未产生，不得虚构提交哈希；独立审计尚未进行（NOT_AUDITED_YET）。",
-    "wr_audit_remediation_2_worktree_branch": "deepseek-whole-repo-audit-remediation-2",
-    "wr_audit_remediation_2_worktree_branch_note": "本批（整仓敌对式总审计定向修复第二轮，WHOLE_REPO_AUDIT_REMEDIATION_2）实现所在分支；基线/R1文档收口提交 4aafd95aaef78f5ed13038a9314de1eadbad2160（docs: record whole-repo audit remediation checkpoint）；实现提交 e63b40ac1690e03315fd3e0734d5723fb80d5182（fix: complete second whole-repo audit remediation，父提交 4aafd95...）已由用户在外部PowerShell创建；checkpoint 文档提交尚未产生，不得虚构提交哈希；独立 re-audit 尚未进行（NOT_AUDITED_YET）。",
-    "wr_audit_remediation_3_worktree_branch": "deepseek-whole-repo-audit-remediation-3",
-    "wr_audit_remediation_3_worktree_branch_note": "本批（整仓敌对式总审计定向修复第三轮/最小收尾，WHOLE_REPO_AUDIT_REMEDIATION_3）实现所在分支；基线/R2文档收口提交 3121a30089307cda4501f13b1c1aaa09130257f8（docs: record second whole-repo audit remediation checkpoint）；实现提交 9c63496e7f34430d8aff3c23e9afc5b5c4482557（fix: close remaining whole-repo audit findings，父提交 3121a300...）已由用户在外部PowerShell创建；checkpoint 文档提交尚未产生，不得虚构提交哈希；独立 re-audit 尚未进行（NOT_AUDITED_YET）。",
-    "wr_audit_remediation_4_worktree_branch": "deepseek-whole-repo-audit-remediation-4",
-    "wr_audit_remediation_4_worktree_branch_note": "本批（整仓敌对式总审计定向修复第四轮/docs-only 治理收尾，WHOLE_REPO_AUDIT_REMEDIATION_4）实现所在分支；基线/R3文档收口提交 6bef086eae51d48e7f12c3e2f2a40d97bef1d651（docs: record third whole-repo audit remediation checkpoint）；实现提交 5eb367599e9d7deb26220cfff8b81144d0d88eff（docs: close remaining whole-repo audit governance findings，父提交 6bef086...）已由用户在外部PowerShell创建；checkpoint 文档提交尚未产生，不得虚构提交哈希；独立 re-audit 尚未进行（NOT_AUDITED_YET）。",
-    "wr_audit_remediation_5_worktree_branch": "deepseek-whole-repo-audit-remediation-5",
-    "wr_audit_remediation_5_worktree_branch_note": "本批（整仓敌对式总审计定向修复第五轮/单点最终收尾，WHOLE_REPO_AUDIT_REMEDIATION_5）实现所在分支；基线/R4文档收口提交 bf5d83c4b1fa0cecb1994d918f66eb82387b4f99（docs: record fourth whole-repo audit remediation checkpoint）；实现提交 2c28cf0404f4b7bbc0752fa75594580fafef1256（docs: resolve final audit status contradiction，父提交 bf5d83c...）已由用户在外部PowerShell创建；checkpoint 文档提交尚未产生，不得虚构提交哈希；独立 re-audit 尚未进行（NOT_AUDITED_YET）。",
-    "wr_audit_remediation_6_worktree_branch": "deepseek-whole-repo-audit-remediation-6",
-    "wr_audit_remediation_6_worktree_branch_note": "本批（整仓敌对式总审计定向修复第六轮/manifest-only 单字段治理收尾，WHOLE_REPO_AUDIT_REMEDIATION_6）实现所在分支；基线/R5文档收口提交 f83848881e6f1ff03621f5383b00f3580d230283（docs: record fifth whole-repo audit remediation checkpoint）；实现提交 2a075580484fadf3a2e4b7b76f4e4ad918af66e3（docs: normalize G-002 machine-readable audit state，父提交 f838488...）已由用户在外部PowerShell创建；【HISTORICAL/AS-OF：这是 R6 implementation commit 后、R6 checkpoint/re-audit 尚未发生时的工作树快照——checkpoint 文档提交尚未产生，不得虚构提交哈希；独立 re-audit 尚未进行（NOT_AUDITED_YET）。CURRENT LIVE REF：R6 checkpoint 后已进行 independent targeted re-audit，结论 REMEDIATION_6_REAUDIT_PASSED；最终 audit_result_commit=0e023694df7ea123c41c2b415784532c9d185d26；worktree_commit_pending=false。】"
+        "A precommit Git worktree state must never be labelled persistent CURRENT state.",
+        "A persisted_current state node must not store live Git or worktree scalars, regardless of field name.",
+        "Historical exemption is granted only by the exact state_role value 'historical_snapshot', never by names or prose containing the word historical."
+      ],
+      "historical_development_state": {
+        "state_role": "historical_snapshot",
+        "snapshot_kind": "development_branch_and_commit_metadata",
+        "as_of": "2026-08-14",
+        "note": "历史开发分支/提交元数据快照（production 批次与 whole-repo remediation 的过去分支与提交事实）；当前实时分支由 git branch --show-current 现场派生，本 manifest 不做静态声称。",
+        "implementation_branch": "deepseek-single-target-tricks",
+        "implementation_branch_note": "检查点记录时的实现分支，不代表当前运行分支",
+        "baseline_commit": "858d6ced315dfa3df78636528c720c0117fdf3de",
+        "baseline_metadata_commit": "5eac686",
+        "milestone_a_commit": "455685d6eaa1c297e9ec48a0cfaeb803b81f3406",
+        "repository_local_identity": {
+          "name": "Codex Development",
+          "email": "codex-local@example.invalid"
+        },
+        "historical_note": "CP-01至CP-04的原始哈希检查点已收入Git基线；里程碑A另有独立代码提交",
+        "milestone_b1_commit": "bffe5516322452b90b7b150d7c4ae35c5b690a0b",
+        "milestone_b2_trick_slice_worktree_commit": "0ff3f8a",
+        "milestone_b2_trick_slice_commit": "18fb9916796a34a60b62fd490529d80bd9eb75ef",
+        "milestone_b2_trick_slice_commit_note": "最小普通锦囊垂直切片（【无中生有】、【无懈可击】）已由用户在外部PowerShell提交，实现提交哈希 18fb9916796a34a60b62fd490529d80bd9eb75ef（feat: implement production single-target trick slice）；milestone_b2_trick_slice_worktree_commit=0ff3f8a 保留原含义，指工作树实现验证所基于的基线提交，不代表实现提交",
+        "milestone_b2_zone_target_trick_batch_commit": "2a73e5c3b3d17dab87bb13168db6e0e4e05a5130",
+        "milestone_b2_zone_target_trick_batch_commit_note": "目标区域选牌批次（【过河拆桥】、【顺手牵羊】）已由用户在外部PowerShell提交，实现提交哈希 2a73e5c3b3d17dab87bb13168db6e0e4e05a5130（feat: implement production zone-target trick slice）",
+        "milestone_b2_zone_target_handle_hmac_fix_commit": "1b5e125ad0baa129458b42043aac08b18dcfad96",
+        "milestone_b2_zone_target_handle_hmac_fix_commit_note": "隐藏手牌句柄HMAC安全修复已由用户在外部PowerShell提交，提交哈希 1b5e125ad0baa129458b42043aac08b18dcfad96（fix: secure hidden hand choice handles）",
+        "duel_fire_attack_worktree_branch": "deepseek-duel-fire-attack",
+        "duel_fire_attack_worktree_branch_note": "本批（【决斗】、【火攻】）实现所在分支；该分支上的本批代码已由用户在外部PowerShell提交，实现提交哈希 b3587912da97825871ae91ea8a88b3e95c39fdde（feat: implement production duel and fire attack slice），当前 HEAD 已为该实现提交",
+        "milestone_b2_duel_fire_attack_batch_commit": "b3587912da97825871ae91ea8a88b3e95c39fdde",
+        "milestone_b2_duel_fire_attack_batch_commit_note": "伤害型普通锦囊批次（【决斗】、【火攻】）已由用户在外部PowerShell提交，实现提交哈希 b3587912da97825871ae91ea8a88b3e95c39fdde（feat: implement production duel and fire attack slice）",
+        "duel_fire_attack_audit_close_note": "伤害型普通锦囊批次（【决斗】、【火攻】）已通过独立只读审计（AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，2026-08-03）；审计收尾真实提交 9c2070017fe624295ebd735bf5163f48a6ac2207（test: close duel and fire attack audit gaps），里程碑标签 milestone-b2-duel-fire-attack-audited 已建立；本文档的最终状态回填由用户提交后移动标签",
+        "duel_fire_attack_audit_close_commit": "9c2070017fe624295ebd735bf5163f48a6ac2207",
+        "group_target_trick_worktree_branch": "deepseek-group-target-tricks",
+        "group_target_trick_worktree_branch_note": "本批（【南蛮入侵】、【万箭齐发】、【桃园结义】）实现所在分支；基线提交 7414b0661a5cd7599d392f5ae5b287a7147438ac（docs: finalize duel and fire attack audit milestone）；实现提交 5f2fbf27b7041bbf3010636de37306eea5da6256（feat: implement production group-target trick slice）；检查点提交 8d68231e336dbe213ffad1c5aaa3101896fe5f2f（docs: record group-target trick checkpoint）；首次审计问题修复提交 ef98245aef32848468c7b2c4a7821ec9ae65146b（test: close group-target trick audit gaps）；最终独立复审收尾提交 d2e4f49925c0bb285d44092821c3a85c496571ef（test: complete group-target trick reaudit closure）；分支名只代表工作流程，提交哈希才是权威依据",
+        "milestone_b2_group_target_trick_batch_commit": "5f2fbf27b7041bbf3010636de37306eea5da6256",
+        "milestone_b2_group_target_trick_batch_commit_note": "群体普通锦囊批次（【南蛮入侵】、【万箭齐发】、【桃园结义】）已由用户在外部PowerShell提交，实现提交哈希 5f2fbf27b7041bbf3010636de37306eea5da6256（feat: implement production group-target trick slice）",
+        "group_target_trick_audit_close_note": "群体普通锦囊批次（【南蛮入侵】、【万箭齐发】、【桃园结义】）已完成最终独立复审：初次独立只读审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES（2026-08-03），首次审计问题修复提交 ef98245aef32848468c7b2c4a7821ec9ae65146b（test: close group-target trick audit gaps）；最终独立复审在专用复审分支上执行，结论 AUDIT_PASSED，复审残项关闭真实提交 d2e4f49925c0bb285d44092821c3a85c496571ef（test: complete group-target trick reaudit closure）；里程碑标签待用户提交文档后建立",
+        "group_target_trick_audit_close_commit": "d2e4f49925c0bb285d44092821c3a85c496571ef",
+        "remaining_ordinary_tricks_worktree_branch": "deepseek-remaining-ordinary-tricks",
+        "remaining_ordinary_tricks_worktree_branch_note": "本批（【五谷丰登】完整生产语义＋【铁索连环】牌本体）实现所在分支；基线提交 6af30432993d908546d7cec114fd78ae62798ad5（docs: finalize group-target trick audit milestone，里程碑标签 milestone-b2-group-target-tricks-audited 为该提交的注解标签）；实现与文档提交由用户在外部提交后回填，不在此虚构提交哈希",
+        "remaining_ordinary_tricks_implement_commit": "20cb1b1f766529a88aa5f3346a4761b77eca66b7",
+        "remaining_ordinary_tricks_implement_commit_note": "剩余普通锦囊批次（CP-04I：【五谷丰登】完整生产语义＋【铁索连环】牌本体）已由用户在外部PowerShell提交，提交信息为 feat: implement wugu and tiesuo card-body slice，完整提交哈希为 20cb1b1f766529a88aa5f3346a4761b77eca66b7；2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED；审计问题关闭提交 5b1c2c15b6a8e21563aab02d8a5c181c553e4967，最终措辞修正提交 b2d4ffca18092938437d15826efdaddba8a0a689；里程碑标签 milestone-b2-wugu-tiesuo-card-body-audited 由用户在本次最终文档提交后立即建立（本轮未执行 git tag、未验证标签已存在）；remaining_ordinary_tricks_worktree_branch 保留原含义，指工作树实现验证所基于的分支",
+        "chain_damage_infrastructure_implement_commit": "c094bff5dab127917e8d0b9a2d3422e3ab736783",
+        "chain_damage_infrastructure_implement_commit_note": "属性伤害传导生产基础设施（CP-04J）已由用户在外部PowerShell创建真实实现提交：提交信息为 feat: implement production chain damage infrastructure，完整提交哈希为 c094bff5dab127917e8d0b9a2d3422e3ab736783；检查点文档提交 55228c9d464daac6eb061ba356b0497ec814eba6（docs: record chain damage infrastructure checkpoint）；审计残项关闭提交 68e419b79e379184c1f1cc7ad650039771530f89（fix: close chain damage audit gaps）；2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED，审计残项 N1-N4 已由审计残项关闭提交正式关闭",
+        "chain_damage_infrastructure_checkpoint_commit": "55228c9d464daac6eb061ba356b0497ec814eba6",
+        "chain_damage_infrastructure_audit_close_commit": "68e419b79e379184c1f1cc7ad650039771530f89",
+        "chain_damage_infrastructure_audit_close_note": "CP-04J 最终独立复审结论 AUDIT_PASSED（2026-08-04）；初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES；审计残项 N1-N4 已由提交 68e419b79e379184c1f1cc7ad650039771530f89（fix: close chain damage audit gaps）正式关闭；里程碑标签 milestone-b2-chain-damage-infrastructure-audited 为本次最终文档提交后由用户立即建立的标签名称（本轮未执行 git tag、未验证标签已存在）",
+        "cp04k_worktree_branch": "deepseek-borrowed-sword-weapon-system",
+        "cp04k_worktree_branch_note": "本批（【借刀杀人】＋11种武器牌本体，CP-04K）实现所在分支；实现提交 75c596b12f34a6222d972b2190148386bb670653（feat: implement borrowed sword and weapon card-body system，amend替代旧提交 7456377f...）；检查点文档提交 f0008b571f502e0d6b7cc1800de9c2a8e39074e3；审计残项关闭提交 79acc6ff514af4900acfe87507374fc8d696ec97（fix: close borrowed sword weapon audit gaps）；最终独立复审结论 AUDIT_PASSED；里程碑标签 milestone-b2-borrowed-sword-weapon-system-audited 由用户在本次最终文档提交后立即建立（本轮未执行 git tag、未验证标签已存在）",
+        "milestone_b2_borrowed_sword_weapon_system_commit": "75c596b12f34a6222d972b2190148386bb670653",
+        "milestone_b2_borrowed_sword_weapon_system_commit_note": "【借刀杀人】＋11种武器牌本体批次（CP-04K）已由用户在外部PowerShell提交，实现提交哈希 75c596b12f34a6222d972b2190148386bb670653（feat: implement borrowed sword and weapon card-body system；amend 替代旧提交 7456377f5fdc94588f6e872be6505b4e0159c803）；检查点文档提交 f0008b571f502e0d6b7cc1800de9c2a8e39074e3；2026-08-05 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED；审计残项关闭提交 79acc6ff514af4900acfe87507374fc8d696ec97；里程碑标签 milestone-b2-borrowed-sword-weapon-system-audited 由用户在本次最终文档提交后立即建立（本轮未执行 git tag、未验证标签已存在）",
+        "borrowed_sword_weapon_system_checkpoint_commit": "f0008b571f502e0d6b7cc1800de9c2a8e39074e3",
+        "borrowed_sword_weapon_system_audit_close_commit": "79acc6ff514af4900acfe87507374fc8d696ec97",
+        "borrowed_sword_weapon_system_audit_close_note": "CP-04K 最终独立复审结论 AUDIT_PASSED（2026-08-05）；初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES；非阻塞问题 N1-N3 已由提交 79acc6ff514af4900acfe87507374fc8d696ec97（fix: close borrowed sword weapon audit gaps）正式关闭；里程碑标签 milestone-b2-borrowed-sword-weapon-system-audited 为本次最终文档提交后由用户立即建立的标签名称（本轮未执行 git tag、未验证标签已存在）",
+        "cp04l_worktree_branch": "deepseek-delayed-trick-infrastructure",
+        "cp04l_worktree_branch_note": "本批（【乐不思蜀】＋【兵粮寸断】＋【闪电】＋判定与阶段基础设施，CP-04L）实现所在分支；基线提交 185cc555324b077d0e81bef10a4518ba2dae3748（docs: finalize borrowed sword and weapon system audit milestone，里程碑标签 milestone-b2-borrowed-sword-weapon-system-audited 指向该基线）；实现提交 35c06bd50a431a62e7c3ad01d10384bf6884c403（feat: implement delayed tricks and judgment infrastructure）、检查点文档提交 4f2c9b61fccb4337a8e84ae560835d705be65bda、第一次审计修复提交 96f536e1f392fd97faf61518a849a0d515b6a82e（fix: close delayed trick audit gaps）与最终修复提交 eeeaf558cdaeeea0eb90456f907f83dce52286f3（fix: harden player-visible replay privacy）均在此分支历史；2026-08-05 第一次独立审计 AUDIT_FAILED_BLOCKING_ISSUES（唯一阻塞项 B1：player_visible 未脱敏 reshuffle 事件），2026-08-06 第二次最终复审 AUDIT_FAILED_BLOCKING_ISSUES（B1-a／B1-b／B1-c 与两个复审观察项），最终修复后 Grok 网页端独立静态审计 STATIC_AUDIT_PASSED（经 GitHub 连接器读取精确目标提交 eeeaf558，未亲自运行 pytest／Git／本地虚拟环境；1733 passed 等运行结果来自本地修复会话），最终审计结论 AUDIT_PASSED（2026-08-06）；文档收口提交 ba64b750fabd99f2bfc93697cea83e1272216d02（docs: finalize delayed trick and judgment audit milestone）；里程碑标签 milestone-b2-delayed-trick-judgment-infrastructure-audited 已实际建立并推送。HISTORICAL/AS-OF：当时本地与 GitHub 远程标签均指向文档收口提交 ba64b750fabd99f2bfc93697cea83e1272216d02；CURRENT LIVE REF：用户随后将标签移动到承载最终仓库状态记录的提交，当前Git标签解析为 fc3df95202b23dccfd9abf5e476485a224d6fc2c，当前标签目标以Git标签解析结果为准。",
+        "delayed_trick_judgment_infrastructure_implement_commit": "35c06bd50a431a62e7c3ad01d10384bf6884c403",
+        "delayed_trick_judgment_infrastructure_implement_commit_note": "三种延时锦囊＋判定与阶段基础设施批次（CP-04L：【乐不思蜀】【兵粮寸断】【闪电】）已由用户在外部PowerShell提交，提交信息为 feat: implement delayed tricks and judgment infrastructure，完整提交哈希为 35c06bd50a431a62e7c3ad01d10384bf6884c403；基线提交 185cc555324b077d0e81bef10a4518ba2dae3748（里程碑标签 milestone-b2-borrowed-sword-weapon-system-audited 指向该基线）；检查点文档提交 4f2c9b61fccb4337a8e84ae560835d705be65bda（docs: record delayed trick and judgment checkpoint）；2026-08-05 第一次独立审计 AUDIT_FAILED_BLOCKING_ISSUES（唯一阻塞项 B1：player_visible 未脱敏 reshuffle 事件），第一次审计修复提交 96f536e1f392fd97faf61518a849a0d515b6a82e（fix: close delayed trick audit gaps，完整 pytest 1724 passed）；2026-08-06 第二次最终复审 AUDIT_FAILED_BLOCKING_ISSUES（B1-a state_hash 等权威状态摘要旁路、B1-b legal_actions/chosen_action 泄露行动者完整手牌、B1-c tiesuo_recast 等隐藏摸牌泄漏，以及 N5 篡改测试结构、judgment_entry_indices 陈旧残留两个复审观察项）；最终修复提交 eeeaf558cdaeeea0eb90456f907f83dce52286f3（fix: harden player-visible replay privacy，本地修复会话完整 pytest 1733 passed）；Grok 网页端独立静态审计 STATIC_AUDIT_PASSED（经 GitHub 连接器读取精确目标提交 eeeaf558，完整读取18个强制生产、测试和状态文件，PARTIAL_READ=无、NOT_READ=无，未亲自运行 pytest／Git／本地虚拟环境）；最终审计结论 AUDIT_PASSED（2026-08-06，status=audited、independent_audit_done=true、audit_conclusion=AUDIT_PASSED、milestone_tag=已建立标签 milestone-b2-delayed-trick-judgment-infrastructure-audited（HISTORICAL/AS-OF：文档收口提交 ba64b750fabd99f2bfc93697cea83e1272216d02，当时本地与 GitHub 远程标签均已验证存在；CURRENT LIVE REF：标签当前Git解析为 fc3df95202b23dccfd9abf5e476485a224d6fc2c，当前标签目标以Git标签解析结果为准）、worktree_commit_pending=false）",
+        "cp04m_worktree_branch": "deepseek-armor-damage-prevention",
+        "cp04m_worktree_branch_note": "本批（四种防具＋伤害修正／防止基础设施，CP-04M）实现所在分支；基线提交 fc3df95202b23dccfd9abf5e476485a224d6fc2c（docs: mark delayed trick milestone repository state finalized，里程碑标签 milestone-b2-delayed-trick-judgment-infrastructure-audited 指向该基线）；实现提交 29ab73e006408e1e1582a300801e7aa6e04bd9c4（feat: implement armor and damage prevention infrastructure）已由用户在外部PowerShell提交；检查点文档提交 f0db82afcea9944143e224aed147d108c6eae061；2026-08-06 Grok 网页端独立静态审计最终结论 STATIC_AUDIT_PASSED；最终审计文档提交 2db702fde037b501190950687059d660c32b56da（docs: finalize armor and damage prevention audit milestone）已由用户在外部PowerShell提交；里程碑标签 milestone-b2-armor-damage-prevention-infrastructure-audited 已实际建立并推送，本地与 GitHub 远程标签均已由用户在外部PowerShell验证存在；标签在最终状态回填开始时指向 2db702fde037b501190950687059d660c32b56da，随后用户已将标签移动到承载最终仓库状态记录的提交；当前标签指向以Git标签解析结果为准。",
+        "cp04n_worktree_branch": "deepseek-mount-distance-infrastructure",
+        "cp04n_worktree_branch_note": "本批（正式坐骑＋距离／攻击范围基础设施，CP-04N）实现所在分支；基线提交 733940b4a5e278ae3eba11e5c6522b0f1832d6b4；实现提交 fd7d69f53e9827877b6a29d67c067012ead6a7af（feat: implement mounts and distance infrastructure）、检查点文档提交 3231adef9aa97cc152c7476195e9f169c3b14a15 与最终审计文档提交 fbeec9c5ad14e8f4b5da85672dab4a70f961bd4e（docs: finalize mount and distance audit milestone）均已由用户在外部PowerShell提交；2026-08-07 Grok 网页端独立静态审计最终结论 STATIC_AUDIT_PASSED；里程碑标签 milestone-b2-mount-distance-infrastructure-audited 已实际建立并推送（本地标签已由本轮亲自验证存在、GitHub 远程标签已由用户在外部PowerShell验证存在）。",
+        "cp04o_worktree_branch": "deepseek-turn-cycle-discard-infrastructure",
+        "cp04o_worktree_branch_note": "本批（正式弃牌阶段＋权威回合循环基础设施，CP-04O）实现所在分支；基线提交 f2eb98a03a56f57ddfd4d5d0a24c0ddb26176989（milestone-b2-mount-distance-infrastructure-audited）；实现提交 b1afb1a613a45c630ae1e42975d276d62915e76d（feat: implement turn cycle and discard infrastructure）、检查点文档提交 7aacd06cdfcf1725307061a3f5c03c233a2199f7（docs: record turn cycle and discard checkpoint）与最终审计文档提交 17246077776ef8a8c7f957706d60fd91e2c0a440（docs: finalize turn cycle and discard audit milestone）均已由用户在外部PowerShell提交；功能分支已推送至GitHub；提交前阻塞性修正：弃牌阶段由逐张弃置改为“选择＋一次性批量提交”正式语义（DISCARD_BATCH_SEMANTICS_FIXED），修正发生在任何implementation commit之前，不存在audit fix commit；2026-08-07 Grok 网页端独立只读静态审计最终结论 STATIC_AUDIT_PASSED（审计分支 deepseek-audit-turn-cycle-discard-infrastructure，精确目标 7aacd06cdfcf1725307061a3f5c03c233a2199f7；Grok 未亲自运行 pytest／Git／本地虚拟环境）；里程碑标签 milestone-b2-turn-cycle-discard-infrastructure-audited 已实际建立并推送（本地标签已由本轮亲自验证存在并在最终仓库状态回填开始时解析到 17246077776ef8a8c7f957706d60fd91e2c0a440；GitHub远程标签建立／推送事实来自用户外部PowerShell验证；当前标签目标以Git标签解析结果为准）。",
+        "cp04p_worktree_branch": "deepseek-weapon-skill-completion",
+        "cp04p_worktree_branch_note": "本批（正式武器技能完整化，CP-04P）实现所在分支；基线提交 ef340c42e180ab14832b291bc0fc83f449a771a6（milestone-b2-turn-cycle-discard-infrastructure-audited）；完整工作树实现与专项测试已在本轮完成（完整 pytest 1953 passed：57项武器专项＋7项借刀朱雀专项；8种武器COMPLETE——寒冰剑逐张弃置语义、朱雀羽扇借刀转火杀、青龙追杀不消耗普通出牌阶段杀额度、贯石斧自身不能作为代价、丈八蛇矛虚拟杀均为2026-08-08用户移动版实测确认/当前确认），实现提交 f0a50ce9ace71c5bf0a22540fbdca9e03aa918b3（feat: implement verified production weapon skills，父提交 ef340c42e180ab14832b291bc0fc83f449a771a6）已由用户在外部PowerShell创建；checkpoint 文档提交尚未产生，不得虚构提交哈希；独立审计尚未进行（NOT_AUDITED_YET）。",
+        "wr_audit_remediation_1_worktree_branch": "deepseek-whole-repo-audit-remediation-1",
+        "wr_audit_remediation_1_worktree_branch_note": "本批（整仓敌对式总审计定向修复，WHOLE_REPO_AUDIT_REMEDIATION_1）实现所在分支；基线/历史CP-04P最终稳定提交 398ea58c9006ee9141ea1acfba35f6d9c497be48；实现提交 f1731b95199165a3449f1a0ce84d9facfc1b41c5（fix: remediate whole-repo audit findings，父提交 398ea58c...）已由用户在外部PowerShell创建；checkpoint 文档提交尚未产生，不得虚构提交哈希；独立审计尚未进行（NOT_AUDITED_YET）。",
+        "wr_audit_remediation_2_worktree_branch": "deepseek-whole-repo-audit-remediation-2",
+        "wr_audit_remediation_2_worktree_branch_note": "本批（整仓敌对式总审计定向修复第二轮，WHOLE_REPO_AUDIT_REMEDIATION_2）实现所在分支；基线/R1文档收口提交 4aafd95aaef78f5ed13038a9314de1eadbad2160（docs: record whole-repo audit remediation checkpoint）；实现提交 e63b40ac1690e03315fd3e0734d5723fb80d5182（fix: complete second whole-repo audit remediation，父提交 4aafd95...）已由用户在外部PowerShell创建；checkpoint 文档提交尚未产生，不得虚构提交哈希；独立 re-audit 尚未进行（NOT_AUDITED_YET）。",
+        "wr_audit_remediation_3_worktree_branch": "deepseek-whole-repo-audit-remediation-3",
+        "wr_audit_remediation_3_worktree_branch_note": "本批（整仓敌对式总审计定向修复第三轮/最小收尾，WHOLE_REPO_AUDIT_REMEDIATION_3）实现所在分支；基线/R2文档收口提交 3121a30089307cda4501f13b1c1aaa09130257f8（docs: record second whole-repo audit remediation checkpoint）；实现提交 9c63496e7f34430d8aff3c23e9afc5b5c4482557（fix: close remaining whole-repo audit findings，父提交 3121a300...）已由用户在外部PowerShell创建；checkpoint 文档提交尚未产生，不得虚构提交哈希；独立 re-audit 尚未进行（NOT_AUDITED_YET）。",
+        "wr_audit_remediation_4_worktree_branch": "deepseek-whole-repo-audit-remediation-4",
+        "wr_audit_remediation_4_worktree_branch_note": "本批（整仓敌对式总审计定向修复第四轮/docs-only 治理收尾，WHOLE_REPO_AUDIT_REMEDIATION_4）实现所在分支；基线/R3文档收口提交 6bef086eae51d48e7f12c3e2f2a40d97bef1d651（docs: record third whole-repo audit remediation checkpoint）；实现提交 5eb367599e9d7deb26220cfff8b81144d0d88eff（docs: close remaining whole-repo audit governance findings，父提交 6bef086...）已由用户在外部PowerShell创建；checkpoint 文档提交尚未产生，不得虚构提交哈希；独立 re-audit 尚未进行（NOT_AUDITED_YET）。",
+        "wr_audit_remediation_5_worktree_branch": "deepseek-whole-repo-audit-remediation-5",
+        "wr_audit_remediation_5_worktree_branch_note": "本批（整仓敌对式总审计定向修复第五轮/单点最终收尾，WHOLE_REPO_AUDIT_REMEDIATION_5）实现所在分支；基线/R4文档收口提交 bf5d83c4b1fa0cecb1994d918f66eb82387b4f99（docs: record fourth whole-repo audit remediation checkpoint）；实现提交 2c28cf0404f4b7bbc0752fa75594580fafef1256（docs: resolve final audit status contradiction，父提交 bf5d83c...）已由用户在外部PowerShell创建；checkpoint 文档提交尚未产生，不得虚构提交哈希；独立 re-audit 尚未进行（NOT_AUDITED_YET）。",
+        "wr_audit_remediation_6_worktree_branch": "deepseek-whole-repo-audit-remediation-6",
+        "wr_audit_remediation_6_worktree_branch_note": "本批（整仓敌对式总审计定向修复第六轮/manifest-only 单字段治理收尾，WHOLE_REPO_AUDIT_REMEDIATION_6）实现所在分支；基线/R5文档收口提交 f83848881e6f1ff03621f5383b00f3580d230283（docs: record fifth whole-repo audit remediation checkpoint）；实现提交 2a075580484fadf3a2e4b7b76f4e4ad918af66e3（docs: normalize G-002 machine-readable audit state，父提交 f838488...）已由用户在外部PowerShell创建；【HISTORICAL/AS-OF：这是 R6 implementation commit 后、R6 checkpoint/re-audit 尚未发生时的工作树快照——checkpoint 文档提交尚未产生，不得虚构提交哈希；独立 re-audit 尚未进行（NOT_AUDITED_YET）。CURRENT LIVE REF：R6 checkpoint 后已进行 independent targeted re-audit，结论 REMEDIATION_6_REAUDIT_PASSED；最终 audit_result_commit=0e023694df7ea123c41c2b415784532c9d185d26；worktree_commit_pending=false。】"
+      },
+      "audit_history": {
+        "state_role": "audit_history",
+        "note": "Milestone B 审计历史的机器可读唯一事实源（canonical audit mapping）；checkpoints 记录与 Markdown 状态必须与本表一致。state_role 为精确枚举：persisted_current / historical_snapshot / audit_history；historical 豁免只授予 state_role==historical_snapshot 的节点。",
+        "rounds": [
+          {
+            "audit_round": "initial",
+            "conclusion": "MILESTONE_B_INITIAL_INDEPENDENT_AUDIT_FAILED",
+            "status": "audited_failed"
+          },
+          {
+            "audit_round": 1,
+            "conclusion": "MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED",
+            "status": "audited_failed"
+          },
+          {
+            "audit_round": 2,
+            "conclusion": "MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED",
+            "status": "audited_failed"
+          },
+          {
+            "audit_round": 3,
+            "conclusion": "MILESTONE_B_REMEDIATION_3_PRE_AUDIT_FAILED",
+            "status": "pre_audit_failed",
+            "final_sol_reaudit": "NO_FINAL_SOL_INDEPENDENT_REAUDIT_PERFORMED"
+          },
+          {
+            "audit_round": 4,
+            "conclusion": "MILESTONE_B_REMEDIATION_4_FINAL_REAUDIT_FAILED",
+            "status": "audited_failed",
+            "open_findings": [
+              "R4-NEW-001",
+              "R4-NEW-002"
+            ],
+            "closed_findings": {
+              "R3-NEW-001": "CLOSED",
+              "R3-NEW-002": "CLOSED",
+              "R3-NEW-003": "CLOSED",
+              "DOC-OBS-001": "CLOSED"
+            }
+          },
+          {
+            "audit_round": 5,
+            "conclusion": "MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED",
+            "status": "audited_failed",
+            "open_findings": [
+              "R4-NEW-002"
+            ],
+            "closed_findings": {
+              "R4-NEW-001": "CLOSED"
+            }
+          },
+          {
+            "audit_round": 6,
+            "conclusion": "MILESTONE_B_REMEDIATION_6_TARGETED_REAUDIT_FAILED",
+            "status": "audited_failed",
+            "open_findings": [
+              "R4-NEW-002",
+              "R6-NEW-001",
+              "R6-NEW-002"
+            ],
+            "closed_findings": {
+              "R4-NEW-001": "CLOSED"
+            }
+          },
+          {
+            "audit_round": 7,
+            "conclusion": "NOT_YET_PERFORMED",
+            "status": "NOT_YET_PERFORMED"
+          }
+        ]
+      }
+    }
   },
   "feature_status": {
+    "state_role": "persisted_current",
     "authoritative_core_foundation": true,
     "minimal_duel_vertical_slice": true,
     "reexecution_replay_supported": true,
@@ -208,6 +324,7 @@
     "milestone_b_complete": false
   },
   "stage_status": {
+    "state_role": "persisted_current",
     "1_source_and_callchain_audit": "passed",
     "2_legacy_invalidation_and_fail_closed_gate": "passed",
     "3_existing_engine_inventory": "passed",
@@ -221,26 +338,31 @@
   "checkpoints": [
     {
       "id": "CP-01-SOURCE-AUDIT",
+      "state_role": "audit_history",
       "status": "passed",
       "evidence": "docs/SOURCE_AND_CALLCHAIN_AUDIT.md"
     },
     {
       "id": "CP-02-LEGACY-STATUS",
+      "state_role": "audit_history",
       "status": "passed",
       "evidence": "docs/LEGACY_RESULTS_INVALID.md"
     },
     {
       "id": "CP-03-ENGINE-INVENTORY",
+      "state_role": "audit_history",
       "status": "passed",
       "evidence": "docs/IMPLEMENTATION_MATRIX.md"
     },
     {
       "id": "CP-04-CORE-FOUNDATION",
+      "state_role": "audit_history",
       "status": "passed",
       "evidence": "scripts/sgs_engine；基线提交858d6ced315dfa3df78636528c720c0117fdf3de"
     },
     {
       "id": "CP-04A-TEST-ONLY-DUEL-VERTICAL-SLICE",
+      "state_role": "audit_history",
       "status": "passed",
       "commit": "455685d6eaa1c297e9ec48a0cfaeb803b81f3406",
       "evidence": "scripts/sgs_engine/duel.py、scripts/sgs_engine/duel_replay.py、scripts/sgs_dev_runner.py及对应测试",
@@ -248,12 +370,14 @@
     },
     {
       "id": "CP-04B-FORMAL-160-CARD-NO-SKILL-DUEL",
+      "state_role": "audit_history",
       "status": "blocked",
       "evidence": "docs/ENGINE_STATUS.md与docs/IMPLEMENTATION_MATRIX.md",
       "unmet_gate": "正式单挑规则范围及边界未闭合；38种牌尚无生产适配器；AuthoritativeCoreSession.run_game仍失败关闭"
     },
     {
       "id": "CP-04D-PRODUCTION-SINGLE-TARGET-TRICK-SLICE",
+      "state_role": "audit_history",
       "status": "passed",
       "commit": "18fb9916796a34a60b62fd490529d80bd9eb75ef",
       "commit_note": "已由用户在外部PowerShell提交真实Git提交（18fb9916796a34a60b62fd490529d80bd9eb75ef，feat: implement production single-target trick slice）",
@@ -262,12 +386,14 @@
     },
     {
       "id": "CP-04C-PRODUCTION-BASIC-CARD-BATCH",
+      "state_role": "audit_history",
       "status": "passed",
       "evidence": "scripts/sgs_engine/production_cards.py、scripts/sgs_engine/production_batch.py、scripts/sgs_engine/production_replay.py、tests/test_sgs_production_basic_cards.py；正式160张牌堆六种基本牌生产批次",
       "scope": "formal；普通【杀】30、火【杀】5、雷【杀】9、【闪】24、【桃】12、【酒】5共85张实体牌接入生产注册表与权威核心；其余32种正式卡牌保持未实现并失败关闭；不构成完整正式整局"
     },
     {
       "id": "CP-04E-PRODUCTION-ZONE-TARGET-TRICK-BATCH",
+      "state_role": "audit_history",
       "status": "passed",
       "commit_note": "已由用户在外部PowerShell提交真实Git提交（2a73e5c3b3d17dab87bb13168db6e0e4e05a5130，feat: implement production zone-target trick slice）",
       "evidence": "scripts/sgs_engine/production_cards.py、scripts/sgs_engine/production_batch.py、tests/test_sgs_production_zone_target_tricks.py；正式160张牌堆目标区域选牌批次",
@@ -276,6 +402,7 @@
     },
     {
       "id": "CP-04F-HIDDEN-HANDLE-HMAC-FIX",
+      "state_role": "audit_history",
       "status": "passed",
       "commit": "1b5e125ad0baa129458b42043aac08b18dcfad96",
       "commit_note": "针对独立只读审计 AUDIT_FAILED 项（裸SHA-256句柄可被160项公开预计算表还原为目标手牌）的定点修复：改为会话级 secrets.token_bytes(32) 随机秘密的 HMAC-SHA256 句柄，绑定会话／窗口／目标／区域／手牌快照；权威回放以 authoritative_private 保存会话标识与密钥，player_visible 导出不含秘密或私有映射；新增29项安全回归测试。已由用户在外部PowerShell提交真实Git提交（1b5e125ad0baa129458b42043aac08b18dcfad96，fix: secure hidden hand choice handles）。",
@@ -284,6 +411,7 @@
     },
     {
       "id": "CP-04G-PRODUCTION-DUEL-FIRE-ATTACK-BATCH",
+      "state_role": "audit_history",
       "status": "audited",
       "commit": "b3587912da97825871ae91ea8a88b3e95c39fdde",
       "commit_note": "本批（【决斗】、【火攻】）实现提交为 b3587912da97825871ae91ea8a88b3e95c39fdde（feat: implement production duel and fire attack slice）。2026-08-03 完成独立只读审计，结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES：生产实现未发现规则、隐藏信息、伤害来源、回放或架构阻塞缺陷，未发现第二套引擎与测试虚假通过；审计指出的两个仓库测试缺口（【火攻】目标仅一张手牌、【决斗】来源死亡后已开始决斗不自动取消）已补为确定性回归测试（test_fire_attack_single_hand_target_legal_reveal、test_duel_continues_after_source_death）。审计收尾真实提交为 9c2070017fe624295ebd735bf5163f48a6ac2207（test: close duel and fire attack audit gaps），里程碑标签 milestone-b2-duel-fire-attack-audited 已建立；本文档为最终状态回填，文档提交自身哈希由用户提交后确认，不在此虚构",
@@ -305,6 +433,7 @@
     },
     {
       "id": "CP-04H-PRODUCTION-GROUP-TARGET-TRICK-BATCH",
+      "state_role": "audit_history",
       "status": "audited",
       "commit": "5f2fbf27b7041bbf3010636de37306eea5da6256",
       "commit_note": "本批（【南蛮入侵】、【万箭齐发】、【桃园结义】）基线提交 7414b0661a5cd7599d392f5ae5b287a7147438ac（docs: finalize duel and fire attack audit milestone）；实现提交 5f2fbf27b7041bbf3010636de37306eea5da6256（feat: implement production group-target trick slice）；检查点文档提交 8d68231e336dbe213ffad1c5aaa3101896fe5f2f（docs: record group-target trick checkpoint）。2026-08-03 完成独立只读审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，首次审计问题修复提交 ef98245aef32848468c7b2c4a7821ec9ae65146b（test: close group-target trick audit gaps）；最终独立复审在专用复审分支上执行，复审残项关闭提交 d2e4f49925c0bb285d44092821c3a85c496571ef（test: complete group-target trick reaudit closure），最终结论 AUDIT_PASSED；未发现规则、隐藏信息、回放、第二套引擎或虚假测试阻塞问题。本文档为最终状态回填，里程碑标签待用户提交文档后建立；文档提交自身哈希由用户提交后确认，不在此虚构；2026-08-04 回填：里程碑标签 milestone-b2-group-target-tricks-audited 已由用户真实建立（指向基线提交 6af30432993d908546d7cec114fd78ae62798ad5 的注解标签）",
@@ -327,6 +456,7 @@
     },
     {
       "id": "CP-04I-PRODUCTION-REMAINING-ORDINARY-TRICK-BATCH",
+      "state_role": "audit_history",
       "status": "audited",
       "commit": "20cb1b1f766529a88aa5f3346a4761b77eca66b7",
       "commit_note": "本批（【五谷丰登】完整生产语义＋【铁索连环】牌本体）真实提交链：基线里程碑提交 6af30432993d908546d7cec114fd78ae62798ad5（docs: finalize group-target trick audit milestone）；实现提交 20cb1b1f766529a88aa5f3346a4761b77eca66b7（feat: implement wugu and tiesuo card-body slice）；检查点文档提交 e8116c1d16e879d8445bbcf3fa0e89a161cf426d（docs: record wugu and tiesuo card-body checkpoint）；审计问题关闭提交 5b1c2c15b6a8e21563aab02d8a5c181c553e4967（fix: close wugu and tiesuo card-body audit gaps）；最终措辞修正提交 b2d4ffca18092938437d15826efdaddba8a0a689（docs: correct CP-04I audit closure wording）。2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED；批次测试文件 tests/test_sgs_production_remaining_ordinary_tricks.py 共60项（51项生产路径＋9项回归），完整 pytest 1463 passed（失败0、跳过0），compileall 通过，源码完整性审计 scanned_file_count=115、defect_count=0、audit_item_count=54；里程碑标签 milestone-b2-wugu-tiesuo-card-body-audited 由用户在本次最终文档提交后立即建立（本轮未执行 git tag）。",
@@ -348,6 +478,7 @@
     },
     {
       "id": "CP-04J-PRODUCTION-CHAIN-DAMAGE-INFRASTRUCTURE",
+      "state_role": "audit_history",
       "status": "audited",
       "commit": "c094bff5dab127917e8d0b9a2d3422e3ab736783",
       "commit_note": "本批（横置角色火／雷属性伤害传导生产基础设施）真实提交链：基线里程碑提交 f0e7e3eab559935ee20fd6ff65813764b99b0ddd（docs: finalize wugu and tiesuo card-body audit milestone，里程碑标签 milestone-b2-wugu-tiesuo-card-body-audited）；实现提交 c094bff5dab127917e8d0b9a2d3422e3ab736783（feat: implement production chain damage infrastructure）；检查点文档提交 55228c9d464daac6eb061ba356b0497ec814eba6（docs: record chain damage infrastructure checkpoint）；审计残项关闭提交 68e419b79e379184c1f1cc7ad650039771530f89（fix: close chain damage audit gaps）。统一传导入口已接通火杀、雷杀、火攻与通用伤害管线，CP-04I 临时属性伤害失败关闭门禁已移除；铁索连环完整语义完成（tiesuo_card_body_implemented=true、tiesuo_chain_damage_implemented=true、tiesuo_full_semantics_complete=true，均限于当前双人正式生产入口范围）；实现提交时完整 pytest 1503 passed（失败0、跳过0），审计残项关闭后完整 pytest 1543 passed（失败0、跳过0），compileall 通过，源码完整性审计 scanned_file_count=116、defect_count=0、audit_item_count=55。2026-08-04 完成独立审计：初次审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES，最终独立复审结论 AUDIT_PASSED；审计残项 N1-N4 已由审计残项关闭提交正式关闭；里程碑标签 milestone-b2-chain-damage-infrastructure-audited 由用户在本次最终文档提交后立即建立（本轮未执行 git tag）。",
@@ -374,6 +505,7 @@
     },
     {
       "id": "CP-04K-PRODUCTION-BORROWED-SWORD-WEAPON-SYSTEM",
+      "state_role": "audit_history",
       "status": "audited",
       "commit": "75c596b12f34a6222d972b2190148386bb670653",
       "commit_note": "本批（【借刀杀人】＋11种武器牌本体，CP-04K）真实提交链：基线提交 3ea01f4e8603dd96698a2e5deee09c1e9b3fccef（milestone-b2-chain-damage-infrastructure-audited）；实现提交 75c596b12f34a6222d972b2190148386bb670653（feat: implement borrowed sword and weapon card-body system；amend 替代旧提交 7456377f5fdc94588f6e872be6505b4e0159c803，测试文件末尾多余空行已在 amend 前修正）；检查点文档提交 f0008b571f502e0d6b7cc1800de9c2a8e39074e3（docs: record borrowed sword and weapon system checkpoint）；审计残项关闭提交 79acc6ff514af4900acfe87507374fc8d696ec97（fix: close borrowed sword weapon audit gaps）。2026-08-05 完成独立审计：首次独立只读审计结论 AUDIT_PASSED_WITH_NONBLOCKING_ISSUES（N1：装备事件reason封闭契约；N2：第二张诸葛连弩正式装备路径；N3：关键专项断言和严格回放），N1-N3 已由审计残项关闭提交正式关闭，最终独立复审结论 AUDIT_PASSED；审计残项关闭后批次测试文件84项、事件契约测试85项、完整 pytest 1649 passed（失败0、跳过0），最终独立复审有效完整重跑 1649 passed；compileall 通过，源码完整性审计 scanned_file_count=117、defect_count=0、audit_item_count=55；里程碑标签 milestone-b2-borrowed-sword-weapon-system-audited 由用户在本次最终文档提交后立即建立（本轮未执行 git tag）。",
@@ -406,6 +538,7 @@
     },
     {
       "id": "CP-04L-PRODUCTION-DELAYED-TRICK-JUDGMENT-INFRASTRUCTURE",
+      "state_role": "audit_history",
       "status": "audited",
       "commit": "35c06bd50a431a62e7c3ad01d10384bf6884c403",
       "commit_note": "本批（【乐不思蜀】＋【兵粮寸断】＋【闪电】＋判定与阶段基础设施，CP-04L）真实提交链：基线提交 185cc555324b077d0e81bef10a4518ba2dae3748（milestone-b2-borrowed-sword-weapon-system-audited）；实现提交 35c06bd50a431a62e7c3ad01d10384bf6884c403（feat: implement delayed tricks and judgment infrastructure）；检查点文档提交 4f2c9b61fccb4337a8e84ae560835d705be65bda（docs: record delayed trick and judgment checkpoint）；第一次审计修复提交 96f536e1f392fd97faf61518a849a0d515b6a82e（fix: close delayed trick audit gaps，完整 pytest 1724 passed）；最终修复提交 eeeaf558cdaeeea0eb90456f907f83dce52286f3（fix: harden player-visible replay privacy，本地修复会话完整 pytest 1733 passed）；文档收口提交 ba64b750fabd99f2bfc93697cea83e1272216d02（docs: finalize delayed trick and judgment audit milestone）。2026-08-05 第一次独立只读审计结论 AUDIT_FAILED_BLOCKING_ISSUES（唯一阻塞项 B1：player_visible 未脱敏 reshuffle 事件泄露洗后牌堆顺序，另有非阻塞残项 N1–N9）；2026-08-06 第二次最终复审结论 AUDIT_FAILED_BLOCKING_ISSUES（B1-a 动作负载 state_hash 等权威状态摘要旁路、B1-b legal_actions/chosen_action 泄露行动者完整手牌、B1-c tiesuo_recast 等隐藏摸牌未统一脱敏，以及 N5 篡改测试结构、judgment_entry_indices 陈旧残留两个复审观察项），最终修复提交已关闭全部阻塞项与观察项；Grok 网页端独立静态审计 STATIC_AUDIT_PASSED（经 GitHub 连接器读取精确目标提交 eeeaf558，完整读取18个强制生产、测试和状态文件，PARTIAL_READ=无、NOT_READ=无；未亲自运行 pytest、Git 或本地虚拟环境，1733 passed 等运行结果来自本地修复会话，两类证据不得混写）；最终审计结论 AUDIT_PASSED（2026-08-06）；compileall 通过、git diff --check 通过、源码完整性审计 scanned_file_count=118／defect_count=0／audit_item_count=55、SHA-256 清单 34/34 一致；里程碑标签 milestone-b2-delayed-trick-judgment-infrastructure-audited 已实际建立并推送（HISTORICAL/AS-OF：当时本地与 GitHub 远程标签均已验证存在并指向文档收口提交 ba64b750fabd99f2bfc93697cea83e1272216d02；CURRENT LIVE REF：当前Git标签解析为 fc3df95202b23dccfd9abf5e476485a224d6fc2c，当前标签目标以Git标签解析结果为准）；worktree_commit_pending=false。",
@@ -447,6 +580,7 @@
     },
     {
       "id": "CP-04M-PRODUCTION-ARMOR-DAMAGE-PREVENTION-INFRASTRUCTURE",
+      "state_role": "audit_history",
       "status": "audited",
       "commit": "29ab73e006408e1e1582a300801e7aa6e04bd9c4",
       "commit_note": "本批（【八卦阵】＋【仁王盾】＋【藤甲】＋【白银狮子】＋伤害修正／防止基础设施，CP-04M）真实提交链：基线提交 fc3df95202b23dccfd9abf5e476485a224d6fc2c（milestone-b2-delayed-trick-judgment-infrastructure-audited）；实现提交 29ab73e006408e1e1582a300801e7aa6e04bd9c4（feat: implement armor and damage prevention infrastructure）；检查点文档提交 f0db82afcea9944143e224aed147d108c6eae061（docs: record armor and damage prevention checkpoint）。2026-08-06 完成独立静态审计：Grok 网页端经 GitHub 连接器对精确目标 f0db82afcea9944143e224aed147d108c6eae061 进行只读静态审计，最终结论 STATIC_AUDIT_PASSED（24个强制文件全部完成相关正文阅读，PARTIAL_READ=空、NOT_READ=空，13个强制章节均为PASSED，未发现阻塞问题）；首轮结论 STATIC_AUDIT_INCOMPLETE 是强制文件正文阅读范围尚未补齐，不是代码阻塞缺陷；本地运行证据（pytest 1799 passed 等）来自本地实现会话，两类证据不得混写；本批没有审计问题修复提交；最终审计文档提交 2db702fde037b501190950687059d660c32b56da（docs: finalize armor and damage prevention audit milestone）已由用户在外部PowerShell提交；里程碑标签 milestone-b2-armor-damage-prevention-infrastructure-audited 已实际建立并推送，本地与 GitHub 远程标签均已由用户在外部PowerShell验证存在，标签在最终状态回填开始时指向 2db702fde037b501190950687059d660c32b56da；随后用户已将标签移动到承载最终仓库状态记录的提交；当前标签指向以Git标签解析结果为准，不硬编码具体SHA为永久标签目标。",
@@ -481,6 +615,7 @@
     },
     {
       "id": "CP-04N-PRODUCTION-MOUNT-DISTANCE-INFRASTRUCTURE",
+      "state_role": "audit_history",
       "status": "audited",
       "commit": "fd7d69f53e9827877b6a29d67c067012ead6a7af",
       "commit_note": "本批（正式坐骑＋距离／攻击范围基础设施，CP-04N）真实提交链：基线提交 733940b4a5e278ae3eba11e5c6522b0f1832d6b4（milestone-b2-armor-damage-prevention-infrastructure-audited）；实现提交 fd7d69f53e9827877b6a29d67c067012ead6a7af（feat: implement mounts and distance infrastructure）；检查点文档提交 3231adef9aa97cc152c7476195e9f169c3b14a15（docs: record mount and distance checkpoint）。2026-08-07 完成独立静态审计：Grok 网页端经 GitHub 连接器对精确目标 3231adef9aa97cc152c7476195e9f169c3b14a15 进行只读静态审计，最终结论 STATIC_AUDIT_PASSED（24个强制文件全部完成要求范围阅读，PARTIAL_READ=空、NOT_READ=空，14个强制审计章节全部PASSED，Blocking issues 无）；Grok 未亲自执行 pytest、compileall 或本地虚拟环境；本地运行证据（pytest 1840 passed 等）来自本地实现会话，两类证据不得混写；距离下限结论为 DISTANCE_FLOOR_FIXED（开发过程中曾出现 DISTANCE_FLOOR_CORRECT 的错误推论，但该错误在 implementation commit 产生前已修复，从未进入Git历史中的错误实现提交，因此不存在audit fix commit，也不得虚构）；本批没有审计修复提交；最终审计文档提交 fbeec9c5ad14e8f4b5da85672dab4a70f961bd4e（docs: finalize mount and distance audit milestone）已由用户在外部PowerShell提交；里程碑标签 milestone-b2-mount-distance-infrastructure-audited 已实际建立并推送，本地标签已由本轮亲自验证存在、GitHub 远程标签已由用户在外部PowerShell验证存在，标签在最终状态回填开始时指向 fbeec9c5ad14e8f4b5da85672dab4a70f961bd4e；后续若用户移动标签以指向承载最终仓库状态记录的提交，当前标签目标以Git标签解析结果为准。",
@@ -516,6 +651,7 @@
     },
     {
       "id": "CP-04O-PRODUCTION-TURN-CYCLE-DISCARD-INFRASTRUCTURE",
+      "state_role": "audit_history",
       "status": "audited",
       "commit": "b1afb1a613a45c630ae1e42975d276d62915e76d",
       "commit_note": "本批（正式弃牌阶段＋权威回合循环基础设施，CP-04O）真实提交链：基线提交 f2eb98a03a56f57ddfd4d5d0a24c0ddb26176989（milestone-b2-mount-distance-infrastructure-audited）；实现提交 b1afb1a613a45c630ae1e42975d276d62915e76d（feat: implement turn cycle and discard infrastructure）；检查点文档提交 7aacd06cdfcf1725307061a3f5c03c233a2199f7（docs: record turn cycle and discard checkpoint）；最终审计文档提交 17246077776ef8a8c7f957706d60fd91e2c0a440（docs: finalize turn cycle and discard audit milestone）。2026-08-07 完成独立只读静态审计：Grok 网页端经 GitHub 连接器对仓库 414238729-ux/- 的审计分支 deepseek-audit-turn-cycle-discard-infrastructure 上精确目标 7aacd06cdfcf1725307061a3f5c03c233a2199f7 进行只读静态审计，最终结论 STATIC_AUDIT_PASSED（READ COVERAGE：FULL_RELEVANT_SCOPE_READ，PARTIAL_READ=空、NOT_READ=空；16个强制审计章节全部PASSED；Blocking issues=NONE；Non-blocking issues=NONE）；Grok 未亲自运行 pytest、compileall 或本地虚拟环境；本地运行证据（pytest 1889 passed 等）来自本地实现会话，两类证据不得混写。批量弃置最终语义为 DISCARD_BATCH_SEMANTICS_FIXED：UI逐张选择不是正式弃牌状态转换；select/unselect 只修改待选集合；确认前被选牌仍在权威手牌区、hand_count不变、不产生CARD_MOVED／CARD_LOST／CARD_DISCARDED；discard_phase_submit 时权威重算 hand_count、hand_limit、excess，必须选择恰好excess张当前合法手牌；整批牌作为同一次弃牌阶段规则操作原子离开手牌；同次提交的逐实体底层事件共享同一权威 window_id，保存“一次弃置若干牌”的批次边界。旧的逐张正式弃置模型在 implementation commit 产生前已经修复，因此本批没有审计修复提交（audit_gap_fix_commit=null），也不得虚构。里程碑标签 milestone-b2-turn-cycle-discard-infrastructure-audited 已实际建立并推送：本地标签已由本轮亲自验证存在，并在最终仓库状态回填开始时解析到 17246077776ef8a8c7f957706d60fd91e2c0a440（final_doc_commit 定义为“最终审计文档提交”，不是“永久当前标签目标”）；用户将在最终仓库状态提交产生后把标签移动到最终仓库状态，当前标签目标始终以Git标签解析结果为准；GitHub功能分支已推送、远程标签已建立并推送的事实来自用户外部PowerShell验证。检查点状态为 audited、independent_audit_done=true、audit_conclusion=AUDIT_PASSED、worktree_commit_pending=false、final_audit_conclusion=STATIC_AUDIT_PASSED、final_pytest=1889、discard_batch_semantics=DISCARD_BATCH_SEMANTICS_FIXED。",
@@ -551,6 +687,7 @@
     },
     {
       "id": "CP-04P-PRODUCTION-WEAPON-SKILL-COMPLETION",
+      "state_role": "audit_history",
       "status": "audited",
       "commit": "f0a50ce9ace71c5bf0a22540fbdca9e03aa918b3",
       "commit_note": "本批（正式武器技能完整化，CP-04P）真实提交链：基线提交 ef340c42e180ab14832b291bc0fc83f449a771a6（milestone-b2-turn-cycle-discard-infrastructure-audited）；实现提交 f0a50ce9ace71c5bf0a22540fbdca9e03aa918b3（feat: implement verified production weapon skills）；检查点文档提交 c30b26880b947217d64304ce430d32030b42941e（docs: record weapon skill completion checkpoint）。2026-08-08 完成独立静态审计（CP_04P_INDEPENDENT_STATIC_AUDIT）：审计者为 Grok 网页端，经 GitHub 连接器对审计分支 deepseek-audit-weapon-skill-completion 上的精确目标 c30b26880b947217d64304ce430d32030b42941e 进行只读静态审计（implementation f0a50ce9ace71c5bf0a22540fbdca9e03aa918b3，baseline ef340c42e180ab14832b291bc0fc83f449a771a6）；16个强制审计章节全部PASSED（01_COMMIT_AND_SCOPE_INTEGRITY、02_REGISTRY_AND_STATISTICS、03_QINGGANGJIAN、04_HANBINGJIAN、05_GUDINGDAO、06_QINGLONGYANYUEDAO、07_GUANSHIFU、08_ZHUQUEYUSHAN、09_ZHUGELIANNU_AND_QILINGONG、10_CIXIONG_PARTIAL_BOUNDARY、11_ZHANGBA_FAIL_CLOSED_BOUNDARY、12_FANGTIAN_PARTIAL_BOUNDARY、13_EVENT_AND_STATE_SEMANTICS、14_SECURITY_REPLAY_STALE、15_TEST_QUALITY、16_DOCS_AND_GATE_CONSISTENCY），BLOCKING_FINDINGS=NONE、NONBLOCKING_FINDINGS=NONE；NOT_READ=none of the mandatory implementation/docs files；PARTIAL_READ=仅production_batch.py非武器外围部分以及非关键docs全文（武器相关changed hunks、调用链、pending、gate及关键状态均已完整追踪，不构成关键审计缺口）；独立复算确认 registered=38种/160张、complete semantics=35种/157张、complete weapons=8种/9张、partial weapons=3种/3张、unregistered=0种/0张、formal_deck_registration_complete=true；PARTIAL分类均被审计确认合理且真正fail-closed（雌雄双股剑 DATA_MODEL_GAP: CHARACTER_GENDER_METADATA_NOT_AVAILABLE；丈八蛇矛 VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP且global virtual:实体绑定放行已撤回、正式生产成功路径不可达、预备helper静态追踪确认没有旁路；方天画戟 MULTIPLAYER/MULTI_TARGET_INFRASTRUCTURE_GAP）。Grok未亲自执行pytest、compileall或本地虚拟环境；本地运行证据（pytest 1966 passed、0 failed、0 skipped、0 xfailed（WHOLE_REPO_AUDIT_REMEDIATION_1 修复后：G-001死亡座次距离、麒麟弓时序修正、G-003丈八统一fail-closed）；compileall通过；git diff --check通过；源码完整性审计 scanned_file_count=122、defect_count=0、audit_item_count=55；SHA-256 38个文件条目全部一致＋1个hash_note）来自本地实现会话，两类证据不得混写。本批没有审计修复提交（audit_gap_fix_commit=null），不得虚构。审计记录文档提交已真实产生并回填：final_doc_commit=08d78cb6fed86360d647728a6f70422326918ff2（docs: record weapon skill independent audit），worktree_commit_pending=false（本轮文档将作为最终稳定状态提交）；里程碑标签 milestone-b2-weapon-skills-audited 已实际建立并推送：本地与 GitHub 远程标签均已由用户在外部验证存在，并在本轮开始时解析到最终稳定基线 398ea58c9006ee9141ea1acfba35f6d9c497be48（docs: finalize weapon skill audit state，最终状态提交，tag 当前目标以Git标签解析结果为准）；milestone_tag_verified=true、milestone_tag_target_resolution=git_tag_resolution。",
@@ -587,7 +724,8 @@
     },
     {
       "id": "WHOLE_REPO_AUDIT_REMEDIATION_1",
-      "status": "committed_pending_audit",
+      "state_role": "audit_history",
+      "status": "audited_failed",
       "commit": "f1731b95199165a3449f1a0ce84d9facfc1b41c5",
       "commit_note": "本批（整仓敌对式总审计定向修复，WHOLE_REPO_AUDIT_REMEDIATION_1）真实提交链：基线/历史CP-04P最终稳定提交 398ea58c9006ee9141ea1acfba35f6d9c497be48（milestone-b2-weapon-skills-audited，旧CP-04P历史身份与标签均保持未移动）；实现提交 f1731b95199165a3449f1a0ce84d9facfc1b41c5（fix: remediate whole-repo audit findings，父提交 398ea58c...）。原整仓总审计 CP04L_TO_CP04P_WHOLE_REPO_ADVERSARIAL_AUDIT 最终结论为 WHOLE_REPO_AUDIT_FAILED，原finding：G-001 MAJOR DEAD_SEAT_DISTANCE_AND_TARGET_VALIDITY_LEAK；G-002 MAJOR COMPLETE_RULE_SOURCE_NOT_INDEPENDENTLY_CLOSED；G-003 MINOR ZHANGBA_PARTIAL_ENUMERATION_SPLIT_BRAIN；G-004 MINOR FINAL_DOC_AND_GIT_STATE_DRIFT；G-005 MINOR HISTORICAL_RULE_TEXT_NOT_FULLY_PROPAGATED；N-001 QILIN_DYING_ORDER_REQUIRES_RULE_CONFIRMATION（后续用户移动版实测证明麒麟弓当前生产timing确实错误，N-001升级为实际修复项）。本次修复结果：G-001 base_seat_distance 改为存活角色环（alive-seat ring）索引计算、is_valid_slash_target 拒绝死亡目标、3/4/5人死亡座次回归、multi_player_production_proven 仍 false；麒麟弓（游戏内正式文本 IN_GAME_CARD_TEXT_CONFIRMED ＋ USER_CONFIRMED_MOBILE_RULE）：正确顺序为 Slash确定将造成伤害→Qilin choice→坐骑离区→HP扣减/DAMAGE→DYING，不再写旧 DAMAGE→Qilin；诸葛连弩来源等级 IN_GAME_CARD_TEXT_CONFIRMED；丈八蛇矛 PARTIAL/fail-closed，不再在正式公共枚举中先生成 virtual:zhangba:* candidate 再撞公共实体验证器，global virtual: 豁免仍不存在；G-004/G-005 当前 live docs/comments 已清理（CP-04P tag 已实际存在并解析到 398ea58c...、CP-04L live tag 当前解析到 fc3df95202b23dccfd9abf5e476485a224d6fc2c、__init__.py 弃牌阶段/武器技能状态、麒麟弓时序表述），历史 as-of 记录保留。G-002 边界：针对审计明确点名的诸葛连弩、麒麟弓，独立来源证据已补齐；不得据此写 G-002 global finding = independently re-audited closed，也不得写 WHOLE_REPO_AUDIT_PASSED（targeted independent re-audit 尚未发生）。验证证据（implementation/regression evidence，不是新的独立审计结论）：完整 pytest 1966 passed（0 failed、0 skipped、0 xfailed）；compileall passed；source integrity scanned_file_count=122、defect_count=0、audit_item_count=55；JSON passed；SHA-256 passed；git diff --check passed；git ls-files -u empty；统计 registered 38种/160张、complete semantics 35种/157张、COMPLETE weapons 8种/9张、PARTIAL weapons 3种/3张、unregistered 0种/0张。门禁保持：authoritative_full_game_core=false、formal_run_ready=false、formal_duel_no_skill_ready=false、multi_player_production_proven=false、milestone_b_complete=false、unsupported_rules=1、approximation_count=0。当前状态：status=committed_pending_audit、independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET、checkpoint_commit=null（检查点文档提交尚未产生，不得虚构）、milestone_tag=null、worktree_commit_pending=true；独立 re-audit 尚未进行。 【HISTORICAL/AS-OF：本条目标记的 independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET 为 R1 实现提交后文档回填时的状态；CURRENT LIVE REF：随后 remediation-1 targeted independent re-audit 结论为 REMEDIATION_REAUDIT_FAILED（R1 未获得通过的独立审计，该失败是 WHOLE_REPO_AUDIT_REMEDIATION_2 的启动依据），不得把 R1 改写为 PASSED。】",
       "independent_audit_done": true,
@@ -612,7 +750,7 @@
         "audit_gap_fix_commit": null,
         "final_audit_conclusion": null,
         "milestone_tag": null,
-        "final_status": "committed_pending_audit",
+        "final_status": "audited_failed",
         "milestone_tag_note": null,
         "final_doc_commit": null,
         "final_doc_commit_message": null,
@@ -622,7 +760,8 @@
     },
     {
       "id": "WHOLE_REPO_AUDIT_REMEDIATION_2",
-      "status": "committed_pending_audit",
+      "state_role": "audit_history",
+      "status": "audited_failed",
       "commit": "e63b40ac1690e03315fd3e0734d5723fb80d5182",
       "commit_note": "本批（整仓敌对式总审计定向修复第二轮，WHOLE_REPO_AUDIT_REMEDIATION_2）真实提交链：基线/R1文档收口提交 4aafd95aaef78f5ed13038a9314de1eadbad2160（docs: record whole-repo audit remediation checkpoint）；实现提交 e63b40ac1690e03315fd3e0734d5723fb80d5182（fix: complete second whole-repo audit remediation，父提交 4aafd95...）。背景：原整仓总审计 CP04L_TO_CP04P_WHOLE_REPO_ADVERSARIAL_AUDIT 结论 WHOLE_REPO_AUDIT_FAILED（G-001..G-005、N-001）；remediation-1 targeted independent re-audit 结论 REMEDIATION_REAUDIT_FAILED（R1 未获得通过的独立审计，该失败是本轮启动依据）。本轮修复：G-001 residual dead-self（dead self 不再在 alive validation 前返回0；dead source/target 统一 fail-closed；alive self 仍=0；alive-seat ring 主体保持）；R1-NEW-001 Qilin pending 不再保存 pre-armor base_amount、改保存 authoritative resolution.final_amount、Qilin 结束后不重新运行 armor resolver（Baiyin/Wine 最终1伤；Tengjia/Fire 最终2伤；HP/DAMAGE/dying 按 resolved final damage 继续）；R1-NEW-002 Qinggang damage-path armor-invalid clear 绑定真正 damage completion（Qilin pre-damage pending 期间不提前清；dodge/prevention 各自正确终点保持）；G-003 仍 CLOSED（不回滚丈八统一 fail-closed）；G-004 live Git ref 与 historical/as-of 记录分层；G-005 当前非历史旧注释已清理（Zhuque borrowed、discard batch、Guding 旧 snapshot 注释）。【杀】family 通则（USER_CONFIRMED_RULE_TEXT＋USER_CONFIRMED_MOBILE_RULE，基础术语20.12）与本轮用户提供的8项移动版游戏内正式文本（普通杀、火杀、雷杀、过河拆桥、决斗、无中生有、桃园结义、仁王盾，均 IN_GAME_CARD_TEXT_CONFIRMED，2026-08-09；决斗另有 USER_CONFIRMED_MOBILE_RULE：目标先响应、双方轮流打出杀、普通/火/雷杀均可满足、首先未打出杀者受到另一角色造成1伤害）已同步 Knowledge／牌堆CSV／结构化CSV／ENGINE_STATUS source inventory。G-002：全部35 declared COMPLETE 已重新建立 source provenance inventory，35项全部覆盖、no missing、no extra、无剩余 USER_OR_EXTERNAL_SUMMARY_UNVERIFIED、无剩余 USER_RULE_CONFIRMATION_REQUIRED、无 MODEL_INFERENCE 作为 COMPLETE 规则真值来源；当前只能写 G-002_SOURCE_GAP_LOCALLY_RESOLVED_PENDING_INDEPENDENT_REAUDIT，（HISTORICAL/AS-OF：R2 回填时独立 re-audit 尚未发生）不得写 G-002=CLOSED、REMEDIATION_REAUDIT_PASSED 或 WHOLE_REPO_AUDIT_PASSED，最终关闭当时必须等待同一个 GPT-5.6 Sol 独立 targeted re-audit。验证证据（implementation/regression evidence，不是独立审计结论）：完整 pytest 1974 passed（0 failed、0 skipped、0 xfailed）；compileall passed；source integrity scanned_file_count=122、defect_count=0、audit_item_count=55；JSON passed；SHA-256 38 entries mismatch=0；git diff --check passed；git ls-files -u empty。统计 registered 38种/160张、complete semantics 35种/157张、COMPLETE weapons 8种/9张、PARTIAL weapons 3种/3张、unregistered 0种/0张。门禁保持：authoritative_full_game_core=false、formal_run_ready=false、formal_duel_no_skill_ready=false、multi_player_production_proven=false、milestone_b_complete=false、unsupported_rules=1、approximation_count=0。当前状态：status=committed_pending_audit、independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET、checkpoint_commit=null（检查点文档提交尚未产生，不得虚构）、milestone_tag=null、worktree_commit_pending=true；独立 re-audit 尚未进行。 【HISTORICAL/AS-OF：本条目标记的 independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET 为 R2 实现提交后文档回填时的状态；CURRENT LIVE REF：随后 remediation-2 targeted independent re-audit 结论为 REMEDIATION_2_REAUDIT_FAILED（原因是当时 G-004/G-005 仍 OPEN；R2 re-audit 已确认 CLOSED 项 G-001、G-002、G-003、QILIN_TIMING_BUG、R1-NEW-001、R1-NEW-002 保持，但 R2 整体不视为 PASSED），不得把 R2 改写为 PASSED。】",
       "independent_audit_done": true,
@@ -647,7 +786,7 @@
         "audit_gap_fix_commit": null,
         "final_audit_conclusion": null,
         "milestone_tag": null,
-        "final_status": "committed_pending_audit",
+        "final_status": "audited_failed",
         "milestone_tag_note": null,
         "final_doc_commit": null,
         "final_doc_commit_message": null,
@@ -658,7 +797,8 @@
     },
     {
       "id": "WHOLE_REPO_AUDIT_REMEDIATION_3",
-      "status": "committed_pending_audit",
+      "state_role": "audit_history",
+      "status": "audited_failed",
       "commit": "9c63496e7f34430d8aff3c23e9afc5b5c4482557",
       "commit_note": "本批（整仓敌对式总审计定向修复第三轮/最小收尾，WHOLE_REPO_AUDIT_REMEDIATION_3）真实提交链：基线/R2文档收口提交 3121a30089307cda4501f13b1c1aaa09130257f8（docs: record second whole-repo audit remediation checkpoint）；实现提交 9c63496e7f34430d8aff3c23e9afc5b5c4482557（fix: close remaining whole-repo audit findings，父提交 3121a300...）。背景：原整仓总审计 CP04L_TO_CP04P_WHOLE_REPO_ADVERSARIAL_AUDIT 结论 WHOLE_REPO_AUDIT_FAILED（G-001..G-005、N-001）；remediation-1 targeted re-audit 结论 REMEDIATION_REAUDIT_FAILED；remediation-2 targeted re-audit 结论 REMEDIATION_2_REAUDIT_FAILED（原因是当时 G-004/G-005 仍 OPEN），均不得改写。R2 re-audit 已确认 CLOSED 项（G-001、G-002、G-003、QILIN_TIMING_BUG、R1-NEW-001、R1-NEW-002）在本轮保持，不重新设计或重构。本轮修复范围（仅最小收尾）：G-004——CP-04L 旧 ba64b750... 所有历史引用明确标记 HISTORICAL/AS-OF，current/live 语态统一为 fc3df95202b23dccfd9abf5e476485a224d6fc2c（真实 Git tag 未移动）；G-005——清除当前非历史 stale（Zhuque borrowed“未提供转换”旧说明、weapon skill test header 旧 COMPLETE/PARTIAL 状态、ignore_armor“无真实武器调用者”旧说明、turn-cycle discard test header 旧“逐张正式弃置”说明）；R2-NEW-001——weapon_choice 运行时二元结构与 annotation 统一为 tuple[str, str] | None（静态契约修复，无 gameplay 语义变化）。验证证据（implementation/regression evidence，不是独立审计结论）：完整 pytest 1974 passed（0 failed、0 skipped、0 xfailed）；compileall passed；source integrity scanned_file_count=122、defect_count=0、audit_item_count=55；JSON passed；SHA-256 38 entries mismatch=0；git diff --check passed；git ls-files -u empty。统计 registered 38种/160张、complete semantics 35种/157张、COMPLETE weapons 8种/9张、PARTIAL weapons 3种/3张、unregistered 0种/0张。门禁保持：authoritative_full_game_core=false、formal_run_ready=false、formal_duel_no_skill_ready=false、multi_player_production_proven=false、milestone_b_complete=false、unsupported_rules=1、approximation_count=0。当前状态：status=committed_pending_audit、independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET、checkpoint_commit=null（检查点文档提交尚未产生，不得虚构）、milestone_tag=null、worktree_commit_pending=true；独立 re-audit 尚未进行；不得提前写 REMEDIATION_3_REAUDIT_PASSED 或 WHOLE_REPO_AUDIT_PASSED。 【HISTORICAL/AS-OF：本条目标记的 independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET 为 R3 实现提交后文档回填时的状态；CURRENT LIVE REF：随后 remediation-3 targeted independent re-audit 结论为 REMEDIATION_3_REAUDIT_FAILED（原因是当时 G-004 仍有一个 docs 漏项与 R3-NEW-001 G-002 状态矛盾；R3 re-audit 已确认 G-005=CLOSED、R2-NEW-001=CLOSED，并确认 G-001/G-002/G-003/QILIN_TIMING_BUG/R1-NEW-001/R1-NEW-002=NO_REGRESSION，但 R3 整体不视为 PASSED），不得把 R3 改写为 PASSED。】",
       "independent_audit_done": true,
@@ -683,7 +823,7 @@
         "audit_gap_fix_commit": null,
         "final_audit_conclusion": null,
         "milestone_tag": null,
-        "final_status": "committed_pending_audit",
+        "final_status": "audited_failed",
         "milestone_tag_note": null,
         "final_doc_commit": null,
         "final_doc_commit_message": null,
@@ -694,7 +834,8 @@
     },
     {
       "id": "WHOLE_REPO_AUDIT_REMEDIATION_4",
-      "status": "committed_pending_audit",
+      "state_role": "audit_history",
+      "status": "audited_failed",
       "commit": "5eb367599e9d7deb26220cfff8b81144d0d88eff",
       "commit_note": "本批（整仓敌对式总审计定向修复第四轮/docs-only 治理收尾，WHOLE_REPO_AUDIT_REMEDIATION_4）真实提交链：基线/R3文档收口提交 6bef086eae51d48e7f12c3e2f2a40d97bef1d651（docs: record third whole-repo audit remediation checkpoint）；实现提交 5eb367599e9d7deb26220cfff8b81144d0d88eff（docs: close remaining whole-repo audit governance findings，父提交 6bef086...）。背景：原整仓总审计 CP04L_TO_CP04P_WHOLE_REPO_ADVERSARIAL_AUDIT 结论 WHOLE_REPO_AUDIT_FAILED（G-001..G-005、N-001）；remediation-1 targeted re-audit 结论 REMEDIATION_REAUDIT_FAILED；remediation-2 targeted re-audit 结论 REMEDIATION_2_REAUDIT_FAILED（因当时 G-004/G-005 仍 OPEN）；remediation-3 targeted re-audit 结论 REMEDIATION_3_REAUDIT_FAILED（因当时 G-004 仍有 ENGINE_STATUS §8 CP-04L tag-target 无限定漏项与 R3-NEW-001 G-002 状态矛盾），均不得改写。R3 re-audit 已确认 G-005=CLOSED、R2-NEW-001=CLOSED，并确认 G-001/G-002/G-003/QILIN_TIMING_BUG/R1-NEW-001/R1-NEW-002=NO_REGRESSION，本轮保持（R4 无 runtime/gameplay 修改）。本轮修复范围（仅 docs governance）：G-004——ENGINE_STATUS §8 CP-04L current tag-target 漏项修正（HISTORICAL/AS-OF：当时标签状态记录为指向 ba64b750...；CURRENT LIVE REF：当前 Git tag 解析为 fc3df95202b23dccfd9abf5e476485a224d6fc2c，以当前 Git ref 解析结果为准；真实 Git tag 未移动），全仓 ba64b750 tag-target 陈述均明确 HISTORICAL/AS-OF；R3-NEW-001——G-002 状态分层（HISTORICAL/AS-OF：R2 implementation 完成但独立 re-audit 尚未发生时状态为 G-002_SOURCE_GAP_LOCALLY_RESOLVED_PENDING_INDEPENDENT_REAUDIT；CURRENT：R2 targeted independent re-audit 已明确 G-002=CLOSED；R2 整体历史结论仍为 REMEDIATION_2_REAUDIT_FAILED，因当时 G-004/G-005 仍 OPEN，不得把 R2 整体 FAILED 误写成 G-002 仍 OPEN）。验证（docs-only 治理批次）：runtime/gameplay files modified=0；未重新运行 pytest，引用 R3 已记录的实现回归证据 1974 passed（0 failed、0 skipped、0 xfailed）；JSON parse 通过；SHA-256 38 entries mismatch=0；docs consistency scan current-state contradiction=0；git diff --check passed；git ls-files -u empty。统计保持：registered 38种/160张、implementation semantics complete 35种/157张、COMPLETE weapons 8种/9张、PARTIAL weapons 3种/3张、unregistered 0种/0张。门禁保持：authoritative_full_game_core=false、formal_run_ready=false、formal_duel_no_skill_ready=false、multi_player_production_proven=false、milestone_b_complete=false、unsupported_rules=1、approximation_count=0。当前状态：status=committed_pending_audit、independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET、checkpoint_commit=null（检查点文档提交尚未产生，不得虚构）、milestone_tag=null、worktree_commit_pending=true；独立 re-audit 尚未进行；不得提前写 REMEDIATION_4_REAUDIT_PASSED 或 WHOLE_REPO_AUDIT_PASSED。 【HISTORICAL/AS-OF：本条目标记的 independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET 为 R4 实现提交后文档回填时的状态；CURRENT LIVE REF：随后 remediation-4 targeted independent re-audit 结论为 REMEDIATION_4_REAUDIT_FAILED（原因是当时唯一残余 current-state contradiction——ENGINE_STATUS 顶部 R2 G-002 子句未分层；R4 re-audit 已确认 G-004=CLOSED、G-005=STILL_CLOSED、R2-NEW-001=STILL_CLOSED，并确认 G-001/G-002/G-003/QILIN_TIMING_BUG/R1-NEW-001/R1-NEW-002=NO_REGRESSION，但 R4 整体不视为 PASSED），不得把 R4 改写为 PASSED。】",
       "independent_audit_done": true,
@@ -719,7 +860,7 @@
         "audit_gap_fix_commit": null,
         "final_audit_conclusion": null,
         "milestone_tag": null,
-        "final_status": "committed_pending_audit",
+        "final_status": "audited_failed",
         "milestone_tag_note": null,
         "final_doc_commit": null,
         "final_doc_commit_message": null,
@@ -730,7 +871,8 @@
     },
     {
       "id": "WHOLE_REPO_AUDIT_REMEDIATION_5",
-      "status": "committed_pending_audit",
+      "state_role": "audit_history",
+      "status": "audited_failed",
       "commit": "2c28cf0404f4b7bbc0752fa75594580fafef1256",
       "commit_note": "本批（整仓敌对式总审计定向修复第五轮/单点最终收尾，WHOLE_REPO_AUDIT_REMEDIATION_5）真实提交链：基线/R4文档收口提交 bf5d83c4b1fa0cecb1994d918f66eb82387b4f99（docs: record fourth whole-repo audit remediation checkpoint）；实现提交 2c28cf0404f4b7bbc0752fa75594580fafef1256（docs: resolve final audit status contradiction，父提交 bf5d83c...）。背景：原整仓总审计 CP04L_TO_CP04P_WHOLE_REPO_ADVERSARIAL_AUDIT 结论 WHOLE_REPO_AUDIT_FAILED（G-001..G-005、N-001）；remediation-1/2/3/4 targeted re-audit 结论 REMEDIATION_REAUDIT_FAILED／REMEDIATION_2_REAUDIT_FAILED／REMEDIATION_3_REAUDIT_FAILED／REMEDIATION_4_REAUDIT_FAILED，均不得改写。R4 re-audit 已确认 G-004=CLOSED、G-005=STILL_CLOSED、R2-NEW-001=STILL_CLOSED，并确认 G-001/G-002/G-003/QILIN_TIMING_BUG/R1-NEW-001/R1-NEW-002=NO_REGRESSION；R4 唯一残余为 R4-NEW-001／R3-NEW-001 residual（ENGINE_STATUS 顶部>状态：总述中 R2 G-002 子句未分层）。本轮唯一修复（docs-only，implementation 实际只修改 docs/ENGINE_STATUS.md，1 insertion/1 deletion）：将旧 current 歧义表述“G-002本地source gap清零[pending independent re-audit]”改为明确双层语义——HISTORICAL/AS-OF：R2 implementation 完成、独立 targeted re-audit 尚未发生时状态为 G-002_SOURCE_GAP_LOCALLY_RESOLVED_PENDING_INDEPENDENT_REAUDIT；CURRENT：R2 targeted independent re-audit 已确认 G-002=CLOSED；同时保持 R2 整体=REMEDIATION_2_REAUDIT_FAILED（因当时 G-004/G-005 仍 OPEN），不得把 R2 整体 FAILED 与 G-002 单项 CLOSED 混淆。验证（docs-only）：runtime/gameplay files modified=0；未重新运行 pytest（引用既有 implementation/regression evidence 1974 passed、0 failed、0 skipped、0 xfailed，不写成 R5 本轮新运行证据）；JSON parse 通过；SHA-256 38 entries mismatch=0；docs current-state contradiction scan=0；git diff --check passed；git ls-files -u empty。统计保持：registered 38种/160张、implementation semantics complete 35种/157张、COMPLETE weapons 8种/9张、PARTIAL weapons 3种/3张、unregistered 0种/0张。门禁保持：authoritative_full_game_core=false、formal_run_ready=false、formal_duel_no_skill_ready=false、multi_player_production_proven=false、milestone_b_complete=false、unsupported_rules=1、approximation_count=0。当前状态：status=committed_pending_audit、independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET、checkpoint_commit=null（检查点文档提交尚未产生，不得虚构）、milestone_tag=null、worktree_commit_pending=true；独立 re-audit 尚未进行；不得把 REMEDIATION_5_REAUDIT_PASSED 或 WHOLE_REPO_AUDIT_PASSED 作为既成事实。 【HISTORICAL/AS-OF：本条目标记的 independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET 为 R5 实现提交后文档回填时的状态；CURRENT LIVE REF：随后 remediation-5 targeted independent re-audit 结论为 REMEDIATION_5_REAUDIT_FAILED（唯一新 finding R5-NEW-001 MINOR——manifest g002_source_gap_locally_resolved 字段仍表现为 current pending；R5 re-audit 已确认 R4-NEW-001/R3-NEW-001 residual=CLOSED、G-004/G-005/R2-NEW-001=STILL_CLOSED、六项 NO_REGRESSION、G-002 source finding 本身 CLOSED，但 R5 整体不视为 PASSED），不得把 R5 改写为 PASSED。】",
       "independent_audit_done": true,
@@ -755,7 +897,7 @@
         "audit_gap_fix_commit": null,
         "final_audit_conclusion": null,
         "milestone_tag": null,
-        "final_status": "committed_pending_audit",
+        "final_status": "audited_failed",
         "milestone_tag_note": null,
         "final_doc_commit": null,
         "final_doc_commit_message": null,
@@ -766,6 +908,7 @@
     },
     {
       "id": "WHOLE_REPO_AUDIT_REMEDIATION_6",
+      "state_role": "audit_history",
       "status": "audited",
       "commit": "2a075580484fadf3a2e4b7b76f4e4ad918af66e3",
       "commit_note": "本批（整仓敌对式总审计定向修复第六轮/manifest-only 单字段治理收尾，WHOLE_REPO_AUDIT_REMEDIATION_6）真实提交链：基线/R5文档收口提交 f83848881e6f1ff03621f5383b00f3580d230283（docs: record fifth whole-repo audit remediation checkpoint）；实现提交 2a075580484fadf3a2e4b7b76f4e4ad918af66e3（docs: normalize G-002 machine-readable audit state，父提交 f838488...）。背景：原整仓总审计 CP04L_TO_CP04P_WHOLE_REPO_ADVERSARIAL_AUDIT 结论 WHOLE_REPO_AUDIT_FAILED（G-001..G-005、N-001）；remediation-1/2/3/4/5 targeted re-audit 结论 REMEDIATION_REAUDIT_FAILED／REMEDIATION_2_REAUDIT_FAILED／REMEDIATION_3_REAUDIT_FAILED／REMEDIATION_4_REAUDIT_FAILED／REMEDIATION_5_REAUDIT_FAILED，均不得改写。R5 re-audit 唯一新 finding 为 R5-NEW-001 MINOR（manifest machine-readable generic current field g002_source_gap_locally_resolved 仍表达 G-002 pending）；R5 re-audit 已确认 R4-NEW-001=CLOSED、R3-NEW-001 residual=CLOSED、G-004=STILL_CLOSED、G-005=STILL_CLOSED、R2-NEW-001=STILL_CLOSED，并确认 G-001/G-002/G-003/QILIN_TIMING_BUG/R1-NEW-001/R1-NEW-002 全部 NO_REGRESSION，G-002 source finding 本身仍=CLOSED。本轮唯一实现修复（docs-only）：final_verification.whole_repo_audit_remediation_2.g002_source_gap_locally_resolved 值由 G-002_SOURCE_GAP_LOCALLY_RESOLVED_PENDING_INDEPENDENT_REAUDIT 改为 G-002_CLOSED，key 保持不变；字段消费者搜索确认仅 manifest 自身使用（无 scripts/tests/schema 消费者）；历史 pending 事实继续由明确 HISTORICAL/AS-OF 的 R2 历史 checkpoint 记录承载，未新增任何 generic current scalar 重新表达 G-002 pending。验证（docs-only）：runtime/gameplay files modified=0；未重新运行 pytest（1974 passed、0 failed、0 skipped、0 xfailed 仅作为既有 implementation/regression evidence）；JSON parse 通过；SHA-256 38 entries mismatch=0；manifest machine-state consistency scan 通过（g002_source_gap_locally_resolved 唯一值=G-002_CLOSED；所有 PENDING_INDEPENDENT_REAUDIT 命中均明确 historical/as-of；R2 overall=REMEDIATION_2_REAUDIT_FAILED；R5 overall=REMEDIATION_5_REAUDIT_FAILED）；four-doc current-state contradiction scan=0；git diff --check passed；git ls-files -u empty。统计保持：registered 38种/160张、implementation semantics complete 35种/157张、COMPLETE weapons 8种/9张、PARTIAL weapons 3种/3张、unregistered 0种/0张。门禁保持：authoritative_full_game_core=false、formal_run_ready=false、formal_duel_no_skill_ready=false、multi_player_production_proven=false、milestone_b_complete=false、unsupported_rules=1、approximation_count=0。HISTORICAL/AS-OF（R6 checkpoint 创建、独立 targeted re-audit 尚未发生时的状态）：status=committed_pending_audit、independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET、checkpoint_commit=null（检查点文档提交尚未产生，不得虚构）、milestone_tag=null、worktree_commit_pending=true；独立 re-audit 尚未进行；当时不得把 REMEDIATION_6_REAUDIT_PASSED 或 WHOLE_REPO_AUDIT_PASSED 作为既成事实。 【独立 targeted re-audit 结果回填（WHOLE_REPO_AUDIT_REMEDIATION_6_TARGETED_REAUDIT）：结论 REMEDIATION_6_REAUDIT_PASSED；R5-NEW-001=CLOSED，R4-NEW-001/R3-NEW-001 residual/G-004/G-005/R2-NEW-001=STILL_CLOSED，R2_CLOSED_FINDINGS_REGRESSION_CHECK 六项 NO_REGRESSION，NEW_FINDINGS=NONE；章节 18/19/25 PASSED，关键 PARTIAL_READ=0、NOT_READ=0；被审计 checkpoint=95d068dd01a97ae4337696a25df4edb1b317f26b、implementation=2a075580484fadf3a2e4b7b76f4e4ad918af66e3、audit_result_commit=null（回填提交尚未产生，不得虚构）、worktree_commit_pending=true、milestone_tag=null；历史链 R1-R5 FAILED 与原始 WHOLE_REPO_AUDIT_FAILED 保持，不得压平。】 【最终审计结果提交身份回填：audit_result_commit=0e023694df7ea123c41c2b415784532c9d185d26（docs: record successful whole-repo remediation re-audit，承载 WHOLE_REPO_AUDIT_REMEDIATION_6_TARGETED_REAUDIT 结果回填的已存在真实提交），worktree_commit_pending=false；status=audited、independent_audit_done=true、audit_conclusion=REMEDIATION_6_REAUDIT_PASSED 保持；g002_source_gap_locally_resolved=G-002_CLOSED 保持；original WHOLE_REPO_AUDIT_FAILED 与 R1-R5 REMEDIATION_*_REAUDIT_FAILED 保持；未创建 remediation-7。】",
@@ -803,21 +946,25 @@
     },
     {
       "id": "MILESTONE_B_FORMAL_160_CARD_NO_SKILL_DUEL_ADVANCEMENT",
-      "status": "committed_pending_audit",
+      "state_role": "audit_history",
+      "status": "audited_failed",
       "commit": "8ce497064fbb4686177cf63cca5265e902037129",
-      "commit_note": "【CURRENT LIVE】MILESTONE_B_FORMAL_160_CARD_NO_SKILL_DUEL_ADVANCEMENT 的 Milestone B 推进已由用户随 MILESTONE_B_AUDIT_REMEDIATION_1 实现提交 8ce497064fbb4686177cf63cca5265e902037129 一起提交（该提交同时承载 remediation-1 修复）；本条目 commit=8ce4970...、status=committed_pending_audit、worktree_commit_pending=false、audit_conclusion=REMEDIATION_1_REAUDIT_FAILED（见 MILESTONE_B_AUDIT_REMEDIATION_1 条目）。\n【HISTORICAL/AS-OF（PRECOMMIT SNAPSHOT，2026-08-09 工作树）】本批最初在固定基线 2ed9627ba816e9ab5023bd3017ce7cca90ec0022（feat: advance formal 160-card duel infrastructure）之后完成，当时尚未提交、commit=null/pending。用户新确认规则：①丈八蛇矛材料生命周期 USER_CONFIRMED_RULE（2026-08-09）——HAND→PROCESSING→DISCARD，VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP 已关闭，丈八蛇矛恢复 COMPLETE（global 37/159、duel 38/160）；②formal soldier profile USER_CONFIRMED_PROJECT_FORMAL_PROFILE（2026-08-09）——双方士兵（soldier）无技能、max_hp=4/initial_hp=4/初始手牌4、唯一 DeterministicRNG 先手、DRAW 正常摸2、无手气卡/身份奖励、正式160牌、死亡胜负，effective gender=NONE（雌雄不因“异性”发动）。gender 模型新增 CharacterGender.NONE（无性别有效状态），与资料未确认（None）严格区分。正式100-seed验收（FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE，seeds 0..99、formal profile、analysis_only=false、每局 strict replay reexecution + final_state_hash）100/100 通过、failures=0、safety-cap 0、unsupported 0、approximation 0；artifact=docs/FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE.json。live gate 现场派生：mode_implemented=true、all_cards_implemented=true（duel-scope）、unsupported_rules=0、fixed_seed_acceptance_passed=true、formal_duel_no_skill_ready=true、formal_run_ready=true、blockers=[]。全局门禁保持：authoritative_full_game_core=false（正式整局引擎仍未完成）、multi_player_production_proven=false、unsupported_rules=1（完整整局哨兵）。本地全量验证：pytest 2041 passed（0 failed/0 skipped/0 xfailed）、compileall exit0、source integrity、JSON/SHA/diff-check 通过。Remediation 2 工作树未提交（本轮）；Milestone B 独立审计状态见 MILESTONE_B_AUDIT_REMEDIATION_1 条目（remediation-1 re-audit FAILED，remediation-2 NOT_AUDITED_YET）；未创建 remediation-7。",
+      "commit_note": "【AUDIT HISTORY】MILESTONE_B_FORMAL_160_CARD_NO_SKILL_DUEL_ADVANCEMENT 的 Milestone B 推进已由用户随 MILESTONE_B_AUDIT_REMEDIATION_1 实现提交 8ce497064fbb4686177cf63cca5265e902037129 一起提交（该提交同时承载 remediation-1 修复）；本条目 commit=8ce4970...、status=audited_failed、worktree_commit_pending=false、audit_conclusion=REMEDIATION_1_REAUDIT_FAILED（见 MILESTONE_B_AUDIT_REMEDIATION_1 条目）。\n【HISTORICAL/AS-OF（PRECOMMIT SNAPSHOT，2026-08-09 工作树）】本批最初在固定基线 2ed9627ba816e9ab5023bd3017ce7cca90ec0022（feat: advance formal 160-card duel infrastructure）之后完成，当时尚未提交、commit=null/pending。用户新确认规则：①丈八蛇矛材料生命周期 USER_CONFIRMED_RULE（2026-08-09）——HAND→PROCESSING→DISCARD，VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP 已关闭，丈八蛇矛恢复 COMPLETE（global 37/159、duel 38/160）；②formal soldier profile USER_CONFIRMED_PROJECT_FORMAL_PROFILE（2026-08-09）——双方士兵（soldier）无技能、max_hp=4/initial_hp=4/初始手牌4、唯一 DeterministicRNG 先手、DRAW 正常摸2、无手气卡/身份奖励、正式160牌、死亡胜负，effective gender=NONE（雌雄不因“异性”发动）。gender 模型新增 CharacterGender.NONE（无性别有效状态），与资料未确认（None）严格区分。正式100-seed验收（FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE，seeds 0..99、formal profile、analysis_only=false、每局 strict replay reexecution + final_state_hash）100/100 通过、failures=0、safety-cap 0、unsupported 0、approximation 0；artifact=docs/FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE.json。live gate 现场派生：mode_implemented=true、all_cards_implemented=true（duel-scope）、unsupported_rules=0、fixed_seed_acceptance_passed=true、formal_duel_no_skill_ready=true、formal_run_ready=true、blockers=[]。全局门禁保持：authoritative_full_game_core=false（正式整局引擎仍未完成）、multi_player_production_proven=false、unsupported_rules=1（完整整局哨兵）。本地全量验证：pytest 2041 passed（0 failed/0 skipped/0 xfailed）、compileall exit0、source integrity、JSON/SHA/diff-check 通过。Remediation 2 工作树未提交（本轮）；Milestone B 独立审计状态见 MILESTONE_B_AUDIT_REMEDIATION_1 条目（remediation-1 re-audit FAILED，remediation-2 NOT_AUDITED_YET）；未创建 remediation-7。",
       "independent_audit_done": true,
       "audit_conclusion": "REMEDIATION_1_REAUDIT_FAILED",
       "milestone_tag": null,
       "worktree_commit_pending": false,
       "historical_precommit_snapshot": {
+        "state_role": "historical_snapshot",
+        "snapshot_kind": "candidate_formation_precommit",
         "layer": "HISTORICAL/AS-OF PRECOMMIT SNAPSHOT (2026-08-09 worktree)",
         "baseline_commit_at_formation": "2ed9627ba816e9ab5023bd3017ce7cca90ec0022",
         "worktree_state_at_formation": "PRECOMMIT",
         "candidate_commit_at_formation": null,
         "candidate_commit_status_at_formation": "pending",
         "independent_audit_done": false,
-        "audit_conclusion": "NOT_AUDITED_YET"
+        "audit_conclusion": "NOT_AUDITED_YET",
+        "as_of": "2026-08-09"
       },
       "evidence": "docs/MILESTONE_B_DEPENDENCY_GRAPH.md、docs/FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE.json、scripts/sgs_engine/formal_duel.py、scripts/sgs_engine/production_batch.py、scripts/sgs_engine/production_cards.py、scripts/sgs_engine/production_replay.py、scripts/sgs_engine_gate.py、scripts/sgs_formal_runner.py、tests/test_sgs_milestone_b_advancement.py及相关生产测试",
       "scope": "正式160张无技能双人单挑的依赖审计与非规则阻塞推进；不重开或续写WHOLE_REPO_AUDIT_REMEDIATION_1...6，不创建remediation-7，不修改旧审计结论、分支或标签",
@@ -907,8 +1054,9 @@
     },
     {
       "checkpoint_id": "MILESTONE_B_AUDIT_REMEDIATION_1",
+      "state_role": "audit_history",
       "batch_name": "MILESTONE_B_AUDIT_REMEDIATION_1",
-      "status": "committed_pending_audit",
+      "status": "audited_failed",
       "commit": "8ce497064fbb4686177cf63cca5265e902037129",
       "commit_status": "committed",
       "independent_audit_done": true,
@@ -916,8 +1064,10 @@
       "milestone_tag": null,
       "worktree_commit_pending": false,
       "generated_on": "2026-08-11",
-      "commit_note": "【CURRENT LIVE】MILESTONE_B_AUDIT_REMEDIATION_1：独立敌对式总审计 MILESTONE_B_FORMAL_160_CARD_NO_SKILL_DUEL_INDEPENDENT_ADVERSARIAL_AUDIT 结论为 MILESTONE_B_AUDIT_FAILED（4 BLOCKING／6 MAJOR／3 MINOR，含 RULE_SOURCE_GAP 类共13项 finding）；定向修复实现提交 8ce497064fbb4686177cf63cca5265e902037129（fix: remediate milestone B formal duel audit findings，父提交 ebd656754ed2a528e0d08cd5175b68385fdb8140）已由用户在外部PowerShell提交；审计分支 sol-ultra-audit-milestone-b-formal-duel 冻结于 ebd6567...，remediation-1 re-audit 分支 sol-ultra-audit-milestone-b-remediation-1 冻结于 8ce4970...。修复内容：MB-B-001（acceptance provenance／gate／run 语义：artifact 是缓存报告不是执行凭证，status 不伪装 simulation_executed，run 必须真实执行 0..99 seeds 并生成 v2 artifact，绑定 implementation/rules-profile/deck identity）；MB-B-002（丈八 DYING 生命周期：Slash root finalizer 在闪／伤害／防止／game over 路径统一清理，材料 PROCESSING→DISCARD）；MB-B-003（session secret 确定性：同一 seed 不同 session secret 的决策 ID／acceptance 记录／replay 确定性一致）；MB-B-004（作用域分层：formal_duel_no_skill_ready=true 不等于完整引擎，authoritative_full_game_core=false、multi_player_production_proven=false、milestone_b_complete=false、global_all_cards_implemented=false、duel_scope_all_cards_sufficient=true，方天画戟保持 global PARTIAL）；MB-M-005（trusted provenance 只能由 canonical factory／from_canonical_profile_value 产生，普通 from_dict 与 analysis／untrusted 配置不能自我提升）；MB-M-006（CharacterMetadata.intrinsic_gender＋effective_gender 分离，当前生效性别按 effective 处理）；MB-M-007（事件顺序：闪响应 Jink／cancelled／finalize 顺序与事件契约）；MB-M-008（assert_resolution_invariants／assert_finished_state_invariants 在 replay／acceptance／runner 全程生效）；MB-M-009（正式 run 必须真实执行，禁止用缓存 artifact 冒充现场执行；same seed／different secret 双确定性运行）；MB-M-010（manifest／docs CURRENT 状态分层：blocked／0 seeds 等写 HISTORICAL/AS-OF 与 PRE-AUDIT SNAPSHOT；独立审计状态 independent_audit_done、audit_conclusion 不得预写 reaudit PASSED）；MB-N-011（amount／amount_override 注入防护与测试子类覆写防线）；MB-N-012（authoritative_private 隐私边界）；MB-N-013（隐藏句柄 handle-only 原则与可见性）。【HISTORICAL/AS-OF（PRE-AUDIT SNAPSHOT，2026-08-11）：本条目最初记录于修复工作树，当时 status=worktree_pending、commit=null、independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET；随后实现提交已由用户创建，remediation-1 targeted independent re-audit 结论为 MILESTONE_B_MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED（CURRENT），不得改写为 PASSED；Remediation 2 尚未独立审计（NOT_AUDITED_YET）。】验证证据见 final_verification；machine_state 为修复工作树时的机器状态快照。",
+      "commit_note": "【AUDIT HISTORY】MILESTONE_B_AUDIT_REMEDIATION_1：独立敌对式总审计 MILESTONE_B_FORMAL_160_CARD_NO_SKILL_DUEL_INDEPENDENT_ADVERSARIAL_AUDIT 结论为 MILESTONE_B_AUDIT_FAILED（4 BLOCKING／6 MAJOR／3 MINOR，含 RULE_SOURCE_GAP 类共13项 finding）；定向修复实现提交 8ce497064fbb4686177cf63cca5265e902037129（fix: remediate milestone B formal duel audit findings，父提交 ebd656754ed2a528e0d08cd5175b68385fdb8140）已由用户在外部PowerShell提交；审计分支 sol-ultra-audit-milestone-b-formal-duel 冻结于 ebd6567...，remediation-1 re-audit 分支 sol-ultra-audit-milestone-b-remediation-1 冻结于 8ce4970...。修复内容：MB-B-001（acceptance provenance／gate／run 语义：artifact 是缓存报告不是执行凭证，status 不伪装 simulation_executed，run 必须真实执行 0..99 seeds 并生成 v2 artifact，绑定 implementation/rules-profile/deck identity）；MB-B-002（丈八 DYING 生命周期：Slash root finalizer 在闪／伤害／防止／game over 路径统一清理，材料 PROCESSING→DISCARD）；MB-B-003（session secret 确定性：同一 seed 不同 session secret 的决策 ID／acceptance 记录／replay 确定性一致）；MB-B-004（作用域分层：formal_duel_no_skill_ready=true 不等于完整引擎，authoritative_full_game_core=false、multi_player_production_proven=false、milestone_b_complete=false、global_all_cards_implemented=false、duel_scope_all_cards_sufficient=true，方天画戟保持 global PARTIAL）；MB-M-005（trusted provenance 只能由 canonical factory／from_canonical_profile_value 产生，普通 from_dict 与 analysis／untrusted 配置不能自我提升）；MB-M-006（CharacterMetadata.intrinsic_gender＋effective_gender 分离，当前生效性别按 effective 处理）；MB-M-007（事件顺序：闪响应 Jink／cancelled／finalize 顺序与事件契约）；MB-M-008（assert_resolution_invariants／assert_finished_state_invariants 在 replay／acceptance／runner 全程生效）；MB-M-009（正式 run 必须真实执行，禁止用缓存 artifact 冒充现场执行；same seed／different secret 双确定性运行）；MB-M-010（manifest／docs CURRENT 状态分层：blocked／0 seeds 等写 HISTORICAL/AS-OF 与 PRE-AUDIT SNAPSHOT；独立审计状态 independent_audit_done、audit_conclusion 不得预写 reaudit PASSED）；MB-N-011（amount／amount_override 注入防护与测试子类覆写防线）；MB-N-012（authoritative_private 隐私边界）；MB-N-013（隐藏句柄 handle-only 原则与可见性）。【HISTORICAL/AS-OF（PRE-AUDIT SNAPSHOT，2026-08-11）：本条目最初记录于修复工作树，当时 status=worktree_pending、commit=null、independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET；随后实现提交已由用户创建，remediation-1 targeted independent re-audit 结论为 MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED（AUDIT HISTORY），不得改写为 PASSED。】验证证据见 final_verification；historical_pre_audit_machine_state 为修复工作树时的机器状态快照（state_role=historical_snapshot）。",
       "historical_pre_audit_machine_state": {
+        "state_role": "historical_snapshot",
+        "snapshot_kind": "pre_audit_machine_state",
         "layer": "HISTORICAL/AS-OF R1 PRE-AUDIT SNAPSHOT (2026-08-11)",
         "formal_duel_no_skill_ready": true,
         "formal_run_ready": true,
@@ -930,7 +1080,8 @@
         "acceptance_artifact_schema": "FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE_v2",
         "simulation_executed": false,
         "independent_audit_done": false,
-        "audit_conclusion": "NOT_AUDITED_YET"
+        "audit_conclusion": "NOT_AUDITED_YET",
+        "as_of": "2026-08-11"
       },
       "final_verification": {
         "targeted_tests": "新增 targeted 测试：formal_duel artifact 验证攻击矩阵（24项全部fail-closed）、zhangba DYING 生命周期（四条路径：闪后／伤害后／防止后／终局清理）、zhangba DYING chain／prevented_zero 边界、cixiong 性别、hidden_handle 隐私、engine_gate／model／actions／session 契约、milestone finished／full-core 边界；完整 pytest 回归。",
@@ -949,8 +1100,9 @@
     },
     {
       "checkpoint_id": "MILESTONE_B_AUDIT_REMEDIATION_2",
+      "state_role": "audit_history",
       "batch_name": "MILESTONE_B_AUDIT_REMEDIATION_2",
-      "status": "committed_pending_audit",
+      "status": "audited_failed",
       "commit": "0793c819ad45cc21328fad7d8afa6882d6197613",
       "commit_status": "committed",
       "independent_audit_done": true,
@@ -959,7 +1111,7 @@
       "worktree_commit_pending": false,
       "checkpoint_commit": null,
       "generated_on": "2026-08-13",
-      "commit_note": "【CURRENT LIVE】MILESTONE_B_AUDIT_REMEDIATION_2 实现提交 0793c819ad45cc21328fad7d8afa6882d6197613（fix: close milestone B remediation 2 correctness gaps，父提交 8ce497064fbb4686177cf63cca5265e902037129）已由用户在外部PowerShell提交；remediation-2 targeted independent re-audit 结论为 MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED（CURRENT），唯一失败原因：MB-B-001 BLOCKING（live-result 汇总不严格：malformed final hash／deck_count=159／action_count=0／turn_count=0 仍可 status=passed；full 100-seed 分支忽略 acceptance artifact 的 passed=false 而无条件写 status=passed；implementation bundle digest 未覆盖 structured rule CSV 与 scripts/deck_data.py）、MB-M-005 MAJOR（TrustedFormalDuelConfiguration 可被公开 import 后直接构造并以 canonical values 自我授予 trusted）、MB-M-009 MAJOR（上述真实缺陷的测试缺失）、MB-M-010 MAJOR（manifest/docs current 状态互斥或过时：旧 HEAD／commit=null/pending／dirty、ready 与 blocked 并存、R1 仍写 NOT_AUDITED_YET/PRECOMMIT_READY、Remediation 2 未提交写成 CURRENT）、R2-NEW-001 MINOR（execution hash 未覆盖 damage_card_already_finished／pending_slash_choice／pending_discard_two／pending_hanbing_discard 四个 runtime 字段）。【HISTORICAL/AS-OF（PRECOMMIT SNAPSHOT）】R2 文档回填时 status=worktree_pending、commit=null、independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET；随后实现提交已由用户创建且 re-audit 已进行并失败，不得改写为 PASSED。",
+      "commit_note": "【AUDIT HISTORY】MILESTONE_B_AUDIT_REMEDIATION_2 实现提交 0793c819ad45cc21328fad7d8afa6882d6197613（fix: close milestone B remediation 2 correctness gaps，父提交 8ce497064fbb4686177cf63cca5265e902037129）已由用户在外部PowerShell提交；remediation-2 targeted independent re-audit 结论为 MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED，唯一失败原因：MB-B-001 BLOCKING（live-result 汇总不严格：malformed final hash／deck_count=159／action_count=0／turn_count=0 仍可 status=passed；full 100-seed 分支忽略 acceptance artifact 的 passed=false 而无条件写 status=passed；implementation bundle digest 未覆盖 structured rule CSV 与 scripts/deck_data.py）、MB-M-005 MAJOR（TrustedFormalDuelConfiguration 可被公开 import 后直接构造并以 canonical values 自我授予 trusted）、MB-M-009 MAJOR（上述真实缺陷的测试缺失）、MB-M-010 MAJOR（manifest/docs current 状态互斥或过时：旧 HEAD／commit=null/pending／dirty、ready 与 blocked 并存、R1 仍写 NOT_AUDITED_YET/PRECOMMIT_READY、Remediation 2 未提交写成 CURRENT）、R2-NEW-001 MINOR（execution hash 未覆盖 damage_card_already_finished／pending_slash_choice／pending_discard_two／pending_hanbing_discard 四个 runtime 字段）。【HISTORICAL/AS-OF（PRECOMMIT SNAPSHOT）】R2 文档回填时 status=worktree_pending、commit=null、independent_audit_done=false、audit_conclusion=NOT_AUDITED_YET；随后实现提交已由用户创建且 re-audit 已进行并失败，不得改写为 PASSED。",
       "final_verification": {
         "targeted_tests": "tests/test_sgs_audit_remediation_2.py 65 项（provenance、FINISHED inventory 52 字段负例矩阵、seed 3、缓存≠live、invalid live→failed、stale cache 不阻塞、SHA-256 清单、根卫生、same seed/不同 secret 确定性）。",
         "pytest": "2118 passed, 0 failed, 0 skipped, 0 xfailed, 823.97s",
@@ -973,6 +1125,7 @@
     },
     {
       "checkpoint_id": "MILESTONE_B_AUDIT_REMEDIATION_3",
+      "state_role": "audit_history",
       "batch_name": "MILESTONE_B_AUDIT_REMEDIATION_3",
       "status": "pro_pre_audit_failed",
       "commit": "5d970560e306b84af518798e11db12c2a42dfc44",
@@ -1016,6 +1169,7 @@
     },
     {
       "checkpoint_id": "MILESTONE_B_AUDIT_REMEDIATION_4",
+      "state_role": "audit_history",
       "batch_name": "MILESTONE_B_AUDIT_REMEDIATION_4",
       "status": "independent_reaudit_failed",
       "commit": "3df02b5cfae9af436ba77d8f1c19a7b9959022b1",
@@ -1053,8 +1207,8 @@
     },
     {
       "checkpoint_id": "MILESTONE_B_AUDIT_REMEDIATION_5",
+      "state_role": "audit_history",
       "batch_name": "MILESTONE_B_AUDIT_REMEDIATION_5",
-      "state_model": "PERSISTED PROJECT STATE",
       "status": "independent_reaudit_failed",
       "independent_audit_done": true,
       "audit_conclusion": "MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED",
@@ -1072,8 +1226,10 @@
       "historical_base_reference": "git.current_milestone_b_development.historical_candidate_formation_snapshots.remediation_5_start",
       "candidate_identity_policy": "R5 future commit SHA and live worktree state are runtime-derived and intentionally not persisted.",
       "implementation_note": "R4-NEW-001：FORMAL_SIMULATION_TRANSITIVE_INPUT_INVENTORY 显式纳入 scripts/__init__.py 及其当前 fresh-process eager local import 闭包；保留 Git-normalized SHA-256 与 explicit-not-automatic 依赖模型。R4-NEW-002：持久项目事实、历史候选形成快照、实时 Git 状态三层分离；不再签入无条件 CURRENT HEAD/worktree scalar。",
-      "independent_reaudit_note": "R5 已由 Sol Ultra final independent re-audit 复审：MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED（R4-NEW-001=CLOSED，唯一未关闭项 R4-NEW-002）。R6 尚未独立复审，不预写 R6 PASSED 或未来 R6 commit SHA。",
+      "independent_reaudit_note": "R5 已由 Sol Ultra final independent re-audit 复审：MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED（R4-NEW-001=CLOSED，唯一未关闭项 R4-NEW-002）。R6 已由 Sol Ultra targeted independent re-audit 复审并失败；R7 尚未独立复审，不预写 R7 PASSED 或未来 R7 commit SHA。",
       "precommit_verification": {
+        "state_role": "historical_snapshot",
+        "snapshot_kind": "precommit_verification",
         "layer": "HISTORICAL/AS-OF R5 REMEDIATION PRECOMMIT VERIFICATION",
         "evidence_scope": "R5 implementation worktree verification; not an independent re-audit result and not live Git state",
         "package_initializer_identity": "FORMAL_SIMULATION_TRANSITIVE_INPUT_INVENTORY=36 个显式输入；与 scripts/sgs_engine/**/*.py 合并后共 49 个唯一文件；fresh-process package-import closure 全部被 identity 覆盖；implementation identity=06c8b2d3ead9adb52a18252e398eae137eb8fb51f657909051500893672b0e33。",
@@ -1084,24 +1240,49 @@
         "formal_100_seed_acceptance": "真实执行 seeds 0..99：100/100 PASSED，natural_end=100，strict reexecution=100，failures=0，unsupported=0，approximation=0，3586.67s；artifact 绑定 implementation identity 06c8b2d3ead9adb52a18252e398eae137eb8fb51f657909051500893672b0e33。",
         "runner_regression": "REPRESENTATIVE：正式 runner live seed 0（run_formal_simulation seeds=(0,) 现场执行）；schema=SGS_FORMAL_DUEL_RUN_SUBSET_v1、status=passed、simulation_executed=true、result_source=live_execution、natural_end=true、reexecution_verified=true、unsupported=0、approximation=0、winner=p2、action_count=388、final_state_hash=030ab3d36ee61475dcfba2bda4e0e9e888ace12af2332ea84058e32c243730d9。",
         "fresh_secret_determinism": "REPRESENTATIVE seed 7，两组 fresh session secret：winner=p2、action_count=162、turn_count=17、canonical final_state_hash=15a584787cd3fc05ea1ab5e04907d0ec5de30362b24abe486159aabf17c6f980；winner/action_count/turn_count/final_state_hash mismatch 全部为 0。",
-        "integrity": "strict UTF-8 text files=158、JSON parse=3、U+FFFD/NUL/连续问号损坏=0；SHA-256 inventory 55 entries mismatch=0；root hygiene、git diff --check exit 0、unmerged 为空，均最终现场核验。"
+        "integrity": "strict UTF-8 text files=158、JSON parse=3、U+FFFD/NUL/连续问号损坏=0；SHA-256 inventory 55 entries mismatch=0；root hygiene、git diff --check exit 0、unmerged 为空，均最终现场核验。",
+        "as_of": "2026-08-14"
       }
     },
     {
       "checkpoint_id": "MILESTONE_B_AUDIT_REMEDIATION_6",
       "batch_name": "MILESTONE_B_AUDIT_REMEDIATION_6",
-      "state_model": "PERSISTED PROJECT STATE",
-      "status": "candidate_pending_independent_reaudit",
-      "independent_reaudit_status": "NOT_YET_PERFORMED",
-      "audit_conclusion": "NOT_YET_PERFORMED",
-      "latest_completed_independent_reaudit": "MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED",
+      "state_role": "audit_history",
+      "status": "independent_reaudit_failed",
+      "independent_audit_done": true,
+      "audit_conclusion": "MILESTONE_B_REMEDIATION_6_TARGETED_REAUDIT_FAILED",
+      "open_findings": [
+        "R4-NEW-002",
+        "R6-NEW-001",
+        "R6-NEW-002"
+      ],
+      "closed_findings": {
+        "R4-NEW-001": "CLOSED"
+      },
       "remediation_scope": [
         "R4-NEW-002"
       ],
       "historical_base_reference": "git.current_milestone_b_development.historical_candidate_formation_snapshots.remediation_6",
-      "candidate_identity_policy": "R6 future commit SHA and live worktree state are runtime-derived and intentionally not persisted.",
-      "implementation_note": "R4-NEW-002：CHECKPOINT_MANIFEST.json 全部对象按 persisted/historical/live 三层模型治理——branch/head/start_head/commit=null/commit_status=pending/worktree pending 类 Git 状态只出现在显式 HISTORICAL/AS-OF/PRECOMMIT SNAPSHOT 祖先之下；CURRENT 节点只保存持久项目事实；实时 Git 状态保持 runtime-derived、persisted=false。",
-      "independent_reaudit_note": "R6 尚未独立复审，不预写 R6 PASSED；提交形成后也无需回填包含本文档的 commit SHA 才能保持本记录为真。"
+      "auditor_note": "Sol Ultra targeted independent re-audit 结论为 MILESTONE_B_REMEDIATION_6_TARGETED_REAUDIT_FAILED：R4-NEW-002 仍 OPEN（黑名单式字段检查无法覆盖同义字段，需按数据模型收口）；新发现 R6-NEW-001 MINOR（Markdown 中 R5 状态互斥）与 R6-NEW-002 MINOR（whole-manifest validator 存在语义字段绕过，historical 豁免被名称/substring 误授）；R4-NEW-001 确认保持 CLOSED。R6 整体不视为 PASSED，历史 FAILED 链不得改写。",
+      "independent_reaudit_note": "R6 已由 Sol Ultra targeted independent re-audit 复审并失败；R7 尚未独立复审，不预写 R7 PASSED 或未来 R7 commit SHA。"
+    },
+    {
+      "checkpoint_id": "MILESTONE_B_AUDIT_REMEDIATION_7",
+      "batch_name": "MILESTONE_B_AUDIT_REMEDIATION_7",
+      "state_role": "persisted_current",
+      "status": "candidate_awaiting_independent_reaudit",
+      "independent_reaudit_status": "NOT_YET_PERFORMED",
+      "audit_conclusion": "NOT_YET_PERFORMED",
+      "latest_completed_independent_reaudit": "MILESTONE_B_REMEDIATION_6_TARGETED_REAUDIT_FAILED",
+      "remediation_scope": [
+        "R4-NEW-002",
+        "R6-NEW-001",
+        "R6-NEW-002"
+      ],
+      "historical_base_reference": "git.current_milestone_b_development.historical_candidate_formation_snapshots.remediation_7",
+      "candidate_identity_policy": "R7 future commit SHA and live worktree state are runtime-derived and intentionally not persisted.",
+      "implementation_note": "R4-NEW-002／R6-NEW-001／R6-NEW-002：建立显式 state_role 数据模型（persisted_current／historical_snapshot／audit_history 精确枚举）；persisted_current 采用字段白名单（允许而非禁止）；全部 legacy checkpoint Git/worktree 状态整体迁入 historical_snapshot（state_role＋as_of＋snapshot_kind）；Markdown 状态与 manifest audit_history 单一事实源一致。",
+      "independent_reaudit_note": "R7 尚未独立复审，不预写 R7 PASSED；提交形成后也无需回填包含本文档的 commit SHA 才能保持本记录为真。"
     }
   ],
   "final_verification": {
@@ -1113,7 +1294,7 @@
       "xfailed": 0,
       "warning": "无（使用 -p no:cacheprovider 避免 .pytest_cache Windows WinError 5 权限提示）",
       "elapsed_seconds": 3877.37,
-      "note": "MILESTONE_B_AUDIT_REMEDIATION_1 修复后完整 pytest 2052 passed；随后补充 test_formal_seed_sweep 相关后为 2053 passed（0 failed/0 skipped/0 xfailed）。 MILESTONE_B_AUDIT_REMEDIATION_2（2026-08-12）：关闭 MB-B-001（artifact 为缓存报告，static eligibility/cached report validity/live result 三层分离，run 前置不依赖缓存，invalid live results 强制 failed 且 simulation_executed=true 只表示执行已发生）、MB-M-005（TrustedFormalDuelConfiguration 仅内部 canonical factory 产生，普通构造/from_dict/replace/copy/JSON roundtrip/exact canonical values 均不能自我提升）、MB-M-008（FINISHED_TRANSIENT_RUNTIME_FIELDS 完整 inventory，seed 3 自然结束残留修复，52 项负例矩阵）、MB-M-009（fabricated evidence/invalid live results/FINISHED negative matrix/stale cache 不阻塞 live run 等测试）、MB-M-010（docs CURRENT/HISTORICAL-AS-OF/PRECOMMIT-SNAPSHOT 分层）、R1-NEW-001（sha256 清单改为真实64位SHA-256，统一 helper scripts/sgs_hash_inventory.py::git_normalized_sha256，self_excluded=true）、R1-NEW-002（manifest/SOURCE_AND_CALLCHAIN_AUDIT 编码损坏恢复为正确UTF-8中文）、R1-NEW-003（删除根目录Git warning垃圾文件并增加hygiene回归）。完整 pytest 2118 passed（0 failed/0 skipped/0 xfailed）；FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE 重跑 100/100；正式 runner live 100-seed 路径 status=passed/simulation_executed=true；第二确定性运行（fresh session secrets）winner/action_count/final_state_hash mismatch 全部为 0。Remediation 1 re-audit = MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED 保持；Remediation 2 = NOT_AUDITED_YET。R3（2026-08-13）：完整 pytest 2158 passed；R4（2026-08-14）：完整 pytest 2220 passed（0 failed/0 skipped/0 xfailed，1501.04s；新增 tests/test_sgs_audit_remediation_4.py 62 项 targeted）；R5（2026-08-14）precommit verification：最终完整 pytest 2291 passed（0 failed/0 skipped/0 xfailed/0 warnings；分两段运行 A=1040/3368.28s + B=1251/509.09s，合计 3877.37s），R5 independent re-audit 已进行且结论为 MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED（R4-NEW-001=CLOSED、R4-NEW-002=OPEN）；R6 尚未独立复审（NOT_YET_PERFORMED）。"
+      "note": "MILESTONE_B_AUDIT_REMEDIATION_1 修复后完整 pytest 2052 passed；随后补充 test_formal_seed_sweep 相关后为 2053 passed（0 failed/0 skipped/0 xfailed）。 MILESTONE_B_AUDIT_REMEDIATION_2（2026-08-12）：关闭 MB-B-001（artifact 为缓存报告，static eligibility/cached report validity/live result 三层分离，run 前置不依赖缓存，invalid live results 强制 failed 且 simulation_executed=true 只表示执行已发生）、MB-M-005（TrustedFormalDuelConfiguration 仅内部 canonical factory 产生，普通构造/from_dict/replace/copy/JSON roundtrip/exact canonical values 均不能自我提升）、MB-M-008（FINISHED_TRANSIENT_RUNTIME_FIELDS 完整 inventory，seed 3 自然结束残留修复，52 项负例矩阵）、MB-M-009（fabricated evidence/invalid live results/FINISHED negative matrix/stale cache 不阻塞 live run 等测试）、MB-M-010（docs CURRENT/HISTORICAL-AS-OF/PRECOMMIT-SNAPSHOT 分层）、R1-NEW-001（sha256 清单改为真实64位SHA-256，统一 helper scripts/sgs_hash_inventory.py::git_normalized_sha256，self_excluded=true）、R1-NEW-002（manifest/SOURCE_AND_CALLCHAIN_AUDIT 编码损坏恢复为正确UTF-8中文）、R1-NEW-003（删除根目录Git warning垃圾文件并增加hygiene回归）。完整 pytest 2118 passed（0 failed/0 skipped/0 xfailed）；FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE 重跑 100/100；正式 runner live 100-seed 路径 status=passed/simulation_executed=true；第二确定性运行（fresh session secrets）winner/action_count/final_state_hash mismatch 全部为 0。Remediation 1 re-audit = MILESTONE_B_REMEDIATION_1_REAUDIT_FAILED 保持；Remediation 2 = NOT_AUDITED_YET。R3（2026-08-13）：完整 pytest 2158 passed；R4（2026-08-14）：完整 pytest 2220 passed（0 failed/0 skipped/0 xfailed，1501.04s；新增 tests/test_sgs_audit_remediation_4.py 62 项 targeted）；R5（2026-08-14）precommit verification：最终完整 pytest 2291 passed（0 failed/0 skipped/0 xfailed/0 warnings；分两段运行 A=1040/3368.28s + B=1251/509.09s，合计 3877.37s），R5 independent re-audit 已进行且结论为 MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED（R4-NEW-001=CLOSED、R4-NEW-002=OPEN）；R6 targeted independent re-audit 已进行且结论为 MILESTONE_B_REMEDIATION_6_TARGETED_REAUDIT_FAILED（R4-NEW-002／R6-NEW-001／R6-NEW-002 OPEN）；R7 尚未独立复审（NOT_YET_PERFORMED）。"
     },
     "compileall": {
       "command": ".\\\\.venv\\\\Scripts\\\\python.exe -m compileall -q scripts tests",
@@ -1129,6 +1310,7 @@
       "note": "R5（2026-08-14）precommit 现场重算：scanned_file_count=132、audit_item_count=126（formal_source=56、test_code=70）、defect_count=0、exit 0；不表示 independent re-audit 已完成。"
     },
     "cp04j_final_reaudit": {
+      "state_role": "audit_history",
       "event_contract_tests_passed": 63,
       "event_contract_tests_file": "tests/test_sgs_engine_events.py",
       "chain_damage_tests_passed": 44,
@@ -1142,6 +1324,8 @@
       "note": "完整 pytest 1543 passed（失败0、跳过0）、compileall 通过、源码完整性审计 scanned_file_count=116、defect_count=0、audit_item_count=55 见本对象相邻字段；上述数字均为 2026-08-04 最终独立复审实际运行记录，本轮纯文档收尾未重新运行完整 pytest"
     },
     "test_only_duel_status": {
+      "state_role": "historical_snapshot",
+      "snapshot_kind": "test_only_duel_verification_status",
       "test_only": true,
       "formal_result": false,
       "deck_card_count": 24,
@@ -1160,9 +1344,12 @@
       },
       "unsupported_rules": 0,
       "approximation_count": 0,
-      "reexecution_replay_supported": true
+      "reexecution_replay_supported": true,
+      "as_of": "2026-08-11"
     },
     "formal_status": {
+      "state_role": "historical_snapshot",
+      "snapshot_kind": "formal_status_at_verification",
       "formal_run_ready": true,
       "authoritative_core_foundation": true,
       "authoritative_full_game_core": false,
@@ -1184,9 +1371,12 @@
       "fixed_seed_acceptance_passed": true,
       "formal_duel_no_skill_ready": true,
       "run_exit_code": 0,
-      "result_file_created": false
+      "result_file_created": false,
+      "as_of": "2026-08-14"
     },
     "milestone_b_analysis_seed_diagnostic": {
+      "state_role": "historical_snapshot",
+      "snapshot_kind": "analysis_seed_diagnostic",
       "artifact": "docs/MILESTONE_B_ANALYSIS_SEED_DIAGNOSTIC.json",
       "schema_version": "sgs-milestone-b-analysis-seed-diagnostic-v1",
       "diagnostic_only": true,
@@ -1223,9 +1413,12 @@
       "reexecution_verified_count": 0,
       "formal_acceptance_passed": false,
       "acceptance_seed_count_impact": 0,
-      "non_rule_seed_blockers_observed": 0
+      "non_rule_seed_blockers_observed": 0,
+      "as_of": "2026-08-11"
     },
     "milestone_b_blockers": {
+      "state_role": "historical_snapshot",
+      "snapshot_kind": "historical_blockers",
       "layer": "HISTORICAL/AS-OF（2026-08-09 之前；全部 blocker 已由 USER_CONFIRMED_PROJECT_FORMAL_PROFILE／USER_CONFIRMED_RULE（2026-08-09）关闭）",
       "blockers": {
         "layer": "HISTORICAL/AS-OF（2026-08-09 之前；全部 blocker 已由 USER_CONFIRMED_PROJECT_FORMAL_PROFILE／USER_CONFIRMED_RULE（2026-08-09）关闭）",
@@ -1236,7 +1429,8 @@
           "FORMAL_EXECUTION_RELEASE_GUARD_CLOSED_PENDING_PREREQUISITES：runner future-ready分支已实现逐seed复检与原子输出，但当前规则/卡牌/100-seed前置条件未关闭，live gate在接触输出路径前拒绝",
           "FORMAL_FIXED_SEED_ACCEPTANCE_NOT_RUN：正式seeds 0..99逐seed验收记录为0，不得以analysis-only sweep替代"
         ]
-      }
+      },
+      "as_of": "2026-08-09"
     },
     "not_configured": [
       "mypy",
@@ -1245,6 +1439,7 @@
       "ci"
     ],
     "production_basic_cards_batch": {
+      "state_role": "audit_history",
       "implemented": true,
       "tested": true,
       "card_types": 6,
@@ -1270,6 +1465,7 @@
       "milestone_b_complete": false
     },
     "production_single_target_trick_slice": {
+      "state_role": "audit_history",
       "implemented": true,
       "tested": true,
       "card_types": 2,
@@ -1294,6 +1490,7 @@
       "formal_duel_no_skill_ready": false
     },
     "production_zone_target_trick_batch": {
+      "state_role": "audit_history",
       "implemented": true,
       "tested": true,
       "card_types": 2,
@@ -1320,6 +1517,7 @@
       "hidden_handle_security_fix": true
     },
     "hidden_handle_security_fix": {
+      "state_role": "audit_history",
       "tests_added": 29,
       "test_file": "tests/test_sgs_production_hidden_handle_security.py",
       "enumeration_attack_matches": 0,
@@ -1330,6 +1528,7 @@
       "mechanism": "session_hmac_sha256"
     },
     "production_duel_fire_attack_batch": {
+      "state_role": "audit_history",
       "implemented": true,
       "tested": true,
       "card_types": 2,
@@ -1365,6 +1564,7 @@
       ]
     },
     "production_group_target_trick_batch": {
+      "state_role": "audit_history",
       "implemented": true,
       "tested": true,
       "card_types": 3,
@@ -1408,6 +1608,7 @@
       ]
     },
     "production_remaining_ordinary_trick_batch": {
+      "state_role": "audit_history",
       "implemented": true,
       "tested": true,
       "card_types": 2,
@@ -1455,6 +1656,7 @@
       "adapter_implemented_entities": 126
     },
     "production_chain_damage_infrastructure": {
+      "state_role": "audit_history",
       "implemented": true,
       "tested": true,
       "worktree_commit_pending": false,
@@ -1474,6 +1676,7 @@
       "audit_closure_note": "N1-N4 已由提交 68e419b79e379184c1f1cc7ad650039771530f89（fix: close chain damage audit gaps）正式关闭：stopped_winner 非合法 result；三个链事件完整字段集／类型／枚举／组合校验；prevented_zero 采用 CONTINUE/FINISHED/PAUSED 控制流并立即结束传导；Knowledge 保留 CP-04I 历史并追加 CP-04J 当前双人生产范围说明（三人以上 NOT PROVEN，prevented_zero 无正式减伤路径端到端证明）"
     },
     "production_borrowed_sword_weapon_system": {
+      "state_role": "audit_history",
       "implemented": true,
       "tested": true,
       "card_types_complete": 18,
@@ -1515,6 +1718,7 @@
       "final_pytest": 1649
     },
     "production_delayed_trick_judgment_infrastructure": {
+      "state_role": "audit_history",
       "implemented": true,
       "tested": true,
       "card_types": 3,
@@ -1555,6 +1759,7 @@
       "final_pytest": 1733
     },
     "production_armor_damage_prevention_infrastructure": {
+      "state_role": "audit_history",
       "implemented": true,
       "tested": true,
       "card_types": 4,
@@ -1596,6 +1801,7 @@
       "final_pytest": 1799
     },
     "production_mount_distance_infrastructure": {
+      "state_role": "audit_history",
       "implemented": true,
       "tested": true,
       "card_types": 2,
@@ -1637,6 +1843,7 @@
       "distance_floor": "DISTANCE_FLOOR_FIXED"
     },
     "production_turn_cycle_discard_infrastructure": {
+      "state_role": "audit_history",
       "implemented": true,
       "tested": true,
       "card_types": 0,
@@ -1684,6 +1891,7 @@
       "milestone_tag_note": "里程碑标签 milestone-b2-turn-cycle-discard-infrastructure-audited 已实际建立并推送：本地标签已由本轮亲自验证存在，并在最终仓库状态回填开始时解析到 17246077776ef8a8c7f957706d60fd91e2c0a440（final_doc_commit 定义为“最终审计文档提交”，不是“永久当前标签目标”）；用户将在最终仓库状态提交产生后把标签移动到最终仓库状态，当前标签目标始终以Git标签解析结果为准；GitHub远程标签建立／推送事实来自用户外部PowerShell验证。"
     },
     "production_weapon_skill_completion": {
+      "state_role": "audit_history",
       "implemented": true,
       "tested": true,
       "card_types": 8,
@@ -1765,6 +1973,7 @@
       "milestone_tag_target_resolution": "git_tag_resolution"
     },
     "whole_repo_audit_remediation_1": {
+      "state_role": "audit_history",
       "implemented": true,
       "tested": true,
       "independent_audit_done": true,
@@ -1788,6 +1997,7 @@
       "approximation_count": 0
     },
     "whole_repo_audit_remediation_2": {
+      "state_role": "audit_history",
       "implemented": true,
       "tested": true,
       "independent_audit_done": true,
@@ -1826,6 +2036,7 @@
       "approximation_count": 0
     },
     "whole_repo_audit_remediation_3": {
+      "state_role": "audit_history",
       "implemented": true,
       "tested": true,
       "independent_audit_done": true,
@@ -1857,6 +2068,7 @@
       "approximation_count": 0
     },
     "whole_repo_audit_remediation_4": {
+      "state_role": "audit_history",
       "implemented": true,
       "tested": true,
       "independent_audit_done": true,
@@ -1889,6 +2101,7 @@
       "approximation_count": 0
     },
     "whole_repo_audit_remediation_5": {
+      "state_role": "audit_history",
       "implemented": true,
       "tested": true,
       "independent_audit_done": true,
@@ -1923,6 +2136,7 @@
       "approximation_count": 0
     },
     "whole_repo_audit_remediation_6": {
+      "state_role": "audit_history",
       "implemented": true,
       "tested": true,
       "independent_audit_done": true,
@@ -1957,6 +2171,8 @@
       "approximation_count": 0
     },
     "historical_milestone_b_formal_duel_advancement_precommit_snapshot": {
+      "state_role": "historical_snapshot",
+      "snapshot_kind": "candidate_formation_precommit",
       "status": "blocked_pending_user_rule_confirmation",
       "baseline_commit": "4c8c4466f1950740c69767a01a0b24cab723b310",
       "branch": "sol-ultra-milestone-b-formal-duel",
@@ -2036,9 +2252,11 @@
       },
       "sealed_audit_chain_unchanged": true,
       "remediation_7_created": false,
-      "layer": "HISTORICAL/AS-OF（PRECOMMIT SNAPSHOT，2026-08-09/2026-08-11；blocked_pending_user_rule_confirmation 与 0 seeds 均为提交前工作树快照）"
+      "layer": "HISTORICAL/AS-OF（PRECOMMIT SNAPSHOT，2026-08-09/2026-08-11；blocked_pending_user_rule_confirmation 与 0 seeds 均为提交前工作树快照）",
+      "as_of": "2026-08-11"
     },
     "milestone_b_audit_remediation_1": {
+      "state_role": "audit_history",
       "targeted_tests": "新增 targeted 测试：formal_duel artifact 验证攻击矩阵（24项全部fail-closed）、zhangba DYING 生命周期（四条路径：闪后／伤害后／防止后／终局清理）、zhangba DYING chain／prevented_zero 边界、cixiong 性别、hidden_handle 隐私、engine_gate／model／actions／session 契约、milestone finished／full-core 边界；完整 pytest 回归。",
       "pytest": "2053 passed, 0 failed, 0 skipped, 0 xfailed, 1 warning (.pytest_cache WinError5), 2352.16s",
       "compileall": "python -m compileall -q scripts tests -> exit 0",
@@ -2051,6 +2269,7 @@
       "hash_mismatch": 0
     },
     "milestone_b_audit_remediation_2": {
+      "state_role": "audit_history",
       "implementation_commit": "0793c819ad45cc21328fad7d8afa6882d6197613",
       "implementation_parent": "8ce497064fbb4686177cf63cca5265e902037129",
       "audit_conclusion": "MILESTONE_B_REMEDIATION_2_REAUDIT_FAILED",
@@ -2079,6 +2298,8 @@
       "reason": "MB-B-001 BLOCKING（live-result 汇总不严格：malformed final hash／deck_count=159／action_count=0／turn_count=0 仍可 status=passed；full 100-seed 分支忽略 acceptance artifact 的 passed=false 而无条件写 status=passed；implementation bundle digest 未覆盖 structured rule CSV 与 scripts/deck_data.py）、MB-M-005 MAJOR（TrustedFormalDuelConfiguration 可被公开 import 后直接构造并以 canonical values 自我授予 trusted）、MB-M-009 MAJOR（上述真实缺陷的测试缺失）、MB-M-010 MAJOR（manifest/docs current 状态互斥或过时：旧 HEAD／commit=null/pending／dirty、ready 与 blocked 并存、R1 仍写 NOT_AUDITED_YET/PRECOMMIT_READY、Remediation 2 未提交写成 CURRENT）、R2-NEW-001 MINOR（execution hash 未覆盖 damage_card_already_finished／pending_slash_choice／pending_discard_two／pending_hanbing_discard 四个 runtime 字段）"
     },
     "milestone_b_audit_remediation_3": {
+      "state_role": "historical_snapshot",
+      "snapshot_kind": "remediation_precommit_verification_reference",
       "layer": "HISTORICAL/AS-OF R3 REMEDIATION PRECOMMIT VERIFICATION REFERENCE",
       "historical_candidate_formation_snapshot": "git.current_milestone_b_development.historical_candidate_formation_snapshots.remediation_3",
       "subsequent_history": "R3 target 5d970560e306b84af518798e11db12c2a42dfc44 已形成；DeepSeek-V4-Pro pre-audit=FAILED；未进行最终 Sol independent re-audit。",
@@ -2088,17 +2309,18 @@
         "MB-M-009": "runner 验证矩阵／provenance／identity 依赖／hash mutation 测试",
         "MB-M-010": "machine/docs CURRENT/HISTORICAL 收口",
         "R2-NEW-001": "execution snapshot 覆盖四个 runtime 字段＋一致性 invariant"
-      }
+      },
+      "as_of": "2026-08-13"
     }
   },
   "sha256": {
-    "docs/ENGINE_STATUS.md": "00081c507adc9b2d9fab6ca20e2f4494adf76e5aad5795e7414ee12febfe2044",
-    "docs/IMPLEMENTATION_MATRIX.md": "eaed1f77bf0986e6c5162957da57308f24f9d6305951347e28e34b72cc5e6e1b",
+    "docs/ENGINE_STATUS.md": "a6b69cc9d73784acee009967c7cf31d445a283202963cc22061d10719ec0f0bb",
+    "docs/IMPLEMENTATION_MATRIX.md": "acc8405cacc9356157e7fdac05cacaf527ea987ff99650c062715adc3a17cbeb",
     "docs/LEGACY_RESULTS_INVALID.md": "267d51329b65b4435ed770b9fe90a0d53148d17cc9b0dae3e6d3406b06c0c0cc",
-    "docs/MASTER_IMPLEMENTATION_PLAN.md": "fa15f655a8fcaf9aed910363f9b263bed6a6e7fbb4c5f007e1b15d30e6f56bc4",
+    "docs/MASTER_IMPLEMENTATION_PLAN.md": "390090370c6fdc84838077d0cb77eba8976d68aef8aa4d7c0471d90b355a3fb2",
     "docs/MILESTONE_B_ANALYSIS_SEED_DIAGNOSTIC.json": "a70ae21cbcfd6f2257dbeeb0f167dcc09dee47cd73fb616e2a6a71f2c18054cf",
-    "docs/MILESTONE_B_DEPENDENCY_GRAPH.md": "58775c4c6704f42e40c17afae6b4292bbb524319ca8a65024fc087c9437979e0",
-    "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "ac34d9ed23a5367f6666573c5e1b55efc7d0266d5089d18d158c7ffd670501da",
+    "docs/MILESTONE_B_DEPENDENCY_GRAPH.md": "41f207fce6b59bfb61b20a2f3551a0548bc42557f7c92e7426d232381136cfc7",
+    "docs/SOURCE_AND_CALLCHAIN_AUDIT.md": "2adbb5b90732c611fcc1dfc50dc9609c3ee97b1344f1d64bd078f4b49f20fa8f",
     "knowledge/三国杀卡牌效果.md": "6bdeedccad12d3a16fc4d9663aec98f7546bc5dadc42ec66a74eb9b3aa470989",
     "knowledge/三国杀牌堆数据.csv": "e490631698e6b7695c6a9b3ad0c355e421ccfafab696e5b3a97418c9ec80f38b",
     "scripts/sgs_dev_runner.py": "6f88baa78fc9c22106188defda7190cd2a4412325db46f3964d217fd0e61c755",
@@ -2139,17 +2361,18 @@
     "tests/test_sgs_production_turn_cycle_discard.py": "cc64a178cd4dea4ede6a614c4502fb6e5eb065a7c2718e9ddd797743dec23646",
     "tests/test_sgs_production_weapon_skills.py": "192f3a304e5e0d8efeb9542555f1286fa5d992136cfc1a1ba7e94b9e64deec2e",
     "tests/test_sgs_production_zone_target_tricks.py": "16cf70dfd8c8dbe88486fbedccf25fb0fb89270cf2ffcaf6c264b8602403bef2",
-    "hash_note": "本表为持久化项目文件的 canonical SHA-256 清单（64位小写十六进制；规范：UTF-8原始内容、去除UTF-8 BOM、CRLF统一为LF后计算，统一helper=scripts/sgs_hash_inventory.py::git_normalized_sha256，R1-NEW-001）。docs/CHECKPOINT_MANIFEST.json 自身不进入本表（self_excluded=true），避免自引用不可能条件；本表不持久化 live Git HEAD/worktree。2026-08-14 MILESTONE_B_AUDIT_REMEDIATION_6 重算：新增 tests/test_sgs_audit_remediation_6.py，更新 tests/test_sgs_audit_remediation_5.py 与五份状态文档；所有登记文件最终现场重算必须 mismatch=0。",
+    "hash_note": "本表为持久化项目文件的 canonical SHA-256 清单（64位小写十六进制；规范：UTF-8原始内容、去除UTF-8 BOM、CRLF统一为LF后计算，统一helper=scripts/sgs_hash_inventory.py::git_normalized_sha256，R1-NEW-001）。docs/CHECKPOINT_MANIFEST.json 自身不进入本表（self_excluded=true），避免自引用不可能条件；本表不持久化 live Git HEAD/worktree。2026-08-14 MILESTONE_B_AUDIT_REMEDIATION_7 重算：新增 tests/test_sgs_audit_remediation_7.py，更新 tests/test_sgs_audit_remediation_5.py、tests/test_sgs_audit_remediation_6.py 与五份状态文档；所有登记文件最终现场重算必须 mismatch=0。",
     "scripts/sgs_formal_milestone_b_acceptance.py": "3fdd0ec9ca135c977722f9f028eee42c11497940a5557b45e24dd7f14bc41ed4",
     "tests/test_sgs_milestone_b_advancement.py": "3d4f626e1f409a1894719615553950d6f908c52abd74f6fb6c45c3ff60631732",
     "scripts/_validation.py": "7c56f865fc3a7d72850c80717e37d7f3aa2a11e3ea0d2b9fb1094fd768bdefc1",
     "scripts/sgs_hash_inventory.py": "c6502cccfbb2d71d9474f2c448da66d522705443cedeb9446b57753fdc2b4400",
     "tests/test_sgs_audit_remediation_3.py": "db5a36ea3d9831503ac4095973e21ad4b25dfd43eb0359a54e1e67433e4095c0",
     "tests/test_sgs_audit_remediation_4.py": "dd0fe3e15d18b155d34f909287938402750d875722bbbd7c4bf69b5e671d6356",
-    "tests/test_sgs_audit_remediation_5.py": "c6712cd53876770a78abdd18cecc9f988fba7fb56fc0ae87f6a17f3aefa57ee8",
-    "tests/test_sgs_audit_remediation_6.py": "febfefb6cd492701fbdae38fe8e5772e48e8ba000c44171b066023fccf3d9c7a",
+    "tests/test_sgs_audit_remediation_5.py": "4f44f0c792b0612bbaf09a7c2ba67e963adb14d36bc03bdc4ce0d73c6dbd0d43",
+    "tests/test_sgs_audit_remediation_6.py": "6ec19da23ff3adc38e42143b2ce146165a93120a5201f0ed16f0aaeaf5b0d548",
     "docs/FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE.json": "8fb694713f68f4da7e1f1b07e266168c476c7b1d14daa436b79b03c7b6f1c695",
-    "self_excluded": true
+    "self_excluded": true,
+    "tests/test_sgs_audit_remediation_7.py": "f4c278db32819bdd7169958d18a1f1b11eead6c4de51f9ad51e13ade0a64b589"
   },
   "source_integrity": {
     "command": "python -m scripts.sgs_source_integrity_audit . --fail-on-defect --pretty",

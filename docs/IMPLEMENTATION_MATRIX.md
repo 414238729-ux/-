@@ -9,8 +9,10 @@ R4-NEW-001/R4-NEW-002 两项 MINOR；R3-NEW-001/002/003 与 DOC-OBS-001
 均 CLOSED。initial independent audit、R1、R2、R3 与 R4 的 FAILED 历史均保留。
 R5 从该固定 R4 target 历史基线开始；R5 已由 Sol final independent re-audit
 复审：`MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED`（R4-NEW-001=CLOSED、
-唯一未关闭项 R4-NEW-002）。R6 候选（`MILESTONE_B_AUDIT_REMEDIATION_6`）尚未独立复审（`NOT_YET_PERFORMED`）；
-不写未来 SHA。
+唯一未关闭项 R4-NEW-002）。R6 已由 Sol Ultra targeted independent re-audit
+复审：`MILESTONE_B_REMEDIATION_6_TARGETED_REAUDIT_FAILED`（R4-NEW-002／
+R6-NEW-001／R6-NEW-002 OPEN）；R7 候选（`MILESTONE_B_AUDIT_REMEDIATION_7`）
+尚未独立复审（`NOT_YET_PERFORMED`）；不写未来 SHA。
 
 R4 形成时的 `PRECOMMIT`、`NOT_AUDITED_YET`、`commit=null` 是
 HISTORICAL R4 CANDIDATE FORMATION SNAPSHOT，不是 persisted current。
@@ -39,7 +41,7 @@ HEAD=`8ce4970...`，R2 工作树当时未提交。二者都不是
 | formal replay／隐私 | `reexecution_replay_supported=true` | 同一 session 现场执行并同步 record decisions，再 strict replay 同一份 record；player-visible 与 omniscient 分层 |
 | formal runner | 实现已接线；`run` 确实现场执行 | status 现场派生 readiness（`simulation_executed=false`）；run 命令现场执行 seeds 0..99、same-game record/replay 并写出带 provenance 的 v2 artifact；绝不把复制缓存称为 `simulation_executed=true`（MB-B-001；R3：唯一 canonical live-result validator，非法 live result 一律 status=failed，runner 不得覆写） |
 | formal gate | 现场派生、保持关闭 | artifact 只是缓存证据：必须绑定当前 implementation/rules-profile/deck identity 且全部关键字段严格验证；调用方 payload／manifest 布尔值不能授予准入；静态执行资格不依赖缓存 artifact（stale 不阻塞新 live run） |
-| implementation identity | explicit enumerated dependency inventory（不是自动 transitive closure） | R5 修复范围明确加入 `scripts/__init__.py` 及其在当前正式 package import 路径中 eager 执行的 28 项 local-import 闭包；继续覆盖引擎、runner/gate、acceptance generator、deck data/CSV、structured rule CSV、validation/hash helper，Git-normalized SHA-256 归一行尾，docs/manifest/acceptance artifact 排除。此 R5 修复尚未独立复审 |
+| implementation identity | explicit enumerated dependency inventory（不是自动 transitive closure） | R5 修复范围明确加入 `scripts/__init__.py` 及其在当前正式 package import 路径中 eager 执行的 28 项 local-import 闭包；继续覆盖引擎、runner/gate、acceptance generator、deck data/CSV、structured rule CSV、validation/hash helper，Git-normalized SHA-256 归一行尾，docs/manifest/acceptance artifact 排除。此 R5 修复已由 R5 final re-audit 复审：`MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED`（R4-NEW-002 仍 OPEN）；R7 尚未独立复审 |
 | 正式 100 固定 seed | `PASSED`（R1/R2 各重新运行；R3 再次运行） | seeds 0..99、formal profile、analysis_only=false、max_steps=2000、每局 strict replay + final_state_hash：R1 100/100（2631.2s）、R2 100/100（1269.5s）、failures=0；各自随后做 determinism reproduction（新 session secrets）winner/action_count/final hash mismatch=0 |
 | 本地回归／完整性 | 见 manifest final_verification | targeted tests、full pytest、compileall、source integrity（以 R3 最终执行为准）、JSON/SHA/diff-check/unmerged 均记录于 docs/CHECKPOINT_MANIFEST.json |
 | 最终门禁 | `formal_duel_no_skill_ready=true`、`formal_run_ready=true` | 只证明正式160张无技能两人单挑范围（duel-scope）；`authoritative_full_game_core=false`、`multi_player_production_proven=false`、`milestone_b_complete=false` 保持（MB-B-004）；full-game 正式入口继续失败关闭，与 duel-scope ready 不互斥——前者描述整局引擎，后者描述本模式范围 |

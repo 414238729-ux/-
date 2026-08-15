@@ -13,8 +13,10 @@ R3 pre-audit=FAILED、R4 final re-audit=FAILED 保持不变。
 
 R5 从上述固定 R4 target 的历史基线开始；R5 已由 Sol final independent
 re-audit 复审：`MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED`
-（R4-NEW-001=CLOSED、唯一未关闭项 R4-NEW-002）。R6 候选
-（`MILESTONE_B_AUDIT_REMEDIATION_6`）尚未独立复审
+（R4-NEW-001=CLOSED、唯一未关闭项 R4-NEW-002）。R6 已由 Sol Ultra targeted
+independent re-audit 复审：`MILESTONE_B_REMEDIATION_6_TARGETED_REAUDIT_FAILED`
+（R4-NEW-002／R6-NEW-001／R6-NEW-002 OPEN）。R7 候选
+（`MILESTONE_B_AUDIT_REMEDIATION_7`）尚未独立复审
 （`NOT_YET_PERFORMED`）。不写未来 commit SHA，不把 precommit worktree 状态当作
 persistent current。
 
@@ -30,7 +32,9 @@ worktree pending 是 HISTORICAL R4 CANDIDATE FORMATION SNAPSHOT。LIVE GIT STATE
 R5 implementation identity 修复范围为：在 explicit enumerated dependency
 inventory 中加入 `scripts/__init__.py` 及它在当前正式 package import
 路径中 eager 执行的 28 项 local-import 闭包。该清单是人工显式 inventory，
-不是自动完整 transitive closure；R5 独立复审尚未进行，验证结果仅以实际运行记录为准。
+不是自动完整 transitive closure；R5 已由 final re-audit 复审：
+`MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED`（R4-NEW-002 仍 OPEN）；R7
+尚未独立复审，验证结果仅以实际运行记录为准。
 
 ### HISTORICAL R4 CANDIDATE FORMATION SNAPSHOT
 

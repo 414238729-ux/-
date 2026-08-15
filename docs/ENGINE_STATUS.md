@@ -15,9 +15,11 @@ R3-NEW-002 仍 OPEN。
 
 R5 以上述固定 R4 target 为历史基线的 remediation candidate 已完成 Sol final
 independent re-audit：`MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED`
-（R4-NEW-001=CLOSED；唯一未关闭项 R4-NEW-002）。R6 候选
-（`MILESTONE_B_AUDIT_REMEDIATION_6`）尚未独立复审
-（`NOT_YET_PERFORMED`）。本文档不写 R6 未来 commit SHA，也不把 `commit=null`、
+（R4-NEW-001=CLOSED；唯一未关闭项 R4-NEW-002）。R6 已由 Sol Ultra targeted
+independent re-audit 复审：`MILESTONE_B_REMEDIATION_6_TARGETED_REAUDIT_FAILED`
+（R4-NEW-002／R6-NEW-001／R6-NEW-002 OPEN）。R7 候选
+（`MILESTONE_B_AUDIT_REMEDIATION_7`）尚未独立复审
+（`NOT_YET_PERFORMED`）。本文档不写 R7 未来 commit SHA，也不把 `commit=null`、
 worktree pending 或 clean/dirty 写成 persisted current 事实。
 
 ### HISTORICAL R4 CANDIDATE FORMATION SNAPSHOT
@@ -56,7 +58,9 @@ manifest R3 source_integrity 残留乱码占位恢复为真实 UTF-8 状态文�
 R5 将 implementation identity 的 explicit enumerated dependency inventory 补入
 `scripts/__init__.py` 及它在当前正式 package import 路径中 eager 执行的 28 项
 local-import 闭包。该清单仍是显式维护的依赖 inventory，不是自动、完整的
-transitive dependency closure；R5 的此项及文档分层修复尚未经独立复审。
+transitive dependency closure；R5 的此项及文档分层修复已由 R5 final re-audit
+复审：`MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED`（R4-NEW-002 仍 OPEN）；
+R7 尚未独立复审。
 
 Remediation 2 re-audit 失败原因（封存历史，逐项）：MB-B-001 BLOCKING——
 live-result 汇总不严格（malformed final hash／deck_count=159／action_count=0／
@@ -165,8 +169,9 @@ mismatch=0/0/0（2304.5s）。R1/R2 均为已提交且已独立复审失败的�
 R3 已提交且 V4-Pro pre-audit=`MILESTONE_B_REMEDIATION_3_PRE_AUDIT_FAILED`
 （QA evidence，不是 Sol Ultra final independent re-audit）；R4 当时为
 `independent_audit_done=false`、`audit_conclusion=NOT_AUDITED_YET`、
-`remediation_4_worktree_state=PRECOMMIT`。该快照已被上方持久化 R4 FAILED/R5
-NOT_YET_PERFORMED 状态取代，不表达当前 Git 工作树。
+`remediation_4_worktree_state=PRECOMMIT`。该快照已被上方持久化 R4 FAILED／
+R5 FAILED／R6 FAILED 审计历史与 R7 `NOT_YET_PERFORMED` 候选状态取代，不表达
+当前 Git 工作树。
 
 永久封存边界保持不变：original=`WHOLE_REPO_AUDIT_FAILED`；R1–R5 分别为对应 `REMEDIATION_*_REAUDIT_FAILED`；R6=`REMEDIATION_6_REAUDIT_PASSED`；finalization correction verification=`PASSED`。不创建 R7，不修改旧 audit branch／milestone tag，不把 original FAILED 改成 PASSED。
 ## 历史批次状态正文（HISTORICAL/AS-OF）
