@@ -384,11 +384,25 @@ def test_r4_failed_history_r5_r6_failed_and_r7_not_yet_audited() -> None:
     )
 
     r7 = checkpoints["MILESTONE_B_AUDIT_REMEDIATION_7"]
-    assert r7["state_role"] == "persisted_current"
-    assert r7["independent_reaudit_status"] == "NOT_YET_PERFORMED"
-    assert r7["audit_conclusion"] == "NOT_YET_PERFORMED"
-    assert r7["remediation_scope"] == ["R4-NEW-002", "R6-NEW-001", "R6-NEW-002"]
+    assert r7["state_role"] == "audit_history"
+    assert r7["independent_audit_done"] is True
+    assert r7["audit_conclusion"] == "MILESTONE_B_REMEDIATION_7_TARGETED_REAUDIT_FAILED"
+    assert r7["open_findings"] == ["R7-NEW-001"]
+    assert r7["closed_findings"] == {
+        "R4-NEW-002": "CLOSED",
+        "R6-NEW-001": "CLOSED",
+        "R6-NEW-002": "CLOSED",
+    }
     assert _all_keys(r7).isdisjoint(
+        {"head", "current_head", "commit", "worktree_commit_pending", "worktree_state"}
+    )
+
+    r8 = checkpoints["MILESTONE_B_AUDIT_REMEDIATION_8"]
+    assert r8["state_role"] == "persisted_current"
+    assert r8["independent_reaudit_status"] == "NOT_YET_PERFORMED"
+    assert r8["audit_conclusion"] == "NOT_YET_PERFORMED"
+    assert r8["remediation_scope"] == ["R7-NEW-001"]
+    assert _all_keys(r8).isdisjoint(
         {"head", "current_head", "commit", "worktree_commit_pending", "worktree_state"}
     )
 
@@ -431,9 +445,12 @@ def test_six_docs_share_persisted_state_and_r7_audit_history() -> None:
         assert canonical["4"] in text, name
         assert canonical["5"] in text, name
         assert canonical["6"] in text, name
-        assert "MILESTONE_B_AUDIT_REMEDIATION_7" in text, name
-        # R6-NEW-001 互斥修复：不得再把 R5 说成尚未复审，不得再出现 R6 候选表述
+        assert canonical["7"] in text, name
+        assert "MILESTONE_B_AUDIT_REMEDIATION_8" in text, name
+        # R6-NEW-001 / R7 互斥修复：不得再把 R5/R6/R7 说成尚未复审
         assert not re.search(r"R5.{0,30}尚未(独立|经独立)复审", text), name
         assert not re.search(r"尚未(独立|经独立)复审.{0,30}R5", text), name
         assert "R6 候选" not in text, name
         assert "R6 尚未独立复审" not in text, name
+        assert "R7 候选" not in text, name
+        assert "R7 尚未独立复审" not in text, name

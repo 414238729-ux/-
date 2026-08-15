@@ -7,7 +7,7 @@
 | 字段 | PERSISTED PROJECT STATE |
 |---|---|
 | R4 固定审计记录 | target=`3df02b5cfae9af436ba77d8f1c19a7b9959022b1`，parent=`5d970560e306b84af518798e11db12c2a42dfc44`；Sol final independent re-audit=`MILESTONE_B_REMEDIATION_4_FINAL_REAUDIT_FAILED`，仅 R4-NEW-001/R4-NEW-002 两项 MINOR 未关闭；R3-NEW-001/002/003 与 DOC-OBS-001 均 CLOSED |
-| R5 persisted state | 从固定 R4 target 历史基线开始，随后 Sol final independent re-audit 结论为 `MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED`（R4-NEW-001=CLOSED，唯一未关闭项 R4-NEW-002）；R6 targeted independent re-audit 结论为 `MILESTONE_B_REMEDIATION_6_TARGETED_REAUDIT_FAILED`（R4-NEW-002／R6-NEW-001／R6-NEW-002 OPEN）；R7 候选（`MILESTONE_B_AUDIT_REMEDIATION_7`）尚未独立复审（`NOT_YET_PERFORMED`）；不写未来 SHA，不持久化 worktree pending/clean/dirty |
+| R5 persisted state | 从固定 R4 target 历史基线开始，随后 Sol final independent re-audit 结论为 `MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED`（R4-NEW-001=CLOSED，唯一未关闭项 R4-NEW-002）；R6 targeted independent re-audit 结论为 `MILESTONE_B_REMEDIATION_6_TARGETED_REAUDIT_FAILED`（R4-NEW-002／R6-NEW-001／R6-NEW-002，随后由 R7 targeted re-audit 确认 CLOSED）；R7 targeted independent re-audit 结论为 `MILESTONE_B_REMEDIATION_7_TARGETED_REAUDIT_FAILED`（唯一未关闭项 R7-NEW-001）；R8 候选（`MILESTONE_B_AUDIT_REMEDIATION_8`）尚未独立复审（`NOT_YET_PERFORMED`）；不写未来 SHA，不持久化 worktree pending/clean/dirty |
 | 里程碑范围 | `formal_duel_no_skill_ready=true`、`duel_scope_all_cards_sufficient=true`；`authoritative_full_game_core=false`、`multi_player_production_proven=false`、`milestone_b_complete=false`、`global_all_cards_implemented=false` |
 
 | 字段 | HISTORICAL/AS-OF R5 REMEDIATION START SNAPSHOT |
@@ -35,7 +35,7 @@ R5 的 implementation identity 修复范围包含 `scripts/__init__.py` 及它�
 当前正式 package import 路径中 eager 执行的 28 项 local-import 闭包。
 此 inventory 为 explicit enumerated dependency inventory，不是自动完整 transitive
 closure。R5 独立复审已进行且结论为 `MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED`
-（R4-NEW-001=CLOSED、R4-NEW-002=OPEN）；R6（`MILESTONE_B_AUDIT_REMEDIATION_6`）已复审：`MILESTONE_B_REMEDIATION_6_TARGETED_REAUDIT_FAILED`（R4-NEW-002／R6-NEW-001／R6-NEW-002 OPEN）；R7 尚未独立复审。
+（R4-NEW-001=CLOSED、R4-NEW-002=OPEN）；R6（`MILESTONE_B_AUDIT_REMEDIATION_6`）已复审：`MILESTONE_B_REMEDIATION_6_TARGETED_REAUDIT_FAILED`（R4-NEW-002／R6-NEW-001／R6-NEW-002，随后由 R7 targeted re-audit 确认 CLOSED）；R7 已复审：`MILESTONE_B_REMEDIATION_7_TARGETED_REAUDIT_FAILED`（唯一未关闭项 R7-NEW-001）；R8 尚未独立复审。
 
 ## 用户新确认规则（2026-08-09）
 
@@ -132,5 +132,5 @@ flowchart TD
 `PRECOMMIT`/`NOT_AUDITED_YET`；随后冻结 target=3df02b5... 的 R4 final re-audit
 结论为 FAILED。R5 已由 Sol final independent re-audit 复审：
 `MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED`（R4-NEW-001=CLOSED、
-R4-NEW-002=OPEN）。R6（`MILESTONE_B_AUDIT_REMEDIATION_6`）已复审：`MILESTONE_B_REMEDIATION_6_TARGETED_REAUDIT_FAILED`（R4-NEW-002／R6-NEW-001／R6-NEW-002 OPEN）。R7 尚未独立复审（`NOT_YET_PERFORMED`），不预写 R7
+R4-NEW-002=OPEN）。R6（`MILESTONE_B_AUDIT_REMEDIATION_6`）已复审：`MILESTONE_B_REMEDIATION_6_TARGETED_REAUDIT_FAILED`（R4-NEW-002／R6-NEW-001／R6-NEW-002，随后由 R7 targeted re-audit 确认 CLOSED）。R7 已复审：`MILESTONE_B_REMEDIATION_7_TARGETED_REAUDIT_FAILED`（唯一未关闭项 R7-NEW-001）。R8 尚未独立复审（`NOT_YET_PERFORMED`），不预写 R8
 PASSED、未来 commit SHA 或 milestone tag。

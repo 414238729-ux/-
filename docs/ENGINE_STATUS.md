@@ -17,9 +17,11 @@ R5 以上述固定 R4 target 为历史基线的 remediation candidate 已完成 
 independent re-audit：`MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED`
 （R4-NEW-001=CLOSED；唯一未关闭项 R4-NEW-002）。R6 已由 Sol Ultra targeted
 independent re-audit 复审：`MILESTONE_B_REMEDIATION_6_TARGETED_REAUDIT_FAILED`
-（R4-NEW-002／R6-NEW-001／R6-NEW-002 OPEN）。R7 候选
-（`MILESTONE_B_AUDIT_REMEDIATION_7`）尚未独立复审
-（`NOT_YET_PERFORMED`）。本文档不写 R7 未来 commit SHA，也不把 `commit=null`、
+（R4-NEW-002／R6-NEW-001／R6-NEW-002，随后由 R7 targeted re-audit 确认 CLOSED）。
+R7 已由 Sol Ultra targeted independent re-audit 复审：
+`MILESTONE_B_REMEDIATION_7_TARGETED_REAUDIT_FAILED`（唯一未关闭项 R7-NEW-001）。
+R8 候选（`MILESTONE_B_AUDIT_REMEDIATION_8`）尚未独立复审
+（`NOT_YET_PERFORMED`）。本文档不写 R8 未来 commit SHA，也不把 `commit=null`、
 worktree pending 或 clean/dirty 写成 persisted current 事实。
 
 ### HISTORICAL R4 CANDIDATE FORMATION SNAPSHOT
@@ -60,7 +62,7 @@ R5 将 implementation identity 的 explicit enumerated dependency inventory 补�
 local-import 闭包。该清单仍是显式维护的依赖 inventory，不是自动、完整的
 transitive dependency closure；R5 的此项及文档分层修复已由 R5 final re-audit
 复审：`MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED`（R4-NEW-002 仍 OPEN）；
-R7 尚未独立复审。
+R8 尚未独立复审。
 
 Remediation 2 re-audit 失败原因（封存历史，逐项）：MB-B-001 BLOCKING——
 live-result 汇总不严格（malformed final hash／deck_count=159／action_count=0／
@@ -170,7 +172,7 @@ R3 已提交且 V4-Pro pre-audit=`MILESTONE_B_REMEDIATION_3_PRE_AUDIT_FAILED`
 （QA evidence，不是 Sol Ultra final independent re-audit）；R4 当时为
 `independent_audit_done=false`、`audit_conclusion=NOT_AUDITED_YET`、
 `remediation_4_worktree_state=PRECOMMIT`。该快照已被上方持久化 R4 FAILED／
-R5 FAILED／R6 FAILED 审计历史与 R7 `NOT_YET_PERFORMED` 候选状态取代，不表达
+R5 FAILED／R6 FAILED／R7 FAILED 审计历史与 R8 `NOT_YET_PERFORMED` 候选状态取代，不表达
 当前 Git 工作树。
 
 永久封存边界保持不变：original=`WHOLE_REPO_AUDIT_FAILED`；R1–R5 分别为对应 `REMEDIATION_*_REAUDIT_FAILED`；R6=`REMEDIATION_6_REAUDIT_PASSED`；finalization correction verification=`PASSED`。不创建 R7，不修改旧 audit branch／milestone tag，不把 original FAILED 改成 PASSED。

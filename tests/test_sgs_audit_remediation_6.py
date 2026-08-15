@@ -24,13 +24,14 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 MANIFEST_PATH = REPOSITORY_ROOT / "docs" / "CHECKPOINT_MANIFEST.json"
 
-from test_sgs_audit_remediation_7 import (  # noqa: E402
+from test_sgs_audit_remediation_8 import (  # noqa: E402
     ALLOWED_STATE_ROLES,
-    R6_CONCLUSION,
-    R7_BASE_COMMIT,
+    R7_CONCLUSION,
+    R8_BASE_COMMIT,
     validate_manifest,
 )
 
+R6_CONCLUSION = "MILESTONE_B_REMEDIATION_6_TARGETED_REAUDIT_FAILED"
 R6_BASE_COMMIT = "c283aa4e049b9a0dc728735d5695302c346901c7"
 
 
@@ -248,14 +249,29 @@ def test_r6_record_reflects_targeted_reaudit_failed() -> None:
     assert "commit" not in record
 
 
-def test_r7_record_is_persisted_current_candidate() -> None:
-    record = _checkpoints()["MILESTONE_B_AUDIT_REMEDIATION_7"]
-    assert record["state_role"] == "persisted_current"
-    assert record["status"] == "candidate_awaiting_independent_reaudit"
-    assert record["independent_reaudit_status"] == "NOT_YET_PERFORMED"
-    assert record["audit_conclusion"] == "NOT_YET_PERFORMED"
-    assert record["remediation_scope"] == ["R4-NEW-002", "R6-NEW-001", "R6-NEW-002"]
-    assert _all_keys(record).isdisjoint(
+def test_r7_record_is_audit_history_and_r8_is_candidate() -> None:
+    r7 = _checkpoints()["MILESTONE_B_AUDIT_REMEDIATION_7"]
+    assert r7["state_role"] == "audit_history"
+    assert r7["status"] == "independent_reaudit_failed"
+    assert r7["independent_audit_done"] is True
+    assert r7["audit_conclusion"] == R7_CONCLUSION
+    assert r7["open_findings"] == ["R7-NEW-001"]
+    assert r7["closed_findings"] == {
+        "R4-NEW-002": "CLOSED",
+        "R6-NEW-001": "CLOSED",
+        "R6-NEW-002": "CLOSED",
+    }
+    assert _all_keys(r7).isdisjoint(
+        {"commit", "head", "branch", "worktree_commit_pending", "worktree_state"}
+    )
+
+    r8 = _checkpoints()["MILESTONE_B_AUDIT_REMEDIATION_8"]
+    assert r8["state_role"] == "persisted_current"
+    assert r8["status"] == "candidate_awaiting_independent_reaudit"
+    assert r8["independent_reaudit_status"] == "NOT_YET_PERFORMED"
+    assert r8["audit_conclusion"] == "NOT_YET_PERFORMED"
+    assert r8["remediation_scope"] == ["R7-NEW-001"]
+    assert _all_keys(r8).isdisjoint(
         {"commit", "head", "branch", "worktree_commit_pending", "worktree_state"}
     )
 
@@ -288,16 +304,17 @@ def test_persisted_project_state_holds_only_allowlisted_persistent_facts() -> No
         "persisted_project_state"
     ]
     assert persisted["state_role"] == "persisted_current"
-    assert persisted["latest_completed_independent_reaudit"] == R6_CONCLUSION
-    assert persisted["next_candidate"] == "MILESTONE_B_AUDIT_REMEDIATION_7"
+    assert persisted["latest_completed_independent_reaudit"] == R7_CONCLUSION
+    assert persisted["next_candidate"] == "MILESTONE_B_AUDIT_REMEDIATION_8"
     assert persisted["audit_history_reference"] == (
         "git.current_milestone_b_development.audit_history"
     )
     assert persisted["r6_finding_status"] == {
-        "R4-NEW-002": "OPEN",
-        "R6-NEW-001": "OPEN",
-        "R6-NEW-002": "OPEN",
+        "R4-NEW-002": "CLOSED",
+        "R6-NEW-001": "CLOSED",
+        "R6-NEW-002": "CLOSED",
     }
+    assert persisted["r7_finding_status"] == {"R7-NEW-001": "OPEN"}
     assert _all_keys(persisted).isdisjoint(
         {"branch", "head", "commit", "worktree_commit_pending", "worktree_state"}
     )
@@ -318,26 +335,29 @@ def test_audit_history_is_canonical_single_source() -> None:
             "MILESTONE_B_REMEDIATION_4_FINAL_REAUDIT_FAILED",
             "MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED",
             R6_CONCLUSION,
+            R7_CONCLUSION,
         ),
         start=1,
     ):
         assert rounds[index]["conclusion"] == expected
-    assert rounds[7]["conclusion"] == "NOT_YET_PERFORMED"
+    assert rounds[8]["conclusion"] == "NOT_YET_PERFORMED"
     persisted_chain = manifest["git"]["current_milestone_b_development"][
         "persisted_project_state"
     ]["historical_audit_chain"]
-    canonical_chain = [entry["conclusion"] for entry in rounds if entry["audit_round"] != 7]
+    canonical_chain = [
+        entry["conclusion"] for entry in rounds if entry.get("status") != "NOT_YET_PERFORMED"
+    ]
     assert persisted_chain == canonical_chain
 
 
-def test_post_commit_stability_r7_needs_no_future_sha() -> None:
+def test_post_commit_stability_r8_needs_no_future_sha() -> None:
     manifest = _manifest()
     text = json.dumps(manifest, ensure_ascii=False)
-    r7 = _checkpoints()["MILESTONE_B_AUDIT_REMEDIATION_7"]
-    assert "commit" not in r7
-    base_index = text.find(R7_BASE_COMMIT)
+    r8 = _checkpoints()["MILESTONE_B_AUDIT_REMEDIATION_8"]
+    assert "commit" not in r8
+    base_index = text.find(R8_BASE_COMMIT)
     assert base_index >= 0
-    assert R7_BASE_COMMIT not in json.dumps(
+    assert R8_BASE_COMMIT not in json.dumps(
         manifest["git"]["current_milestone_b_development"]["persisted_project_state"],
         ensure_ascii=False,
     )
@@ -355,7 +375,7 @@ def test_post_commit_stability_r7_needs_no_future_sha() -> None:
 
 
 def test_schema_version_bumped() -> None:
-    assert _manifest()["schema_version"] == "1.3"
+    assert _manifest()["schema_version"] == "1.4"
 
 
 def test_acceptance_artifact_identity_unchanged() -> None:
@@ -365,3 +385,4 @@ def test_acceptance_artifact_identity_unchanged() -> None:
         "8fb694713f68f4da7e1f1b07e266168c476c7b1d14daa436b79b03c7b6f1c695"
     )
     assert "tests/test_sgs_audit_remediation_7.py" in sha
+    assert "tests/test_sgs_audit_remediation_8.py" in sha

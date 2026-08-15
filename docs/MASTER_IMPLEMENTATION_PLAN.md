@@ -15,8 +15,10 @@ R5 从上述固定 R4 target 的历史基线开始；R5 已由 Sol final indepen
 re-audit 复审：`MILESTONE_B_REMEDIATION_5_FINAL_REAUDIT_FAILED`
 （R4-NEW-001=CLOSED、唯一未关闭项 R4-NEW-002）。R6 已由 Sol Ultra targeted
 independent re-audit 复审：`MILESTONE_B_REMEDIATION_6_TARGETED_REAUDIT_FAILED`
-（R4-NEW-002／R6-NEW-001／R6-NEW-002 OPEN）。R7 候选
-（`MILESTONE_B_AUDIT_REMEDIATION_7`）尚未独立复审
+（R4-NEW-002／R6-NEW-001／R6-NEW-002，随后由 R7 targeted re-audit 确认 CLOSED）。
+R7 已由 Sol Ultra targeted independent re-audit 复审：
+`MILESTONE_B_REMEDIATION_7_TARGETED_REAUDIT_FAILED`（唯一未关闭项 R7-NEW-001）。
+R8 候选（`MILESTONE_B_AUDIT_REMEDIATION_8`）尚未独立复审
 （`NOT_YET_PERFORMED`）。不写未来 commit SHA，不把 precommit worktree 状态当作
 persistent current。
 
