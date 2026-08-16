@@ -176,6 +176,12 @@ from .production_replay import (
     record_reference_production_batch,
     reexecute_production_replay,
 )
+from .multiplayer import (
+    DuelOutcomePolicy,
+    OutcomePolicy,
+    PlayerTopology,
+    resolve_victory_after_death,
+)
 from .formal_duel import (
     ALLOWED_RULE_STATUS,
     FormalDuelBlocker,
@@ -301,6 +307,10 @@ __all__ = [
     "record_reference_production_batch",
     "record_reference_formal_duel",
     "reexecute_production_replay",
+    "PlayerTopology",
+    "OutcomePolicy",
+    "DuelOutcomePolicy",
+    "resolve_victory_after_death",
     "RNGCall",
     "REEXECUTION_SCHEMA",
     "ReplayEntry",

@@ -67,6 +67,12 @@ from .model import (
     ZoneKind,
     ZoneRef,
 )
+from .multiplayer import (
+    DuelOutcomePolicy,
+    OutcomePolicy,
+    PlayerTopology,
+    resolve_victory_after_death,
+)
 from .production_cards import (
     FormalCardRegistry,
     GroupTargetTrickAdapter,
@@ -2275,13 +2281,57 @@ class ProductionBasicCardBatch:
             raise ProductionBatchError("生产会话模式ID必须是非空字符串")
         return mode
 
+    @staticmethod
+    def _prepare_player_ids(
+        player_hp: tuple[int, ...], player_ids: tuple[str, ...] | None
+    ) -> tuple[str, ...]:
+        if player_ids is None:
+            return tuple(f"p{index}" for index in range(1, len(player_hp) + 1))
+        if not isinstance(player_ids, tuple):
+            raise TypeError("player_ids必须是元组或None")
+        if len(player_ids) != len(player_hp):
+            raise ValueError("player_ids与体力元组的长度必须一致")
+        if any(not isinstance(value, str) or not value.strip() for value in player_ids):
+            raise ValueError("player_ids中的每一项都必须是非空字符串")
+        if len(set(player_ids)) != len(player_ids):
+            raise ValueError("player_ids不能重复")
+        return tuple(player_id.strip() for player_id in player_ids)
+
+    @property
+    def topology(self) -> PlayerTopology:
+        """从当前权威状态派生的玩家拓扑（POST-B C1）。"""
+
+        return PlayerTopology.from_state(self._state)
+
+    @property
+    def player_ids(self) -> tuple[str, ...]:
+        return self._player_ids
+
+    @property
+    def outcome_policy(self) -> OutcomePolicy | None:
+        return self._outcome_policy
+
+    def _response_order_from_turn_player(
+        self, state: GameState, runtime: _BatchRuntime
+    ) -> tuple[str, ...]:
+        """多人同一时机处理顺序：从当前回合角色开始沿存活角色环座次递增。
+
+        Knowledge 基础术语第 7 节确认的通用顺序。两人局退化为
+        (当前回合角色, 另一名角色)，与既有生产行为完全一致。
+        """
+        return PlayerTopology.from_state(state).alive_ring_from(
+            runtime.current_player_id, include_anchor=True
+        )
+
     def __init__(
         self,
         *,
         seed: int,
         deck_path: str | Path = DEFAULT_DECK_PATH,
-        player_hp: tuple[int, int] = (4, 4),
-        player_max_hp: tuple[int, int] = (4, 4),
+        player_hp: tuple[int, ...] = (4, 4),
+        player_max_hp: tuple[int, ...] = (4, 4),
+        player_ids: tuple[str, ...] | None = None,
+        outcome_policy: OutcomePolicy | None = None,
         initial_hand_count: int = 4,
         shuffle: bool = True,
         session_id: str | None = None,
@@ -2289,8 +2339,12 @@ class ProductionBasicCardBatch:
     ) -> None:
         if isinstance(seed, bool) or not isinstance(seed, int):
             raise TypeError("随机种子必须是整数")
-        if len(player_hp) != 2 or len(player_max_hp) != 2:
-            raise ValueError("生产批处理会话必须提供恰好两名角色的体力")
+        if not isinstance(player_hp, tuple) or not isinstance(player_max_hp, tuple):
+            raise TypeError("玩家体力参数必须是元组")
+        if len(player_hp) != len(player_max_hp):
+            raise ValueError("玩家体力与体力上限的元组长度必须一致")
+        if len(player_hp) < 2:
+            raise ValueError("生产批处理会话必须提供至少两名角色的体力")
         for index, (hp, max_hp) in enumerate(
             zip(player_hp, player_max_hp), start=1
         ):
@@ -2305,6 +2359,13 @@ class ProductionBasicCardBatch:
                 raise ValueError(f"第{index}名角色必须以至少1点体力开始")
             if hp > max_hp:
                 raise ValueError(f"第{index}名角色的初始体力不能高于体力上限")
+        prepared_player_ids = self._prepare_player_ids(player_hp, player_ids)
+        if outcome_policy is not None and not isinstance(
+            outcome_policy, OutcomePolicy
+        ):
+            raise TypeError("模式胜负策略必须是OutcomePolicy或None")
+        self._outcome_policy = outcome_policy
+        self._player_ids = prepared_player_ids
         if (
             isinstance(initial_hand_count, bool)
             or not isinstance(initial_hand_count, int)
@@ -2335,36 +2396,52 @@ class ProductionBasicCardBatch:
         self._formal_registry = FormalCardRegistry(records, session=self)
         self._formal_registry.ensure_all_basic_cards_implemented()
 
-        first_player_id = self._rng.choice(("p1", "p2"))
+        first_player_id = self._rng.choice(prepared_player_ids)
         self._first_player_id = first_player_id
         ordered_ids = [record.instance_id for record in records]
         if shuffle:
             self._rng.shuffle(ordered_ids)
-        p1_hand = tuple(
-            ordered_ids[index]
-            for index in range(0, 2 * initial_hand_count, 2)
-        )
-        p2_hand = tuple(
-            ordered_ids[index]
-            for index in range(1, 2 * initial_hand_count, 2)
-        )
-        dealt = set(p1_hand) | set(p2_hand)
+        hands: dict[str, list[str]] = {
+            player_id: [] for player_id in prepared_player_ids
+        }
+        for round_index in range(initial_hand_count):
+            for player_index, player_id in enumerate(prepared_player_ids):
+                hands[player_id].append(
+                    ordered_ids[
+                        round_index * len(prepared_player_ids) + player_index
+                    ]
+                )
+        dealt = {
+            instance_id for hand in hands.values() for instance_id in hand
+        }
         draw_order = tuple(
             instance_id
             for instance_id in ordered_ids
             if instance_id not in dealt
         )
-        players = (
-            PlayerState("p1", 1, player_hp[0], player_max_hp[0]),
-            PlayerState("p2", 2, player_hp[1], player_max_hp[1]),
+        players = tuple(
+            PlayerState(
+                prepared_player_ids[index],
+                index + 1,
+                player_hp[index],
+                player_max_hp[index],
+            )
+            for index in range(len(prepared_player_ids))
         )
+        hand_zones = {
+            player_id: ZoneRef.hand(player_id)
+            for player_id in prepared_player_ids
+        }
         locations = {
             instance_id: (
-                ZoneRef.hand("p1")
-                if instance_id in p1_hand
-                else ZoneRef.hand("p2")
-                if instance_id in p2_hand
-                else DRAW_PILE
+                next(
+                    (
+                        hand_zones[player_id]
+                        for player_id in prepared_player_ids
+                        if instance_id in hands[player_id]
+                    ),
+                    DRAW_PILE,
+                )
             )
             for instance_id in ordered_ids
         }
@@ -2375,8 +2452,10 @@ class ProductionBasicCardBatch:
             players=players,
             card_locations=locations,
             zone_order={
-                ZoneRef.hand("p1"): p1_hand,
-                ZoneRef.hand("p2"): p2_hand,
+                **{
+                    hand_zones[player_id]: tuple(hands[player_id])
+                    for player_id in prepared_player_ids
+                },
                 DRAW_PILE: draw_order,
                 DISCARD_PILE: (),
                 PROCESSING_ZONE: (),
@@ -2385,7 +2464,7 @@ class ProductionBasicCardBatch:
         )
         self._state.assert_card_conservation()
         self._events = EventQueue()
-        for player_id, hand in (("p1", p1_hand), ("p2", p2_hand)):
+        for player_id in prepared_player_ids:
             self._events.extend(
                 GameEvent(
                     event_type=EventType.CARD_GAINED,
@@ -2394,7 +2473,7 @@ class ProductionBasicCardBatch:
                     target_ids=(player_id,),
                     payload={"reason": "initial_hand"},
                 )
-                for instance_id in hand
+                for instance_id in hands[player_id]
             )
         # CP-04L：首名角色也必须经过完整阶段流（PREPARE→JUDGMENT→DRAW→PLAY），
         # 不再在初始化时直接摸2并进入PLAY；摸2在DRAW阶段以正式动作完成。
@@ -2591,6 +2670,11 @@ class ProductionBasicCardBatch:
 
     @staticmethod
     def opponent_of(player_id: str) -> str:
+        """两人局兼容助手：返回唯一对手（POST-B C1 后仅限遗留两人语义）。
+
+        多人顺序一律改用 :class:`PlayerTopology`（存活角色环），本助手
+        不再作为生产顺序的隐式规则源。
+        """
         if player_id == "p1":
             return "p2"
         if player_id == "p2":
@@ -2937,8 +3021,18 @@ class ProductionBasicCardBatch:
         """返回可序列化的稳定执行快照，供严格重执行逐步比较。"""
 
         snapshot = {
-            "schema": "production-basic-batch-execution-v1",
+            "schema": "production-basic-batch-execution-v2",
             "mode": self.mode_id,
+            "player_count": len(self._player_ids),
+            "outcome_policy_identity": (
+                self._outcome_policy.identity()
+                if self._outcome_policy is not None
+                else (
+                    "implicit_two_player_duel"
+                    if len(self._player_ids) == 2
+                    else "unregistered_outcome_policy"
+                )
+            ),
             "runtime": self._runtime.audit_value(),
             "first_player_id": self.first_player_id,
             "current_actor_id": (
@@ -3031,17 +3125,22 @@ class ProductionBasicCardBatch:
                 # 之前直接门禁拒绝（decision=use_slash，手牌≥2时抛
                 # UnsupportedRuleError），不生成 virtual:zhangba:* candidate
                 # 后再撞公共实体验证器。
+                zhangba_targets = PlayerTopology.from_state(
+                    state
+                ).all_other_alive_ids(actor)
                 check_weapon_skill_gate(
                     state,
                     actor_id=actor,
                     decision="use_slash",
-                    target_id=self.opponent_of(actor),
+                    target_id=(
+                        zhangba_targets[0] if zhangba_targets else actor
+                    ),
                     slash_used_count=self._runtime.slash_used_counts.get(
                         actor, 0
                     ),
                 )
                 hand_ids = tuple(state.card_ids_in(ZoneRef.hand(actor)))
-                if len(hand_ids) >= 2:
+                if len(hand_ids) >= 2 and zhangba_targets:
                     window_id = (
                         f"zhangba:{self._runtime.turn_number}:{actor}"
                     )
@@ -3072,7 +3171,7 @@ class ProductionBasicCardBatch:
                                         conversion_rule_id="zhangba",
                                         material_card_instance_ids=material_ids,
                                     ),
-                                    target_ids=(self.opponent_of(actor),),
+                                    target_ids=(zhangba_targets[0],),
                                     payload={
                                         "operation": "use_slash",
                                         "card_key": "sgs_basic_sha",
@@ -4555,9 +4654,8 @@ class ProductionBasicCardBatch:
             self._events.extend((dying_event,))
             dying_sequence = self._events.snapshot()[-1].sequence
             assert dying_sequence is not None
-            rescue_order = (
-                runtime.current_player_id,
-                self.opponent_of(runtime.current_player_id),
+            rescue_order = self._response_order_from_turn_player(
+                next_state, runtime
             )
             return next_state, replace(
                 runtime,
@@ -4874,9 +4972,8 @@ class ProductionBasicCardBatch:
             self._events.extend((dying_event,))
             dying_sequence = self._events.snapshot()[-1].sequence
             assert dying_sequence is not None
-            rescue_order = (
-                runtime.current_player_id,
-                self.opponent_of(runtime.current_player_id),
+            rescue_order = self._response_order_from_turn_player(
+                next_state, runtime
             )
             return next_state, replace(
                 next_runtime,
@@ -7261,10 +7358,7 @@ class ProductionBasicCardBatch:
         queued = self._events.extend((used_event, move_event))
         used_sequence = queued[0].sequence
         assert used_sequence is not None
-        order = (
-            runtime.current_player_id,
-            self.opponent_of(runtime.current_player_id),
-        )
+        order = self._response_order_from_turn_player(state, runtime)
         next_runtime = replace(
             runtime,
             phase=ProductionPhase.TRICK_RESPONSE,
@@ -7630,10 +7724,7 @@ class ProductionBasicCardBatch:
         queued = self._events.extend((used_event, move_event))
         used_sequence = queued[0].sequence
         assert used_sequence is not None
-        order = (
-            runtime.current_player_id,
-            self.opponent_of(runtime.current_player_id),
-        )
+        order = self._response_order_from_turn_player(state, runtime)
         next_runtime = replace(
             runtime,
             phase=ProductionPhase.TRICK_RESPONSE,
@@ -9575,10 +9666,7 @@ class ProductionBasicCardBatch:
         queued = self._events.extend((used_event, move_event))
         used_sequence = queued[0].sequence
         assert used_sequence is not None
-        order = (
-            runtime.current_player_id,
-            self.opponent_of(runtime.current_player_id),
-        )
+        order = self._response_order_from_turn_player(state, runtime)
         weapon_ids = state.card_ids_in(
             ZoneRef.equipment(first_target, "weapon")
         )
@@ -10419,10 +10507,7 @@ class ProductionBasicCardBatch:
             target_sequence=sequence,
         )
         first_target = sequence[0]
-        order = (
-            runtime.current_player_id,
-            self.opponent_of(runtime.current_player_id),
-        )
+        order = self._response_order_from_turn_player(state, runtime)
         next_runtime = replace(
             runtime,
             phase=ProductionPhase.TRICK_RESPONSE,
@@ -10776,10 +10861,7 @@ class ProductionBasicCardBatch:
             next_runtime = self._return_to_play(runtime)
             return next_state, replace(next_runtime, pending_wugu=None)
         next_target = group.target_sequence[next_index]
-        order = (
-            runtime.current_player_id,
-            self.opponent_of(runtime.current_player_id),
-        )
+        order = self._response_order_from_turn_player(state, runtime)
         last_events = self._events.snapshot()
         source_sequence = last_events[-1].sequence if last_events else None
         next_group = replace(
@@ -11100,10 +11182,7 @@ class ProductionBasicCardBatch:
             target_sequence=sequence,
         )
         first_target = sequence[0]
-        order = (
-            runtime.current_player_id,
-            self.opponent_of(runtime.current_player_id),
-        )
+        order = self._response_order_from_turn_player(state, runtime)
         next_runtime = replace(
             runtime,
             phase=ProductionPhase.TRICK_RESPONSE,
@@ -11419,10 +11498,7 @@ class ProductionBasicCardBatch:
             target_sequence=sequence,
         )
         first_target = sequence[0]
-        order = (
-            runtime.current_player_id,
-            self.opponent_of(runtime.current_player_id),
-        )
+        order = self._response_order_from_turn_player(state, runtime)
         next_runtime = replace(
             runtime,
             phase=ProductionPhase.TRICK_RESPONSE,
@@ -11543,9 +11619,8 @@ class ProductionBasicCardBatch:
             self._events.extend((damage_event, dying_event))
             dying_sequence = self._events.snapshot()[-1].sequence
             assert dying_sequence is not None
-            rescue_order = (
-                runtime.current_player_id,
-                self.opponent_of(runtime.current_player_id),
+            rescue_order = self._response_order_from_turn_player(
+                next_state, runtime
             )
             next_runtime = replace(
                 runtime,
@@ -12570,17 +12645,52 @@ class ProductionBasicCardBatch:
             )
             finish_events = [*finish_events, borrowed_finish]
         next_state = _replace_player(next_state, dying_id, alive=False)
-        winner = self.opponent_of(dying_id)
+        winner = resolve_victory_after_death(
+            PlayerTopology.from_state(next_state),
+            dying_id,
+            policy=self._outcome_policy,
+            explicit_two_player_fallback=True,
+        )
         damage_source = self._pending_damage_source(runtime)
+        death_event = GameEvent(
+            event_type=EventType.DEATH,
+            damage_source=damage_source,
+            kill_credit=damage_source,
+            target_ids=(dying_id,),
+        )
+        if winner is None:
+            # POST-B C1：多人对局中的非终局死亡——不产生 VICTORY，对局继续。
+            # 当前只证明群体锦囊目标死亡后继续逐目标队列；其余挂起根
+            # （五谷/传导/判定/借刀/单体根牌）的死亡继续结算尚未由正式
+            # 多人语义证明，一律失败关闭，不猜测2v2/身份场/最后一人生存
+            # 等模式规则。
+            if (
+                runtime.pending_group_trick is not None
+                and runtime.pending_wugu is None
+                and runtime.pending_chain is None
+                and pending_judgment is None
+                and borrowed is None
+            ):
+                self._events.extend(
+                    [*finish_events, *cleanup_events, death_event]
+                )
+                next_state, next_runtime = self._resume_group_after_damage(
+                    next_state, runtime, dying_id, rescued=False
+                )
+                next_runtime = replace(
+                    next_runtime,
+                    judgment_entry_indices=judgment_entry_indices_after_death,
+                )
+                self._commit_runtime(runtime, next_runtime)
+                return next_state
+            raise UnsupportedRuleError(
+                "多人对局中非终局死亡的继续结算尚未证明（当前仅支持群体"
+                "锦囊目标死亡后继续目标队列）；失败关闭，不猜测模式规则"
+            )
         final_events: list[GameEvent] = (
             finish_events + list(cleanup_events)
             + [
-            GameEvent(
-                event_type=EventType.DEATH,
-                damage_source=damage_source,
-                kill_credit=damage_source,
-                target_ids=(dying_id,),
-            ),
+                death_event,
                 GameEvent(
                     event_type=EventType.VICTORY,
                     target_ids=(winner,),
@@ -12881,10 +12991,7 @@ class ProductionBasicCardBatch:
             next_id,
             card.card_key,
         )
-        order = (
-            runtime.current_player_id,
-            self.opponent_of(runtime.current_player_id),
-        )
+        order = self._response_order_from_turn_player(state, runtime)
         next_runtime = replace(
             runtime,
             phase=ProductionPhase.JUDGMENT_WUXIE,
@@ -13817,7 +13924,9 @@ class ProductionBasicCardBatch:
             raise InvalidActionError("只有结束阶段可以结束回合")
         if context.actor_id != runtime.current_player_id:
             raise InvalidActionError("只有当前回合角色可以结束回合")
-        next_player = self.opponent_of(runtime.current_player_id)
+        next_player = PlayerTopology.from_state(state).next_alive(
+            runtime.current_player_id
+        )
         next_state = state
         next_runtime = replace(
             runtime,

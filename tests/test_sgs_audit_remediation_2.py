@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+import scripts.sgs_engine.formal_duel as formal_duel_module
 import scripts.sgs_formal_runner as formal_runner
 from scripts.sgs_engine.actions import UnsupportedRuleError
 from scripts.sgs_engine.formal_duel import (
@@ -44,6 +45,36 @@ from scripts.sgs_engine_gate import (
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+
+# 冻结 Milestone B R8 时代的实现身份（历史证据常量，不得改写）。
+FROZEN_R8_IMPLEMENTATION_IDENTITY = (
+    "06c8b2d3ead9adb52a18252e398eae137eb8fb51f657909051500893672b0e33"
+)
+# R8 时代被冻结 manifest sha256 表记录、随后由 post-B 开发（C1）合法修改的
+# 生产源文件及其 R8 时代哈希：历史表项必须始终等于这些冻结值（证明证据
+# 未被改写），当前文件必须与其不同（证明分歧正是 post-B 修改，而非篡改）。
+_R8_ERA_SHA256_FOR_POST_B_CHANGED_FILES = {
+    "scripts/sgs_engine/__init__.py": (
+        "2d4419241f3d4d6bd7f372ee6ef7e9e48b2a14c9fffb4c295c4a2daab53157e7"
+    ),
+    "scripts/sgs_engine/formal_duel.py": (
+        "8894e8bd0d7255fcf74c49361f410fe58b26f6dd1fddf990c38f0ebd63dcca4c"
+    ),
+    "scripts/sgs_engine/production_batch.py": (
+        "402507fb38f47d25a6b180245009ab92cf8829ae2897609fda998c3e3c7047e3"
+    ),
+    "scripts/sgs_engine/production_cards.py": (
+        "d8b2f2dd4a7abb8624459119acc477938c12f02ad2f5fb8a9caab03709b59718"
+    ),
+    "scripts/sgs_engine/production_replay.py": (
+        "b519a2ac02f72e7957e1b2c9b1f5d003088d1998a39a736efd66215574be25da"
+    ),
+    # POST_B_C1_PRECOMMIT_TEST_STATE_CLOSURE 修正了该测试的语义
+    # （历史证据 vs 当前认证分离），属于 post-B 合法修改。
+    "tests/test_sgs_formal_duel.py": (
+        "493d8d43e9a92e08f9e8ee62abed378dbdb1d809a63cbce61c35742359928ddb"
+    ),
+}
 
 
 def _fresh_seed_game(seed: int = 3) -> FormalNoSkillDuelSession:
@@ -265,20 +296,30 @@ def test_finished_invariant_negative_matrix(field: str) -> None:
 
 
 def test_cached_report_is_not_live_execution(monkeypatch: pytest.MonkeyPatch) -> None:
-    """缓存报告有效（cached_acceptance_report_valid）不表示 simulation 已执行。"""
+    """缓存报告有效（cached_acceptance_report_valid）不表示 simulation 已执行。
+
+    POST-B C1：缓存有效性由实现身份匹配决定——冻结 R8 artifact 在 C1
+    identity 下按设计 stale（valid=False），静态执行资格仍为 True，
+    状态输出绝不伪装 simulation executed。
+    """
 
     readiness = inspect_formal_duel_readiness()
-    assert readiness.cached_acceptance_report_valid is True
     assert readiness.formal_duel_execution_ready is True
+    identity_matches = (
+        formal_duel_module.implementation_identity()
+        == FROZEN_R8_IMPLEMENTATION_IDENTITY
+    )
+    assert readiness.cached_acceptance_report_valid is identity_matches
     # status 命令（build_current_status）绝不伪装 simulation executed。
     status = formal_runner.build_current_status(
         mode_name="formal_160_card_no_skill_duel"
     )
     assert status["simulation_executed"] is False
-    assert status["formal_duel"]["cached_acceptance_report_valid"] is True
     assert (
-        status["formal_duel"]["formal_duel_execution_ready"] is True
+        status["formal_duel"]["cached_acceptance_report_valid"]
+        is identity_matches
     )
+    assert status["formal_duel"]["formal_duel_execution_ready"] is True
 
 
 def test_invalid_live_results_force_failed_status(
@@ -363,6 +404,14 @@ def test_stale_cache_does_not_block_live_execution(
 
 
 def test_manifest_sha256_inventory_is_true_sha256() -> None:
+    """manifest SHA-256 清单：历史证据完整性与当前树对照分离。
+
+    R1-NEW-001 语义（post-B 修正）：冻结表项必须仍是 64 位 hex 的 R8 时代
+    哈希——未变更文件必须与当前文件逐字一致（防篡改），post-B 已变更的
+    生产源文件必须仍记录其 R8 时代哈希（历史证据未被改写）且当前文件已
+    偏离（分歧即 post-B 修改本身）。
+    """
+
     from scripts.sgs_hash_inventory import git_normalized_sha256
 
     manifest = json.loads(
@@ -375,15 +424,30 @@ def test_manifest_sha256_inventory_is_true_sha256() -> None:
     assert "hash_note" in sha
     mismatches = []
     entries = 0
+    changed_since_r8 = 0
     for key, value in sha.items():
         if key in ("hash_note", "self_excluded"):
             continue
         entries += 1
         assert len(value) == 64, (key, value)
         assert re.fullmatch(r"[0-9a-f]{64}", value), (key, value)
+        if key in _R8_ERA_SHA256_FOR_POST_B_CHANGED_FILES:
+            changed_since_r8 += 1
+            # 历史证据：表项必须仍等于 R8 时代冻结值（不得被改写）。
+            assert (
+                value == _R8_ERA_SHA256_FOR_POST_B_CHANGED_FILES[key]
+            ), key
+            # 当前树：文件必须已偏离 R8 时代字节（post-B 合法修改）。
+            # 若某文件回到 R8 字节，应从变更集清单中移除。
+            assert git_normalized_sha256(key) != value, (
+                f"{key} 当前内容与R8时代哈希重新一致，"
+                "应从 post-B 变更集清单移除"
+            )
+            continue
         if value != git_normalized_sha256(key):
             mismatches.append(key)
     assert mismatches == []
+    assert changed_since_r8 == len(_R8_ERA_SHA256_FOR_POST_B_CHANGED_FILES)
     assert entries >= 50
 
 

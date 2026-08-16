@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 import scripts.sgs_engine.formal_duel as formal_duel_module
@@ -24,6 +25,16 @@ from scripts.sgs_engine import (
     record_reference_formal_duel,
     reexecute_production_replay,
     run_formal_duel_seed_sweep,
+)
+
+# 冻结 Milestone B R8 时代的实现身份（历史证据常量，不得改写）。
+FROZEN_R8_IMPLEMENTATION_IDENTITY = (
+    "06c8b2d3ead9adb52a18252e398eae137eb8fb51f657909051500893672b0e33"
+)
+_ACCEPTANCE_ARTIFACT_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "docs"
+    / "FORMAL_MILESTONE_B_100_SEED_ACCEPTANCE.json"
 )
 
 
@@ -122,16 +133,46 @@ def test_live_readiness_has_exact_mode_scoped_card_semantics() -> None:
     assert readiness.reexecution_replay_supported is True
     assert readiness.unsupported_rules == 0
     assert readiness.approximation_count == 0
-    assert readiness.acceptance_seed_count == 100
-    assert readiness.acceptance_natural_end_count == 100
-    assert readiness.acceptance_failure_count == 0
-    assert len(readiness.acceptance_seed_results) == 100
-    assert readiness.fixed_seed_acceptance_passed is True
-    # MB-B-001：缓存报告有效性与静态执行资格分离。
-    assert readiness.cached_acceptance_report_valid is True
-    assert readiness.cached_acceptance_seed_count == 100
-    assert readiness.cached_fixed_seed_acceptance_passed is True
+    # MB-B-001：缓存报告有效性只由身份绑定决定；静态执行资格与缓存分离。
+    # POST-B C1：冻结 R8 acceptance artifact 是历史证据，不是 current
+    # certification。其规则/牌堆身份未变，只有 implementation identity
+    # 被 C1 有意改变 → 缓存证据按设计 stale（valid=False / 0 seeds），
+    # 静态执行资格（formal_duel_execution_ready）不受影响。
     assert readiness.formal_duel_execution_ready is True
+    artifact_payload = json.loads(
+        _ACCEPTANCE_ARTIFACT_PATH.read_text(encoding="utf-8")
+    )
+    assert (
+        artifact_payload["implementation_identity"]
+        == FROZEN_R8_IMPLEMENTATION_IDENTITY
+    )
+    assert (
+        formal_duel_module.rules_profile_identity()
+        == artifact_payload["rules_profile_identity"]
+    )
+    assert (
+        formal_duel_module.deck_identity()
+        == artifact_payload["deck_identity"]
+    )
+    identity_matches = (
+        formal_duel_module.implementation_identity()
+        == FROZEN_R8_IMPLEMENTATION_IDENTITY
+    )
+    assert readiness.cached_acceptance_report_valid is identity_matches
+    assert readiness.cached_acceptance_seed_count == (
+        100 if identity_matches else 0
+    )
+    assert readiness.acceptance_seed_count == (
+        readiness.cached_acceptance_seed_count
+    )
+    assert readiness.acceptance_natural_end_count == (
+        100 if identity_matches else 0
+    )
+    assert readiness.fixed_seed_acceptance_passed is identity_matches
+    assert readiness.cached_fixed_seed_acceptance_passed is identity_matches
+    assert len(readiness.acceptance_seed_results) == (
+        readiness.acceptance_seed_count
+    )
     # MB-B-004：能力必须分层——duel scope 充分，但全局完整引擎不得成立。
     assert readiness.duel_scope_all_cards_sufficient is True
     assert readiness.global_all_cards_implemented is False

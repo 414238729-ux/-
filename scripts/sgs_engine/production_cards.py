@@ -34,6 +34,7 @@ from .actions import (
     UnsupportedRuleError,
 )
 from .engine import DEFAULT_DECK_PATH, AuthoritativeCoreSession
+from .multiplayer import PlayerTopology
 from .model import (
     EQUIPMENT_SLOTS,
     CharacterGender,
@@ -826,11 +827,14 @@ class SlashAdapter(BasicCardAdapter):
         if session.runtime.slash_used_counts.get(context.actor_id, 0) > 0:
             # 达到通常上限：先经过武器技能门禁；诸葛连弩（CP-04P 已实现
             # “你使用【杀】无次数限制”）继续枚举，其余武器不改变次数。
+            other_targets = PlayerTopology.from_state(
+                state
+            ).all_other_alive_ids(context.actor_id)
             check_weapon_skill_gate(
                 state,
                 actor_id=context.actor_id,
                 decision="use_slash",
-                target_id=session.opponent_of(context.actor_id),
+                target_id=other_targets[0] if other_targets else context.actor_id,
                 slash_used_count=session.runtime.slash_used_counts.get(
                     context.actor_id, 0
                 ),
@@ -845,40 +849,24 @@ class SlashAdapter(BasicCardAdapter):
             card = state.cards_by_id[instance_id]
             if card.card_key != self.card_key:
                 continue
-            target = session.opponent_of(context.actor_id)
-            if not is_valid_slash_target(state, context.actor_id, target):
-                continue
-            check_weapon_skill_gate(
-                state,
-                actor_id=context.actor_id,
-                decision="use_slash",
-                target_id=target,
-                slash_card_key=self.card_key,
-                slash_used_count=session.runtime.slash_used_counts.get(
-                    context.actor_id, 0
-                ),
-            )
-            actions.append(
-                LegalAction(
-                    action_type=ActionType.USE_CARD,
-                    actor_id=context.actor_id,
-                    card_instance_id=instance_id,
-                    target_ids=(target,),
-                    payload={
-                        "operation": "use_slash",
-                        "card_key": self.card_key,
-                        "card_name": self.card_name,
-                    },
-                )
-            )
-            # CP-04P 朱雀羽扇（7.10 用户整理解释）：使用普通【杀】指定目标
-            # 时可将该【杀】转为【火杀】。提供独立的“转火杀”使用动作；
-            # 未选择转换则按普通【杀】结算。
-            if (
-                self.card_key == "sgs_basic_sha"
-                and equipped_weapon_key(state, context.actor_id)
-                == "sgs_weapon_zhuqueyushan"
+            # POST-B C1：【杀】目标候选不再固定为唯一对手，而是按存活角色环
+            # 枚举全部其他存活角色（距离合法性由 is_valid_slash_target 统一
+            # 过滤）。两人局候选恰为对手一人，行为不变。
+            for target in PlayerTopology.from_state(state).all_other_alive_ids(
+                context.actor_id
             ):
+                if not is_valid_slash_target(state, context.actor_id, target):
+                    continue
+                check_weapon_skill_gate(
+                    state,
+                    actor_id=context.actor_id,
+                    decision="use_slash",
+                    target_id=target,
+                    slash_card_key=self.card_key,
+                    slash_used_count=session.runtime.slash_used_counts.get(
+                        context.actor_id, 0
+                    ),
+                )
                 actions.append(
                     LegalAction(
                         action_type=ActionType.USE_CARD,
@@ -889,10 +877,31 @@ class SlashAdapter(BasicCardAdapter):
                             "operation": "use_slash",
                             "card_key": self.card_key,
                             "card_name": self.card_name,
-                            "converted_to_fire": True,
                         },
                     )
                 )
+                # CP-04P 朱雀羽扇（7.10 用户整理解释）：使用普通【杀】指定目标
+                # 时可将该【杀】转为【火杀】。提供独立的“转火杀”使用动作；
+                # 未选择转换则按普通【杀】结算。
+                if (
+                    self.card_key == "sgs_basic_sha"
+                    and equipped_weapon_key(state, context.actor_id)
+                    == "sgs_weapon_zhuqueyushan"
+                ):
+                    actions.append(
+                        LegalAction(
+                            action_type=ActionType.USE_CARD,
+                            actor_id=context.actor_id,
+                            card_instance_id=instance_id,
+                            target_ids=(target,),
+                            payload={
+                                "operation": "use_slash",
+                                "card_key": self.card_key,
+                                "card_name": self.card_name,
+                                "converted_to_fire": True,
+                            },
+                        )
+                    )
         return tuple(actions)
 
     def apply_action(

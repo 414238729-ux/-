@@ -267,6 +267,7 @@ _PRODUCTION_INITIAL_CONFIGURATION_FIELDS = {
     "initial_hand_count",
     "shuffle",
     "max_steps",
+    "outcome_policy_identity",
 }
 _FORMAL_DUEL_INITIAL_CONFIGURATION_FIELDS = {
     "formal_duel_configuration",
@@ -926,7 +927,10 @@ class ProductionReexecutionReplay:
         return value
 
     def player_visible_payload(
-        self, viewer_id: str | None = None
+        self,
+        viewer_id: str | None = None,
+        *,
+        valid_player_ids: tuple[str, ...] = ("p1", "p2"),
     ) -> dict[str, object]:
         """返回不包含权威私有材料的玩家可见回放导出（CP-04L 双视角脱敏）。
 
@@ -937,6 +941,11 @@ class ProductionReexecutionReplay:
         initial_rng_state、随机消费记录等可反推牌堆顺序或下一张顶牌的材料，
         以及 ``authoritative_private``（会话秘密与句柄映射）；权威重执行
         拒绝此类导出（缺少私有材料直接失败关闭）。
+
+        POST-B C1：合法观察者集合由 ``valid_player_ids`` 显式提供（默认保持
+        正式双人会话的 ("p1", "p2") 以兼容既有调用），不再使用
+        ``observer != p1 则按 p2`` 之类的二元逻辑；多人会话应传入其权威
+        玩家ID元组，非法ID一律失败关闭而不是静默当作旁观者。
         """
 
         if viewer_id is not None:
@@ -944,7 +953,14 @@ class ProductionReexecutionReplay:
                 raise ValueError(
                     "viewer_id必须是None或非空字符串（正式会话合法角色ID）"
                 )
-            if viewer_id not in ("p1", "p2"):
+            if not isinstance(valid_player_ids, tuple) or any(
+                not isinstance(value, str) or not value.strip()
+                for value in valid_player_ids
+            ):
+                raise TypeError(
+                    "valid_player_ids必须是非空字符串元组"
+                )
+            if viewer_id not in valid_player_ids:
                 raise ValueError(
                     f"viewer_id={viewer_id!r}不是正式会话中的合法角色ID；"
                     "不得把非法ID静默当作旁观者"
@@ -1195,6 +1211,11 @@ def record_reference_production_batch(
             "initial_hand_count": initial_hand_count,
             "shuffle": shuffle,
             "max_steps": max_steps,
+            "outcome_policy_identity": (
+                game.outcome_policy.identity()
+                if game.outcome_policy is not None
+                else None
+            ),
         }
     header = {
         "schema_version": REEXECUTION_SCHEMA,
@@ -1266,7 +1287,11 @@ def record_reference_production_batch(
     event_values = tuple(_event_values(game))
     outcome = {
         "winner_id": game.winner_id,
-        "finish_reason": "opponent_confirmed_dead",
+        "finish_reason": (
+            game.outcome_policy.finish_reason
+            if game.outcome_policy is not None
+            else "opponent_confirmed_dead"
+        ),
         "step_count": game.step_count,
         "turn_count": game._runtime.turn_number,
         "decision_count": len(decisions),
@@ -1371,8 +1396,14 @@ def _compare_sequence(
 def reexecute_production_replay(
     record: ProductionReexecutionReplay,
     fixture: Any | None = None,
+    outcome_policy: Any | None = None,
 ) -> ProductionReplayVerificationResult:
-    """从配置重新执行规则并严格验证每项决策、随机、事件和状态。"""
+    """从配置重新执行规则并严格验证每项决策、随机、事件和状态。
+
+    POST-B C1：基本批次模式的重建可由 ``outcome_policy`` 显式提供模式
+    胜负策略（记录中 ``outcome_policy_identity`` 必须与其一致）；未提供
+    时按既有双人回退语义重建。策略对象必须与录制时同一实现。
+    """
 
     if not isinstance(record, ProductionReexecutionReplay):
         raise TypeError("规则重执行必须接收ProductionReexecutionReplay")
@@ -1392,6 +1423,24 @@ def reexecute_production_replay(
     session_secret = bytes.fromhex(str(private["session_secret_hex"]))
     mode_id = str(header["mode_id"])
     if mode_id == PRODUCTION_BASIC_CARDS_MODE:
+        recorded_policy_identity = config.get("outcome_policy_identity")
+        if recorded_policy_identity not in (None, "unregistered_outcome_policy"):
+            if outcome_policy is None or (
+                not hasattr(outcome_policy, "identity")
+                or outcome_policy.identity() != recorded_policy_identity
+            ):
+                raise ProductionReplayFormatError(
+                    "生产批次回放记录了模式胜负策略，但重执行未提供一致策略"
+                )
+        elif outcome_policy is not None and hasattr(
+            outcome_policy, "identity"
+        ) and outcome_policy.identity() not in (
+            "unregistered_outcome_policy",
+            None,
+        ):
+            raise ProductionReplayFormatError(
+                "生产批次回放未记录模式胜负策略，但重执行提供了策略"
+            )
         game = ProductionBasicCardBatch(
             seed=int(header["seed"]),
             deck_path=str(config["deck_path"]),
@@ -1401,6 +1450,7 @@ def reexecute_production_replay(
             shuffle=config["shuffle"],  # type: ignore[arg-type]
             session_id=session_id,
             session_secret=session_secret,
+            outcome_policy=outcome_policy,
         )
     elif mode_id == FORMAL_NO_SKILL_DUEL_MODE:
         from .formal_duel import FormalDuelConfiguration, FormalNoSkillDuelSession

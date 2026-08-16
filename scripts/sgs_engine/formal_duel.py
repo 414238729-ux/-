@@ -16,6 +16,7 @@ from typing import Iterable, Mapping, Sequence
 
 from .actions import ActionContext, ActionType, LegalAction, UnsupportedRuleError
 from .model import DRAW_PILE, CharacterGender, CharacterMetadata
+from .multiplayer import DuelOutcomePolicy
 from .production_batch import (
     FORMAL_NO_SKILL_DUEL_MODE,
     BatchReferenceController,
@@ -581,6 +582,7 @@ class FormalNoSkillDuelSession(ProductionBasicCardBatch):
             shuffle=True,
             session_id=session_id,
             session_secret=session_secret,
+            outcome_policy=DuelOutcomePolicy(),
         )
         players = tuple(
             replace(player, character=configuration.participants[index])
