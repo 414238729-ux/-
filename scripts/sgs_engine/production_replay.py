@@ -87,9 +87,13 @@ def _require_sequence(value: object, label: str) -> Sequence[object]:
 
 
 def _require_exact_fields(
-    value: Mapping[str, object], required: set[str], label: str
+    value: Mapping[str, object],
+    required: set[str],
+    label: str,
+    *,
+    optional_missing: frozenset[str] = frozenset(),
 ) -> None:
-    missing = sorted(required.difference(value))
+    missing = sorted(required.difference(optional_missing).difference(value))
     extra = sorted(set(value).difference(required))
     if missing:
         raise ProductionReplayFormatError(f"{label}缺少字段：{', '.join(missing)}")
@@ -268,6 +272,8 @@ _PRODUCTION_INITIAL_CONFIGURATION_FIELDS = {
     "shuffle",
     "max_steps",
     "outcome_policy_identity",
+    # POST-B C2：一等回放输入；旧记录（C1 时代）可缺省（默认 p1..pN）。
+    "player_ids",
 }
 _FORMAL_DUEL_INITIAL_CONFIGURATION_FIELDS = {
     "formal_duel_configuration",
@@ -815,6 +821,7 @@ class ProductionReexecutionReplay:
                 initial_configuration,
                 _PRODUCTION_INITIAL_CONFIGURATION_FIELDS,
                 "生产批次initial_configuration",
+                optional_missing=frozenset({"player_ids"}),
             )
         max_steps = initial_configuration["max_steps"]
         if (
@@ -836,9 +843,13 @@ class ProductionReexecutionReplay:
             raise ProductionReplayFormatError(
                 "initial_configuration.max_steps不能小于终局step_count"
             )
-        if outcome["finish_reason"] != "opponent_confirmed_dead":
+        finish_reason = outcome.get("finish_reason")
+        if not isinstance(finish_reason, str) or not finish_reason.strip():
+            # POST-B C2：终局原因是 OutcomePolicy 产生的模式语义，不再是
+            # duel-only 常量；完整性校验只要求非空字符串，语义绑定由
+            # 重执行时与已校验身份的 policy 产出值比对（见 reexecute）。
             raise ProductionReplayFormatError(
-                "终局finish_reason必须是opponent_confirmed_dead"
+                "终局finish_reason必须是非空字符串"
             )
         if outcome["decision_count"] != len(decisions):
             raise ProductionReplayFormatError(
@@ -1216,6 +1227,10 @@ def record_reference_production_batch(
                 if game.outcome_policy is not None
                 else None
             ),
+            # POST-B C2：玩家身份与座次升为回放一等输入。从权威会话读取
+            # 真实 player_ids（按座次 1..N 顺序），不依赖 dict 插入顺序、
+            # 隐式 p1..pN 命名或 object repr；重执行按该清单权威重建。
+            "player_ids": list(game.player_ids),
         }
     header = {
         "schema_version": REEXECUTION_SCHEMA,
@@ -1441,11 +1456,36 @@ def reexecute_production_replay(
             raise ProductionReplayFormatError(
                 "生产批次回放未记录模式胜负策略，但重执行提供了策略"
             )
+        # POST-B C2：player_ids 为一等回放输入。旧记录（C1 时代）无此
+        # 字段时保持默认 p1..pN 兼容；新记录必须逐项合法（非空字符串、
+        # 无重复、长度与 player_hp 一致），否则失败关闭。
+        raw_player_ids = config.get("player_ids")
+        if raw_player_ids is None:
+            player_ids = None
+        else:
+            # 回放对象经 canonical JSON 冻结后序列可能转为 tuple。
+            if not isinstance(raw_player_ids, (list, tuple)) or any(
+                not isinstance(value, str) or not value.strip()
+                for value in raw_player_ids
+            ):
+                raise ProductionReplayFormatError(
+                    "initial_configuration.player_ids必须是非空字符串序列"
+                )
+            player_ids = tuple(value.strip() for value in raw_player_ids)
+            if len(player_ids) != len(config["player_hp"]):
+                raise ProductionReplayFormatError(
+                    "initial_configuration.player_ids与player_hp长度不一致"
+                )
+            if len(set(player_ids)) != len(player_ids):
+                raise ProductionReplayFormatError(
+                    "initial_configuration.player_ids不能重复"
+                )
         game = ProductionBasicCardBatch(
             seed=int(header["seed"]),
             deck_path=str(config["deck_path"]),
             player_hp=tuple(config["player_hp"]),  # type: ignore[arg-type]
             player_max_hp=tuple(config["player_max_hp"]),  # type: ignore[arg-type]
+            player_ids=player_ids,
             initial_hand_count=int(config["initial_hand_count"]),
             shuffle=config["shuffle"],  # type: ignore[arg-type]
             session_id=session_id,
@@ -1640,11 +1680,18 @@ def reexecute_production_replay(
     )
     outcome = record.outcome
     _expect_equal("winner", None, outcome["winner_id"], game.winner_id, "胜者不一致")
+    # POST-B C2：终局原因与已通过身份校验的 OutcomePolicy 产出值一致；
+    # 未注册策略（双人回退）保持历史值 opponent_confirmed_dead。
+    expected_finish_reason = (
+        game.outcome_policy.finish_reason
+        if game.outcome_policy is not None
+        else "opponent_confirmed_dead"
+    )
     _expect_equal(
         "outcome",
         None,
         outcome["finish_reason"],
-        "opponent_confirmed_dead",
+        expected_finish_reason,
         "终局原因不一致",
     )
     _expect_equal("outcome", None, outcome["step_count"], game.step_count, "动作总数不一致")

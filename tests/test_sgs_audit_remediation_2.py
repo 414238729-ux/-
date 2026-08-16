@@ -74,6 +74,22 @@ _R8_ERA_SHA256_FOR_POST_B_CHANGED_FILES = {
     "tests/test_sgs_formal_duel.py": (
         "493d8d43e9a92e08f9e8ee62abed378dbdb1d809a63cbce61c35742359928ddb"
     ),
+    # POST-B C2 合法修改（方天画戟多人语义、gate 一致性与测试语义）。
+    "scripts/sgs_engine_gate.py": (
+        "cb012d873b6fbcc0d31dddeaefde2df6c44d01c523171d1e6ae91501ebd1d9a8"
+    ),
+    "tests/test_sgs_engine_gate.py": (
+        "f319c3cc0a19c8d3e1e900a886c586d117a6e2eb55b7cca67c2282efff8ebb8d"
+    ),
+    "tests/test_sgs_milestone_b_advancement.py": (
+        "3d4f626e1f409a1894719615553950d6f908c52abd74f6fb6c45c3ff60631732"
+    ),
+    "tests/test_sgs_production_weapon_skills.py": (
+        "192f3a304e5e0d8efeb9542555f1286fa5d992136cfc1a1ba7e94b9e64deec2e"
+    ),
+    "tests/test_sgs_production_borrowed_sword_weapon_system.py": (
+        "d1af6685f4349dfbea6d652d9ed9ea6ecece2098cf78b0323b2010b7ccfee088"
+    ),
 }
 
 

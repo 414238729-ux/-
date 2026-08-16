@@ -168,9 +168,13 @@ WEAPON_SKILL_STATUS: Mapping[str, str] = MappingProxyType(
         # 也不是材料停留在 HAND 直到结算完成。材料非弃置代价，不产生
         # CARD_DISCARDED。VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP 已关闭。
         "sgs_weapon_zhangbashemao": "COMPLETE",
-        # 方天画戟：双人环境下“至多3个目标”不会产生额外目标，但技能核心
-        # 多目标语义未在多人生产入口实现/证明，不得计为COMPLETE。
-        "sgs_weapon_fangtianhuaji": "PARTIAL",
+        # 方天画戟（Knowledge 7.9 用户整理解释）：使用作为最后一张手牌的
+        # 【杀】时可指定至多3个目标。POST-B C2 已实现多人多目标语义：
+        # 最后一张手牌判定时点=使用该杀时（文本推导："当你使用杀时，若此
+        # 杀是你最后一张手牌"）；目标组合由权威枚举生成、使用时就地快照、
+        # 逐目标沿用统一杀响应/伤害/濒死结构；酒强化+方天多目标的伤害
+        # 归属未由正式规则源确认，该组合失败关闭。
+        "sgs_weapon_fangtianhuaji": "COMPLETE",
         # 朱雀羽扇：主动出牌阶段使用普通【杀】时可选转为【火杀】（7.10
         # 用户整理解释），生产语义已实现；借刀强制使用场景同样提供普通
         # 【杀】转【火杀】正式选择（USER_CONFIRMED_MOBILE_RULE，2026-08-08
@@ -621,13 +625,12 @@ def check_weapon_skill_gate(
         return
 
     if weapon_key == "sgs_weapon_fangtianhuaji":
-        # 技能：使用作为最后一张手牌的【杀】时可指定至多3个目标。
-        # 当前生产切片为双人环，额外目标不存在，目标集合可证明不变；
-        # 三人以上无法证明，失败关闭。
-        if len(state.players) != 2:
-            raise UnsupportedRuleError(
-                "方天画戟多目标技能未实现；当前不是双人切片，无法证明目标集合不变，失败关闭"
-            )
+        # 技能（Knowledge 7.9 用户整理解释）：使用作为最后一张手牌的【杀】
+        # 时可指定至多3个目标。POST-B C2 已实现多人多目标语义：
+        # 枚举由 SlashAdapter 按“装备方天＋该杀是最后一张手牌＋每个目标
+        # 距离合法”生成 2/3 目标组合动作；apply_slash_use 对目标快照与
+        # 最后一张手牌时点（使用杀时）逐项复核，逐目标沿用既有杀响应/
+        # 伤害/濒死结构。本门禁不再按人数失败关闭。
         return
 
     if weapon_key == "sgs_weapon_zhuqueyushan":
@@ -902,6 +905,51 @@ class SlashAdapter(BasicCardAdapter):
                             },
                         )
                     )
+            # POST-B C2 方天画戟（Knowledge 7.9 用户整理解释）：使用作为
+            # 最后一张手牌的【杀】时可指定至多3个目标。多目标组合动作：
+            # - 装备方天画戟，且该【杀】是行动角色当前唯一手牌
+            #   （"当你使用杀时，若此杀是你最后一张手牌"的文本推导时点）；
+            # - 从存活环顺序枚举 2/3 目标组合（快照顺序=座次环顺序）；
+            # - 每个目标单独通过距离/攻击范围合法性（方天攻击范围4）；
+            # - 酒强化+方天多目标的伤害归属未由正式规则源确认 → 该组合
+            #   不枚举（伪造提交由 apply_slash_use 失败关闭）。
+            if (
+                self.card_key
+                in ("sgs_basic_sha", "sgs_basic_huosha", "sgs_basic_leisha")
+                and equipped_weapon_key(state, context.actor_id)
+                == "sgs_weapon_fangtianhuaji"
+                and tuple(
+                    state.card_ids_in(ZoneRef.hand(context.actor_id))
+                )
+                == (instance_id,)
+                and session.runtime.wine_buff_owner_id != context.actor_id
+            ):
+                others = PlayerTopology.from_state(
+                    state
+                ).all_other_alive_ids(context.actor_id)
+                legal_targets = tuple(
+                    target
+                    for target in others
+                    if is_valid_slash_target(state, context.actor_id, target)
+                )
+                for size in (2, 3):
+                    if len(legal_targets) < size:
+                        continue
+                    for combo in itertools.combinations(legal_targets, size):
+                        actions.append(
+                            LegalAction(
+                                action_type=ActionType.USE_CARD,
+                                actor_id=context.actor_id,
+                                card_instance_id=instance_id,
+                                target_ids=combo,
+                                payload={
+                                    "operation": "use_slash",
+                                    "card_key": self.card_key,
+                                    "card_name": self.card_name,
+                                    "fangtian_multi_target": True,
+                                },
+                            )
+                        )
         return tuple(actions)
 
     def apply_action(
@@ -1984,7 +2032,8 @@ class WugufengdengAdapter(TrickCardAdapter):
     独立【无懈可击】窗口，被取消的目标不选牌；当前目标从公开展示池选择
     一张并获得。全部目标结算完成后剩余展示牌统一进入弃牌堆，原锦囊此时
     才从处理区进入弃牌堆；游戏提前结束也执行确定性清理。三人以上展示
-    数量与完整顺序仍未由正式生产入口证明。
+    数量与完整顺序已由 POST-B C2 四人生产验收证明（含使用者、存活环
+    座次序、展示数=目标数、逐目标独立无懈与选牌、展示池清空）。
     """
 
     includes_self = True

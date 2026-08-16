@@ -7,6 +7,37 @@
 > （`docs/CHECKPOINT_MANIFEST.json` 与 `docs/ENGINE_STATUS.md` 是冻结审计目标，
 > 其 sha256 表项不得因本文件而失效）。
 
+## 0. POST-B 轨道状态
+
+- `POST_B_C1_MULTIPLAYER_AUTHORITATIVE_FOUNDATION` = `IMPLEMENTED_NOT_INDEPENDENTLY_AUDITED`
+- `POST_B_C2_MULTIPLAYER_CARD_SEMANTICS_CLOSURE` = `PRECOMMIT_NOT_INDEPENDENTLY_AUDITED`
+
+### 0.1 C2 摘要（MULTIPLAYER CARD SEMANTICS CLOSURE）
+
+- 方天画戟多人多目标语义闭合（Knowledge 7.9 用户整理解释）：装备方天＋
+  使用作为最后一张手牌的【杀】时可指定至多3个目标；目标组合由权威枚举
+  生成、使用时就地快照、逐目标沿用统一杀响应/伤害/濒死结构；死亡目标
+  继续后续目标；酒强化+方天多目标交互未由正式规则源确认 → 失败关闭。
+- `WEAPON_SKILL_STATUS` 11 种武器全部 COMPLETE；38 类卡牌
+  `global_all_cards_implemented=true`（`multi_player_production_proven`、
+  `authoritative_full_game_core`、`2v2_ready` 仍为 false）。
+- replay 债务收敛：`initial_configuration.player_ids` 升为一等回放输入
+  （自定义玩家ID/座次权威重建）；`finish_reason` 去 duel 硬编码（与已
+  校验身份的 OutcomePolicy 产出值比对，伪造/不匹配失败关闭）。
+- 非终局死亡继续路径扩展：群体锦囊（C1）+ 方天多目标（C2）；群体锦囊
+  目标死亡时根锦囊保持处理区直到全部目标完成。
+- C2 实现身份：`5a2c8feb3d030ad659bbe0522f97ba3a4701f7343e80f74505df7d8d4e9b0e33`
+- C2 专项测试 `tests/test_post_b_c2_multiplayer_card_semantics.py`：
+  32 项真实生产路径（方天合法/非法/伪造/逐目标响应/死亡继续、4p 南蛮/
+  万箭/桃园/五谷、三人无懈链、借刀多候选/距离/拒绝转移、闪电 4p 转移/
+  跳死、多人距离坐骑、防具逐目标隔离、player_ids/seat replay 往返、
+  custom finish_reason、伪造政策拒绝、4-observer 可见性、38 类覆盖矩阵）。
+- 全量 pytest：**2412 passed、0 failed、0 errors**（单进程单次调用，
+  940.49s；环境插件与 `--basetemp` 位于仓库外，运行后删除）。
+- formal duel 防回归：seed 0 → p2/388/43、seed 7 → p2/162/17（与
+  R5/R8 记录一致）；冻结 R8 acceptance artifact 仍为历史证据
+  （cached_acceptance_report_valid=false，不授权 C2）。
+
 ## 1. 当前轨：POST_B_C1_MULTIPLAYER_AUTHORITATIVE_FOUNDATION
 
 **目标（已完成）**：把正式生产核心中隐含的“恰好两名玩家”假设收敛为可复用的
@@ -20,7 +51,7 @@ N≥2 多人权威基础；**不是**完成 2v2。C1 只落地项目 1–4，并
 | 3 | 群体锦囊目标顺序（服务器使用时快照，跳过死亡角色） | 已落地（`_group_target_sequence` 接入存活环） |
 | 4 | 死亡/座位遍历（死亡不重编号、非终局死亡继续结算边界） | 已落地（统一胜负出口 + 群体锦囊继续分支） |
 | 5 | 模式胜负规则（2v2/身份场/最后一人） | 仅建立 `OutcomePolicy` 边界；未注册策略一律失败关闭 |
-| 6 | 方天画戟多目标 | 未实现（保持既有失败关闭） |
+| 6 | 方天画戟多目标 | C2 已实现（7.9 用户整理解释；见 0.1 节） |
 | 7 | 2v2 模式规则 | 未实现（2v2 未就绪） |
 
 **状态标志**：

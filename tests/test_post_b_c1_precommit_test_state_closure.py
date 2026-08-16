@@ -31,8 +31,9 @@ _ACCEPTANCE_ARTIFACT_PATH = (
 FROZEN_R8_IMPLEMENTATION_IDENTITY = (
     "06c8b2d3ead9adb52a18252e398eae137eb8fb51f657909051500893672b0e33"
 )
-C1_IMPLEMENTATION_IDENTITY = (
-    "844728ead0e0c0fa1f41ae1fe80cc46fe6562ed126df38fc6d47b36e34ccf8de"
+# 当前 post-B 实现身份：随 post-B 轨道（C1→C2）更新；冻结 R8 值永不变。
+POST_B_CURRENT_IMPLEMENTATION_IDENTITY = (
+    "5a2c8feb3d030ad659bbe0522f97ba3a4701f7343e80f74505df7d8d4e9b0e33"
 )
 FROZEN_R8_RULES_PROFILE_IDENTITY = (
     "9a7b0e9f45c05292a207c500e5b024a77d97b4a6c9446230d81d357c7b514283"
@@ -49,7 +50,7 @@ def _load_artifact_payload() -> dict[str, object]:
 
 
 # ----------------------------------------------------------------------
-# 1. 冻结 R8 artifact 身份 != 当前 C1 身份
+# 1. 冻结 R8 artifact 身份 != 当前 post-B 实现身份
 # ----------------------------------------------------------------------
 
 
@@ -60,7 +61,7 @@ def test_frozen_r8_artifact_identity_differs_from_c1_current_identity() -> None:
         == FROZEN_R8_IMPLEMENTATION_IDENTITY
     )
     current_identity = formal_duel_module.implementation_identity()
-    assert current_identity == C1_IMPLEMENTATION_IDENTITY
+    assert current_identity == POST_B_CURRENT_IMPLEMENTATION_IDENTITY
     assert current_identity != artifact["implementation_identity"]
 
 

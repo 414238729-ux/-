@@ -523,11 +523,23 @@ def _evaluate_live_formal_duel_gate(
                 GateIssueCode.ALL_CARDS_NOT_IMPLEMENTED,
                 "正式单挑（严格两人）范围所需卡牌语义尚未全部实现",
             )
-        if readiness.global_all_cards_implemented is True:
+        # POST-B C2：方天画戟多人语义已闭合，global_all_cards_implemented
+        # 允许为 True，但必须与现场 38 类 global 语义明细逐项一致
+        # （不再按时代硬编码 must-be-False；不一致/伪造仍失败关闭）。
+        derived_global_all_cards = (
+            readiness.global_complete_card_key_count
+            == readiness.registered_card_key_count
+            and readiness.global_complete_instance_count
+            == readiness.registered_instance_count
+        )
+        if (
+            readiness.global_all_cards_implemented
+            != derived_global_all_cards
+        ):
             add(
                 GateIssueCode.FORMAL_DUEL_READINESS_INSPECTION_FAILED,
-                "global_all_cards_implemented 当前必须保持 False"
-                "（方天画戟多人语义仍为 PARTIAL，MB-B-004）",
+                "global_all_cards_implemented与38类卡牌现场global语义"
+                "明细不一致",
             )
         if not readiness.reexecution_replay_supported:
             add(

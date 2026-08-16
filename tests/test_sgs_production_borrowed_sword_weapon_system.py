@@ -284,12 +284,10 @@ def test_implemented_and_remaining_card_counts_updated() -> None:
     assert JIEDAO in registry.implemented_card_keys
     assert len(registry.implemented_card_keys) == 38
     assert len(registry.unimplemented_card_keys) == 0
-    # 完整实现口径：36种／158张（CP-04P：诸葛连弩、青釭剑、寒冰剑、
-    # 雌雄双股剑、古锭刀、青龙偃月刀、贯石斧、朱雀羽扇、麒麟弓共9种／
-    # 10张武器为COMPLETE，计入完整实现；丈八蛇矛已按 USER_CONFIRMED_RULE
-    # （2026-08-09）完成材料 HAND→PROCESSING→DISCARD 生命周期并计为
-    # COMPLETE（VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP 已关闭）；
-    # 方天画戟保持 PARTIAL）
+    # 完整实现口径：38种／160张（CP-04P：11种武器全部COMPLETE——
+    # 丈八蛇矛已按 USER_CONFIRMED_RULE（2026-08-09）完成材料
+    # HAND→PROCESSING→DISCARD 生命周期；方天画戟多人多目标语义已由
+    # POST-B C2 实现（Knowledge 7.9 用户整理解释），不再保持 PARTIAL）
     complete_keys = (
         set(PRODUCTION_BASIC_CARD_KEYS)
         | set(PRODUCTION_TRICK_KEYS)
@@ -302,8 +300,8 @@ def test_implemented_and_remaining_card_counts_updated() -> None:
             if status == "COMPLETE"
         }
     )
-    assert len(complete_keys) == 37
-    assert sum(len(registry.instances_of(key)) for key in complete_keys) == 159
+    assert len(complete_keys) == 38
+    assert sum(len(registry.instances_of(key)) for key in complete_keys) == 160
     # 注册表口径：38种适配器／160张实体
     assert sum(len(registry.instances_of(key)) for key in registry.implemented_card_keys) == 160
     assert set(registry.unimplemented_card_keys) == set()

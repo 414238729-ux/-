@@ -19,6 +19,7 @@ from scripts.sgs_engine import (
     FormalNoSkillDuelSession,
     GameState,
     ProductionBasicCardBatch,
+    ProductionReplayDivergenceError,
     ProductionReplayFormatError,
     canonical_json,
     inspect_formal_duel_readiness,
@@ -110,12 +111,13 @@ def test_live_readiness_has_exact_mode_scoped_card_semantics() -> None:
     assert readiness.deck_count == 160
     assert readiness.registered_card_key_count == 38
     assert readiness.registered_instance_count == 160
-    assert readiness.global_complete_card_key_count == 37
-    assert readiness.global_complete_instance_count == 159
+    # POST-B C2：方天画戟 global 语义闭合 → global COMPLETE 38/160。
+    assert readiness.global_complete_card_key_count == 38
+    assert readiness.global_complete_instance_count == 160
     assert readiness.duel_complete_card_key_count == 38
     assert readiness.duel_complete_instance_count == 160
     assert len(statuses) == 38
-    assert statuses["sgs_weapon_fangtianhuaji"].global_status == "PARTIAL"
+    assert statuses["sgs_weapon_fangtianhuaji"].global_status == "COMPLETE"
     assert (
         statuses["sgs_weapon_fangtianhuaji"].duel_status
         == "NOT_APPLICABLE_TO_DUEL"
@@ -173,10 +175,12 @@ def test_live_readiness_has_exact_mode_scoped_card_semantics() -> None:
     assert len(readiness.acceptance_seed_results) == (
         readiness.acceptance_seed_count
     )
-    # MB-B-004：能力必须分层——duel scope 充分，但全局完整引擎不得成立。
+    # MB-B-004：能力必须分层——duel scope 充分；POST-B C2 后 38 类卡牌
+    # global 语义闭合（global_all_cards_implemented=True），但卡牌完成
+    # 不等于完整多人模式完成（multi_player_production_proven 仍 False）。
     assert readiness.duel_scope_all_cards_sufficient is True
-    assert readiness.global_all_cards_implemented is False
-    assert readiness.global_card_semantics_complete is False
+    assert readiness.global_all_cards_implemented is True
+    assert readiness.global_card_semantics_complete is True
     assert readiness.mode_implemented is True
     assert readiness.formal_duel_no_skill_ready is True
 
@@ -379,8 +383,16 @@ def test_formal_replay_enforces_root_config_cap_and_finish_schema() -> None:
 
     bad_reason = record.to_dict()
     bad_reason["outcome"]["finish_reason"] = "caller_supplied_reason"
-    with pytest.raises(ProductionReplayFormatError, match="finish_reason"):
-        ProductionReexecutionReplay.from_dict(bad_reason)
+    bad_reason["record_sha256"] = ""
+    # POST-B C2：finish_reason 是 OutcomePolicy 产生的模式语义；完整性
+    # 校验只要求非空字符串，伪造值在严格重执行时与已校验身份策略的
+    # 产出值比对后被拒绝。
+    with pytest.raises(
+        (ProductionReplayFormatError, ProductionReplayDivergenceError)
+    ):
+        reexecute_production_replay(
+            ProductionReexecutionReplay.from_dict(bad_reason)
+        )
 
 
 def test_formal_replay_internal_game_requires_exact_canonical_type() -> None:

@@ -214,6 +214,12 @@ class _PendingSlash:
     # finalizer 只允许清理恰好一次：任何后续出口再次到达时不得重复移动，
     # 也不得在 DYING/game-over 前跳过清理（MB-B-002）。
     materials_finalized: bool = False
+    # POST-B C2 方天画戟（Knowledge 7.9 用户整理解释）：使用作为最后一张
+    # 手牌的【杀】时指定的至多3个目标。target_sequence 是使用时形成的
+    # 权威固定快照（不随结算动态重排/增删）；空元组=单目标语义（既有
+    # target_id 路径不变）。current_target_index 指示正在结算的目标。
+    target_sequence: tuple[str, ...] = ()
+    current_target_index: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -5197,8 +5203,57 @@ class ProductionBasicCardBatch:
             # CP-04P：诸葛连弩“你使用【杀】无次数限制”（Knowledge 7.1
             # 用户整理解释）豁免通常出牌阶段次数上限；其余武器不改变次数。
             raise InvalidActionError("本出牌阶段已经使用过【杀】，受次数限制")
-        if action.card_instance_id is None or len(action.target_ids) != 1:
-            raise InvalidActionError("【杀】必须指定一张实体牌和恰好一名目标")
+        if action.card_instance_id is None or not action.target_ids:
+            raise InvalidActionError("【杀】必须指定一张实体牌和至少一名目标")
+        fangtian_targets = tuple(action.target_ids)
+        multi_target = len(fangtian_targets) >= 2
+        if multi_target:
+            # POST-B C2 方天画戟（Knowledge 7.9 用户整理解释）：使用作为
+            # 最后一张手牌的【杀】时可指定至多3个目标。判定时点=使用杀时
+            # （文本推导）；目标快照在此时形成，结算中不增删/重排。
+            if equipped_weapon != "sgs_weapon_fangtianhuaji":
+                raise InvalidActionError(
+                    "只有装备方天画戟才能为【杀】指定多个目标"
+                )
+            if len(fangtian_targets) > 3:
+                raise InvalidActionError(
+                    "方天画戟至多指定3个目标（Knowledge 7.9）"
+                )
+            if len(set(fangtian_targets)) != len(fangtian_targets):
+                raise InvalidActionError(
+                    "方天画戟多目标不能重复指定同一角色"
+                )
+            if bool(action.payload.get("fangtian_multi_target")) is not True:
+                raise InvalidActionError(
+                    "多目标【杀】必须携带方天画戟正式动作负载"
+                )
+            for extra_key in ("extra_targets", "fangtian_targets", "target_set"):
+                if action.payload.get(extra_key) is not None:
+                    raise InvalidActionError(
+                        f"动作负载不得伪造额外目标字段{extra_key!r}"
+                    )
+            if runtime.wine_buff_owner_id == context.actor_id:
+                raise UnsupportedRuleError(
+                    "酒强化与方天画戟多目标【杀】的伤害归属未由正式规则源"
+                    "确认（BLOCKED_BY_RULE_SOURCE）；该组合失败关闭"
+                )
+            hand_ids = tuple(
+                state.card_ids_in(ZoneRef.hand(context.actor_id))
+            )
+            if hand_ids != (action.card_instance_id,):
+                raise InvalidActionError(
+                    "方天画戟只能在使用作为最后一张手牌的【杀】时"
+                    "指定额外目标"
+                )
+            for candidate in fangtian_targets:
+                if candidate == context.actor_id or not is_valid_slash_target(
+                    state, context.actor_id, candidate
+                ):
+                    raise InvalidActionError(
+                        "方天画戟的每个目标都必须在攻击范围内且合法"
+                    )
+        elif len(fangtian_targets) != 1:
+            raise InvalidActionError("【杀】必须指定恰好一名目标")
         # CP-04P 丈八蛇矛（7.8 当前确认）：两张手牌当作普通【杀】使用。
         # 虚拟杀不是新的实体卡牌：action.card_instance_id 为确定性合成
         # 虚拟标识，两张实体材料按正式规则进入弃牌堆；出牌阶段使用虚拟杀
@@ -5238,21 +5293,23 @@ class ProductionBasicCardBatch:
             raise InvalidActionError("【杀】动作的实体牌与适配器卡牌键不一致")
         if str(action.payload.get("card_key", "")) != adapter.card_key:
             raise InvalidActionError("【杀】动作负载与适配器卡牌键不一致")
-        target = action.target_ids[0]
-        if target == context.actor_id or not is_valid_slash_target(
-            state, context.actor_id, target
+        target = fangtian_targets[0]
+        if not multi_target and (
+            target == context.actor_id
+            or not is_valid_slash_target(state, context.actor_id, target)
         ):
             raise InvalidActionError("【杀】目标不在攻击范围内或目标非法")
-        check_weapon_skill_gate(
-            state,
-            actor_id=context.actor_id,
-            decision="use_slash",
-            target_id=target,
-            slash_card_key=adapter.card_key,
-            slash_used_count=runtime.slash_used_counts.get(
-                context.actor_id, 0
-            ),
-        )
+        for candidate in fangtian_targets:
+            check_weapon_skill_gate(
+                state,
+                actor_id=context.actor_id,
+                decision="use_slash",
+                target_id=candidate,
+                slash_card_key=adapter.card_key,
+                slash_used_count=runtime.slash_used_counts.get(
+                    context.actor_id, 0
+                ),
+            )
         if not zhangba_virtual and state.location_of(
             action.card_instance_id
         ) != ZoneRef.hand(context.actor_id):
@@ -5282,7 +5339,7 @@ class ProductionBasicCardBatch:
                 card_instance_id=action.card_instance_id,
                 card_key=adapter.card_key,
                 card_user=context.actor_id,
-                target_ids=(target,),
+                target_ids=fangtian_targets,
                 payload={
                     "damage_nature": adapter.damage_nature,
                     "boosted": boosted,
@@ -5306,7 +5363,7 @@ class ProductionBasicCardBatch:
                 card_instance_id=action.card_instance_id,
                 card_key=adapter.card_key,
                 card_user=context.actor_id,
-                target_ids=(target,),
+                target_ids=fangtian_targets,
                 payload={
                     "damage_nature": adapter.damage_nature,
                     "boosted": boosted,
@@ -5339,6 +5396,8 @@ class ProductionBasicCardBatch:
             fire_converted=fire_converted,
             virtual=zhangba_virtual,
             material_ids=(zhangba_materials if zhangba_virtual else ()),
+            target_sequence=(fangtian_targets if multi_target else ()),
+            current_target_index=0,
         )
         if (
             equipped_weapon == "sgs_weapon_cixiongshuanggujian"
@@ -5418,11 +5477,19 @@ class ProductionBasicCardBatch:
                 self._events.extend(
                     (cancelled_event, *zhangba_finish_events)
                 )
+                base_runtime = runtime
             else:
+                # POST-B C2：多目标【杀】目标0被防具无效时，根【杀】必须
+                # 保持 PROCESSING 继续后续目标；先挂起 pending_slash 再
+                # finalize（_finish_slash_processing 的多目标守卫据此
+                # 跳过根牌弃置，_complete_root_resolution 推进下一目标）。
+                base_runtime = replace(
+                    runtime, pending_slash=pending_slash
+                )
                 next_state, runtime, finish_events = (
                     self._finish_slash_processing(
                         next_state,
-                        runtime,
+                        base_runtime,
                         action.card_instance_id,
                         f"slash_invalidated_by_{invalid_reason}",
                     )
@@ -5447,6 +5514,7 @@ class ProductionBasicCardBatch:
             pending_slash=pending_slash,
             response_window_id=(
                 f"slash:{runtime.turn_number}:{action.card_instance_id}"
+                + (":0" if multi_target else "")
             ),
             response_window_order=(target,),
             response_window_source_sequence=used_sequence,
@@ -6755,6 +6823,15 @@ class ProductionBasicCardBatch:
         """
 
         pending = runtime.pending_slash
+        if (
+            pending is not None
+            and pending.target_sequence
+            and pending.current_target_index + 1 < len(pending.target_sequence)
+        ):
+            # POST-B C2 方天画戟：非最后目标的单目标出口不得把根【杀】
+            # PROCESSING→DISCARD；根牌留在处理区直到全部目标结算完成
+            # （与群体锦囊"全部目标完成才finalize"同一口径）。
+            return state, runtime, ()
         if (
             pending is not None
             and pending.virtual
@@ -12585,6 +12662,26 @@ class ProductionBasicCardBatch:
         elif runtime.defer_damage_card_finish:
             # 根牌（闪电）完成时点由本路径统一清理
             finish_events = []
+        elif (
+            runtime.pending_group_trick is not None
+            and runtime.pending_wugu is None
+            and runtime.pending_chain is None
+            and runtime.pending_judgment is None
+            and runtime.pending_borrowed_sword is None
+            and resolve_victory_after_death(
+                PlayerTopology.from_state(
+                    _replace_player(next_state, dying_id, alive=False)
+                ),
+                dying_id,
+                policy=self._outcome_policy,
+                explicit_two_player_fallback=True,
+            )
+            is None
+        ):
+            # POST-B C1/C2：非终局死亡的群体锦囊目标——根锦囊必须保持
+            # 处理区，继续剩余目标队列；根牌 finalize 由最后的
+            # _advance_group_target 统一执行，不得在此提前离开处理区。
+            finish_events = []
         else:
             # MB-B-002：死亡/game-over 前必须统一 finalize 根杀（丈八
             # 材料 PROCESSING→DISCARD 恰好一次），不允许跳过清理。
@@ -12659,11 +12756,13 @@ class ProductionBasicCardBatch:
             target_ids=(dying_id,),
         )
         if winner is None:
-            # POST-B C1：多人对局中的非终局死亡——不产生 VICTORY，对局继续。
-            # 当前只证明群体锦囊目标死亡后继续逐目标队列；其余挂起根
-            # （五谷/传导/判定/借刀/单体根牌）的死亡继续结算尚未由正式
-            # 多人语义证明，一律失败关闭，不猜测2v2/身份场/最后一人生存
-            # 等模式规则。
+            # POST-B C1/C2：多人对局中的非终局死亡——不产生 VICTORY，
+            # 对局继续。已证明两条继续路径：群体锦囊目标死亡后继续目标
+            # 队列（C1）、方天画戟多目标【杀】目标死亡后继续后续目标
+            # （C2）。其余挂起根（五谷/传导/判定/借刀/单体根牌）的死亡
+            # 继续结算尚未由正式多人语义证明，一律失败关闭，不猜测
+            # 2v2/身份场/最后一人生存等模式规则。
+            pending_slash = runtime.pending_slash
             if (
                 runtime.pending_group_trick is not None
                 and runtime.pending_wugu is None
@@ -12683,9 +12782,40 @@ class ProductionBasicCardBatch:
                 )
                 self._commit_runtime(runtime, next_runtime)
                 return next_state
+            if (
+                pending_slash is not None
+                and pending_slash.target_sequence
+                and pending_slash.current_target_index + 1
+                < len(pending_slash.target_sequence)
+                and runtime.pending_wugu is None
+                and runtime.pending_chain is None
+                and pending_judgment is None
+                and borrowed is None
+            ):
+                # 方天画戟多目标：死亡目标结算完成，推进到快照中的下一
+                # 目标；根【杀】保持在处理区（与群体锦囊同一口径）。
+                self._events.extend(
+                    [*finish_events, *cleanup_events, death_event]
+                )
+                next_state, next_runtime = self._advance_slash_target(
+                    next_state,
+                    replace(
+                        runtime,
+                        pending_dying_id=None,
+                        rescue_order=(),
+                        rescue_index=0,
+                        rescue_decision_count=0,
+                        judgment_entry_indices=(
+                            judgment_entry_indices_after_death
+                        ),
+                    ),
+                )
+                self._commit_runtime(runtime, next_runtime)
+                return next_state
             raise UnsupportedRuleError(
                 "多人对局中非终局死亡的继续结算尚未证明（当前仅支持群体"
-                "锦囊目标死亡后继续目标队列）；失败关闭，不猜测模式规则"
+                "锦囊与方天画戟多目标的目标死亡后继续队列）；失败关闭，"
+                "不猜测模式规则"
             )
         final_events: list[GameEvent] = (
             finish_events + list(cleanup_events)
@@ -13623,7 +13753,94 @@ class ProductionBasicCardBatch:
             base_runtime = self._return_to_play(runtime)
             next_runtime = replace(base_runtime, pending_borrowed_sword=None)
             return next_state, next_runtime
+        pending_slash = runtime.pending_slash
+        if (
+            pending_slash is not None
+            and pending_slash.target_sequence
+            and pending_slash.current_target_index + 1
+            < len(pending_slash.target_sequence)
+        ):
+            # POST-B C2 方天画戟：当前目标结算完成后推进到下一目标，
+            # 根【杀】保持在处理区；逐目标独立防具判定/响应/伤害/濒死。
+            return self._advance_slash_target(state, runtime)
         return state, self._return_to_play(runtime)
+
+    def _advance_slash_target(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """方天画戟多目标【杀】推进到下一个目标（POST-B C2）。
+
+        按使用时固定快照 target_sequence 顺序推进；每个目标独立以最新
+        状态判定防具无效化（藤甲普通杀免疫逐目标），被无效则继续推进，
+        全部完成才 finalize 根【杀】。酒强化+方天多目标在 apply_slash_use
+        已失败关闭，不会到达本方法。
+        """
+
+        pending = runtime.pending_slash
+        if pending is None or not pending.target_sequence:
+            raise ProductionBatchError("多目标推进缺少方天画戟目标快照")
+        next_index = pending.current_target_index + 1
+        if next_index >= len(pending.target_sequence):
+            raise ProductionBatchError("方天画戟多目标推进索引越界")
+        next_target = pending.target_sequence[next_index]
+        next_pending = replace(
+            pending,
+            target_id=next_target,
+            current_target_index=next_index,
+            ignore_armor=False,
+        )
+        slash = self._slash_card(state, runtime, pending.slash_instance_id)
+        invalidation = armor_invalidates_effect(
+            state,
+            victim_id=next_target,
+            card_instance_id=pending.slash_instance_id,
+            card_key=slash.card_key,
+            ignore_armor=False,
+            card_color=None,
+        )
+        if invalidation is not None:
+            invalid_reason, armor_id = invalidation
+            cancelled_event = GameEvent(
+                event_type=EventType.CARD_EFFECT_CANCELLED,
+                card_instance_id=pending.slash_instance_id,
+                card_key=slash.card_key,
+                card_user=pending.attacker_id,
+                target_ids=(next_target,),
+                payload={
+                    "reason": invalid_reason,
+                    "armor_instance_id": armor_id,
+                    "armor_key": _card_key(state, armor_id),
+                    "invalidated_by_armor": True,
+                    "fangtian_target_index": next_index,
+                },
+            )
+            self._events.extend((cancelled_event,))
+            base_runtime = replace(runtime, pending_slash=next_pending)
+            if next_index + 1 < len(pending.target_sequence):
+                return self._advance_slash_target(state, base_runtime)
+            next_state, runtime2, finish_events = (
+                self._finish_slash_processing(
+                    state,
+                    base_runtime,
+                    pending.slash_instance_id,
+                    f"slash_invalidated_by_{invalid_reason}",
+                )
+            )
+            self._events.extend(finish_events)
+            return self._complete_root_resolution(next_state, runtime2)
+        return state, replace(
+            runtime,
+            phase=ProductionPhase.SLASH_RESPONSE,
+            pending_slash=next_pending,
+            response_window_id=(
+                f"slash:{runtime.turn_number}:{pending.slash_instance_id}"
+                f":{next_index}"
+            ),
+            response_window_order=(next_target,),
+            bagua_attempted=False,
+        )
 
     def _apply_end_play_phase(
         self,

@@ -488,7 +488,8 @@ def test_formal_profile_weapon_statuses_duel_sufficient() -> None:
         statuses["sgs_weapon_fangtianhuaji"].duel_status
         == "NOT_APPLICABLE_TO_DUEL"
     )
-    assert statuses["sgs_weapon_fangtianhuaji"].global_status == "PARTIAL"
+    # POST-B C2：方天画戟多人多目标语义已实现 → global COMPLETE。
+    assert statuses["sgs_weapon_fangtianhuaji"].global_status == "COMPLETE"
     assert WEAPON_SKILL_STATUS["sgs_weapon_zhangbashemao"] == "COMPLETE"
 
 
@@ -578,7 +579,9 @@ def test_full_core_scope_is_not_expanded_by_duel_readiness() -> None:
     assert capabilities["authoritative_full_game_core"] is False
     assert capabilities["multi_player_production_proven"] is False
     assert capabilities["milestone_b_complete"] is False
-    assert capabilities["global_all_cards_implemented"] is False
+    # POST-B C2：38 类卡牌 global 语义已闭合 → 该字段允许为 True；
+    # 但卡牌完成不等于多人完整模式完成，其余标志仍必须为 False。
+    assert capabilities["global_all_cards_implemented"] is True
     assert capabilities["duel_scope_all_cards_sufficient"] is True
     assert capabilities["formal_duel_no_skill_ready"] is True
     assert status["formal_run_ready"] is True
@@ -587,5 +590,5 @@ def test_full_core_scope_is_not_expanded_by_duel_readiness() -> None:
         for item in status["formal_duel"]["card_semantic_statuses"]
     }
     assert (
-        statuses["sgs_weapon_fangtianhuaji"]["global_status"] == "PARTIAL"
+        statuses["sgs_weapon_fangtianhuaji"]["global_status"] == "COMPLETE"
     )

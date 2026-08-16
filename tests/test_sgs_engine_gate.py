@@ -407,7 +407,9 @@ def test_formal_duel_gate_can_only_open_from_consistent_live_readiness(
         duel_complete_card_key_count=current.registered_card_key_count,
         duel_complete_instance_count=current.registered_instance_count,
         duel_scope_all_cards_sufficient=True,
-        global_all_cards_implemented=False,
+        # POST-B C2：global 状态与现场卡牌语义明细一致（R8 时代为 False，
+        # C2 后为 True），不得与伪造的 card_semantic_statuses 矛盾。
+        global_all_cards_implemented=current.global_all_cards_implemented,
         mode_runtime_reachable=True,
         mode_implemented=True,
         deterministic_controller_implemented=True,
@@ -456,7 +458,8 @@ def test_formal_duel_gate_rejects_seed_summary_without_per_seed_evidence(
         duel_complete_card_key_count=current.registered_card_key_count,
         duel_complete_instance_count=current.registered_instance_count,
         duel_scope_all_cards_sufficient=True,
-        global_all_cards_implemented=False,
+        # POST-B C2：与现场卡牌语义明细一致（不得人为写 False）。
+        global_all_cards_implemented=current.global_all_cards_implemented,
         mode_runtime_reachable=True,
         mode_implemented=True,
         deterministic_controller_implemented=True,

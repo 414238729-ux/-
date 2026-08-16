@@ -255,14 +255,14 @@ def test_all_weapon_entities_present_with_ranges_and_status() -> None:
         "sgs_weapon_qinglongyanyuedao",
         "sgs_weapon_guanshifu",
         "sgs_weapon_zhangbashemao",
+        "sgs_weapon_fangtianhuaji",
         "sgs_weapon_zhuqueyushan",
         "sgs_weapon_qilingong",
     }
+    # POST-B C2：方天画戟多人多目标语义已实现，11 种武器全部 COMPLETE。
     assert {
         key for key, status in WEAPON_SKILL_STATUS.items() if status == "PARTIAL"
-    } == {
-        "sgs_weapon_fangtianhuaji",
-    }
+    } == set()
 
 
 # ----------------------------------------------------------------------
@@ -1008,14 +1008,18 @@ def test_fangtian_two_player_last_or_nonlast_slash_has_only_one_target(
     ]
     assert len(slash_actions) == 1
     assert slash_actions[0].target_ids == ("p2",)
-    assert WEAPON_SKILL_STATUS["sgs_weapon_fangtianhuaji"] == "PARTIAL"
+    assert WEAPON_SKILL_STATUS["sgs_weapon_fangtianhuaji"] == "COMPLETE"
     _step(game, slash_actions[0])
     _step(game, _action(game, "pass_slash_response"))
     assert _damages(game)
     _assert_conservation(game)
 
 
-def test_fangtian_three_player_state_stays_fail_closed_and_globally_partial() -> None:
+def test_fangtian_three_player_gate_opens_for_multiplayer() -> None:
+    """POST-B C2：三人局方天画戟不再按人数失败关闭；门禁开放后由
+    枚举/apply 的真实多目标语义负责合法性（详细多目标测试见
+    tests/test_post_b_c2_multiplayer_card_semantics.py）。"""
+
     game = _fresh(seed=3)
     _equip(game, "sgs_weapon_fangtianhuaji")
     three_player_state = replace(
@@ -1024,15 +1028,15 @@ def test_fangtian_three_player_state_stays_fail_closed_and_globally_partial() ->
         revision=game.state.revision + 1,
     )
 
-    assert WEAPON_SKILL_STATUS["sgs_weapon_fangtianhuaji"] == "PARTIAL"
-    with pytest.raises(UnsupportedRuleError, match="方天画戟多目标技能未实现"):
-        check_weapon_skill_gate(
-            three_player_state,
-            actor_id="p1",
-            decision="use_slash",
-            target_id="p2",
-            slash_card_key="sgs_basic_sha",
-        )
+    assert WEAPON_SKILL_STATUS["sgs_weapon_fangtianhuaji"] == "COMPLETE"
+    # 门禁对三人状态放行（不再 UnsupportedRuleError）。
+    check_weapon_skill_gate(
+        three_player_state,
+        actor_id="p1",
+        decision="use_slash",
+        target_id="p2",
+        slash_card_key="sgs_basic_sha",
+    )
 
 
 # ----------------------------------------------------------------------
