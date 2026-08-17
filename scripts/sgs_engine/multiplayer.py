@@ -183,6 +183,15 @@ class OutcomePolicy:
         """终局原因标识（进入回放 outcome，行为相关）。"""
         return "opponent_confirmed_dead"
 
+    @property
+    def draw_finish_reason(self) -> str | None:
+        """平局终局原因标识（POST-B C3）。
+
+        返回 None 表示该策略无平局终局（如 formal duel）；2v2 返回其
+        牌堆耗尽平局标识。平局时 winner 为 None，终局原因使用本值。
+        """
+        return None
+
 
 @dataclass(frozen=True, slots=True)
 class DuelOutcomePolicy(OutcomePolicy):

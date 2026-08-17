@@ -10,7 +10,8 @@
 ## 0. POST-B 轨道状态
 
 - `POST_B_C1_MULTIPLAYER_AUTHORITATIVE_FOUNDATION` = `IMPLEMENTED_NOT_INDEPENDENTLY_AUDITED`
-- `POST_B_C2_MULTIPLAYER_CARD_SEMANTICS_CLOSURE` = `PRECOMMIT_NOT_INDEPENDENTLY_AUDITED`
+- `POST_B_C2_MULTIPLAYER_CARD_SEMANTICS_CLOSURE` = `IMPLEMENTED_NOT_INDEPENDENTLY_AUDITED`
+- `POST_B_C3_FORMAL_NO_SKILL_2V2_MODE` = `PRECOMMIT_NOT_INDEPENDENTLY_AUDITED`
 
 ### 0.1 C2 摘要（MULTIPLAYER CARD SEMANTICS CLOSURE）
 
@@ -20,7 +21,8 @@
   继续后续目标；酒强化+方天多目标交互未由正式规则源确认 → 失败关闭。
 - `WEAPON_SKILL_STATUS` 11 种武器全部 COMPLETE；38 类卡牌
   `global_all_cards_implemented=true`（`multi_player_production_proven`、
-  `authoritative_full_game_core`、`2v2_ready` 仍为 false）。
+  `authoritative_full_game_core` 仍为 false；`2v2_ready` 由 C3 正式门禁
+  置为 true，见 §9）。
 - replay 债务收敛：`initial_configuration.player_ids` 升为一等回放输入
   （自定义玩家ID/座次权威重建）；`finish_reason` 去 duel 硬编码（与已
   校验身份的 OutcomePolicy 产出值比对，伪造/不匹配失败关闭）。
@@ -50,14 +52,17 @@ N≥2 多人权威基础；**不是**完成 2v2。C1 只落地项目 1–4，并
 | 2 | 多人回合循环（沿存活环座次递增继任、跳过死亡角色） | 已落地（`_apply_end_turn` 等） |
 | 3 | 群体锦囊目标顺序（服务器使用时快照，跳过死亡角色） | 已落地（`_group_target_sequence` 接入存活环） |
 | 4 | 死亡/座位遍历（死亡不重编号、非终局死亡继续结算边界） | 已落地（统一胜负出口 + 群体锦囊继续分支） |
-| 5 | 模式胜负规则（2v2/身份场/最后一人） | 仅建立 `OutcomePolicy` 边界；未注册策略一律失败关闭 |
+| 5 | 模式胜负规则（2v2/身份场/最后一人） | C3 已落地正式2v2（`TwoVsTwoOutcomePolicy`）；身份场/最后一人仍失败关闭 |
 | 6 | 方天画戟多目标 | C2 已实现（7.9 用户整理解释；见 0.1 节） |
-| 7 | 2v2 模式规则 | 未实现（2v2 未就绪） |
+| 7 | 2v2 模式规则 | C3 已实现（formal no-skill 2v2，见 §9） |
 
 **状态标志**：
 
-- `2v2_ready = false`
-- `multi_player_production_proven = false`
+- `2v2_ready = true`（C3 正式门禁；只指 formal no-skill 2v2 静态执行
+  资格，不含客户端30分钟墙钟/评分裁定，§2.12 CONFIRMED_OUT_OF_
+  SIMULATION_SCOPE）
+- `multi_player_production_proven = false`（比“正式2v2已验收”更宽的
+  多人生产语义总声明，本轨不置 true）
 - `authoritative_full_game_core = false`
 
 C1 没有新建第二套引擎（没有 `MultiplayerEngine`）：`PlayerTopology`/`OutcomePolicy`
@@ -203,3 +208,91 @@ certification；6) fresh C1 live execution（seed 0 真实执行 + 严格重执�
   项（非两人问题），建议另立审计。
 - 后续轨（C2/C3）：项目 5–7 的正式语义（模式胜负、方天画戟多目标、2v2
   规则）在 C1 之后另行推进；C1 停止后不自动开始 C2。
+
+## 9. 当前轨：POST_B_C3_FORMAL_NO_SKILL_2V2_MODE
+
+**状态**：`PRECOMMIT_NOT_INDEPENDENTLY_AUDITED`（实现完成，预提交门禁全部
+通过；未独立审计，不做 `git commit/push/tag/merge`，由用户最终提交）。
+C3 停止后不自动开始斗地主（§3 模式规则保持 Knowledge-only）。
+
+**范围**：正式、失败关闭、严格可回放的 no-skill 2v2 模式层，复用 C1 多人
+基础与 C2 全局卡牌语义（38/38、160 张正式牌堆）；不新建第二套引擎
+（无 `TwoVsTwoEngine`），只有 mode profile / team 模型 / OutcomePolicy /
+模式层钩子 / 可见性配置。不含：Milestone B 修复、身份模式、斗地主、
+武将技能、AI 策略、Web、正式胜率阶段。
+
+**规则源**（Knowledge《三国杀模式规则》§2，全部 `当前确认`）：
+
+- §2.9 胜利条件：一方两名角色全部确认死亡 → 对方立即获胜；一名队友死亡
+  游戏继续 + 存活队友摸1张；按真实结算顺序逐次确认死亡，不建立“同时死亡”
+  抽象；胜负成立后未开始的普通结算停止、已成立的死亡不回滚。
+- §2.10 初始体力：模式不修改基础属性；测试角色档案 base_hp/base_max_hp
+  = 4/4（角色属性，不是模式加成）。
+- §2.11 牌堆耗尽平局：原子步骤开始时不足 → 不半截取牌直接平局；完整执行
+  后牌堆为0 → 完成后立即平局；覆盖摸牌/判定/展示等全部消耗牌堆的步骤；
+  不自动重洗避免平局。平局是正式 OutcomePolicy 终局（winner=None +
+  `2v2_draw_deck_exhausted`），进入 strict replay / canonical outcome。
+- §2.12 客户端30分钟：`CONFIRMED_OUT_OF_SIMULATION_SCOPE`（登记不实现；
+  safety action cap 触发 = 测试失败，绝不自动判胜）。
+- 基础术语 §15.8 传导候选快照规则：Knowledge-only，C3 不实现；§21.2
+  `NESTED_INDEPENDENT_ATTRIBUTE_DAMAGE_DURING_CHAIN = WAITING_FOR_VERIFICATION`
+  （不修改 `_PendingChainDamage`/`candidate_order`/嵌套传导生产语义）。
+
+**实现（`scripts/sgs_engine/mode_2v2.py` + 生产核心模式层接线）**：
+
+- `Formal2v2Configuration`（canonical profile：1+4 对 2+3、初始手牌 3/4/4/5、
+  先手 1 号位、4 号位首轮飞扬、禁手气卡、死亡奖励 1、no_reshuffle_draw）
+  与 `TrustedFormal2v2Configuration`（exact type + capability token +
+  canonical value 三项权威边界）。
+- `TwoVsTwoOutcomePolicy`：`resolve_winner_after_death` 返回队伍ID
+  （team_a/team_b）；两队同时无存活在顺序确认死亡下不可达 → 失败关闭；
+  `draw_finish_reason = 2v2_draw_deck_exhausted`。
+- `TwoVsTwoModePolicy`：initial_hand_counts / first_player_id /
+  deck_supply_mode / teams / teammate_of / seat_of / feiyang_available /
+  death_confirmed_hook（存活队友摸1张，复用核心 `_mode_death_reward_draw`
+  事务：预检不足就地平局、完整后牌堆为0立即平局）。
+- `Formal2v2Session(ProductionBasicCardBatch)`：MODE_ID 替换 + exact-type
+  会话边界 + 测试角色士兵档案（性别 NONE，雌雄“异性”判定不触发）。
+- 生产核心接线：`FEIYANG_ACTIVATE` 阶段（窗口/枚举/发动/放弃、HMAC 候选
+  句柄、判定区 entry_index 清理）；按座次初始手牌发牌；确定性先手不消耗
+  RNG；`_deck_supply_precheck`（no_reshuffle_draw 口径）+ 8 个取牌步骤的
+  完成后平局检查（摸牌/无中/重铸/雌雄/判定/八卦/五谷展示/死亡奖励）；
+  死亡处理 winner-None 分支的模式层继续路径（群体锦囊队列 C1、方天多目标
+  C2、传导根恢复、单体根牌 finalize 后 `_complete_root_resolution`、当前
+  回合角色死亡立即结束回合推进下家）；执行快照新增 `mode_policy_identity`
+  与 `teams`（队伍映射序列化，不按座次奇偶推导）。
+- 回放：`SUPPORTED_REPLAY_MODES` 含 2v2；`formal_2v2_configuration` +
+  `teams` + `analysis_only` + `max_steps` 为一等初始配置；平局终局
+  winner=None + draw finish_reason；队伍映射/配置篡改失败关闭；正式结果
+  必须绑定 canonical profile；`record_reference_formal_2v2` canonical
+  工厂；可见性按 §2.4 队友可见（visible 集合 = 观察者 ∪ 同队队友，
+  队伍映射来自回放一等输入）。
+- 正式门禁 `inspect_formal_2v2_readiness()`：`2v2_ready =
+  formal_2v2_no_skill_ready`（canonical factory 可达 + 38/38 卡牌语义
+  复用 + 严格回放支持 + unsupported/approximation=0）；`client_timeout_
+  score_adjudication` 恒 false（§2.12）。`multi_player_production_proven`
+  与 `authoritative_full_game_core` 保持 false（比“正式2v2已验收”更宽的
+  总声明，本轨不置 true）。
+
+**专项测试**（新增 `tests/test_post_b_c3_2v2_mode.py` 30 项、
+`test_post_b_c3_2v2_replay.py` 8 项、`test_post_b_c3_2v2_visibility.py`
+8 项）：canonical profile/队伍/座次/初始化/回合循环、顺序死亡队伍胜负、
+濒死救援、死亡奖励与单体/群体/传导/当前回合角色死亡的继续路径、飞扬
+窗口全边界、队伍目标合法性、平局（足量/不足两种原子口径）、20 种子
+自然结束+严格重执行、跨会话秘密确定性、safety cap 失败语义、回放
+队伍胜/平局往返与篡改失败关闭、队友可见性。
+
+**固定种子**：20 种子（pytest 内，全严格重执行）+ 50 种子独立扫查
+（seed 20–69）：全部自然结束（队伍全灭胜负，`team_eliminated`）、
+unsupported=0、无安全上限触发、严格重执行逐决策验证一致、合法队伍胜者。
+
+**实现身份**：C3_IMPLEMENTATION_IDENTITY =
+`b94d1190e606250a0335bc41a957216443202e5ccee8cd6fb78deb0a5a72297b`
+（冻结 R8 证据 `06c8b2d3…` 仍是历史证据，未被改写；C1/C2 测试语义
+修正后随轨更新当前身份 pin）。
+
+**formal duel 防回归**：seed 0 → p2/388/43、seed 7 → p2/162/17
+（与 R5/R8 记录一致；全量套件覆盖）。
+
+**遗留**：斗地主/身份场/最后一人胜负策略、武将技能、改判、AI、Web、
+正式胜率阶段仍不在本轨；`multi_player_production_proven` 保持 false。

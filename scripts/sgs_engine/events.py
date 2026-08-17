@@ -35,6 +35,8 @@ class EventType(str, Enum):
     DYING = "dying"
     DEATH = "death"
     VICTORY = "victory"
+    # POST-B C3：正式平局终局（2v2 牌堆耗尽平局，winner=None）。
+    DRAW = "draw"
     GROUP_TARGET_RESOLVED = "group_target_resolved"
     CHAINED_STATE = "chained_state"
     CARD_RECAST = "card_recast"

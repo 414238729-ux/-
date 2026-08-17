@@ -135,10 +135,14 @@ class ProductionPhase(str, Enum):
     DISCARD = "discard"
     END = "end"
     FINISHED = "finished"
+    # POST-B C3：正式2v2 4号位首轮“飞扬”判定阶段开始窗口（模式层阶段）。
+    FEIYANG_ACTIVATE = "feiyang_activate"
 
 
 BATCH_PHASES: tuple[ProductionPhase, ...] = (
     ProductionPhase.PREPARE,
+    # POST-B C3：正式2v2 4号位首轮“飞扬”判定阶段开始窗口（模式层阶段）。
+    ProductionPhase.FEIYANG_ACTIVATE,
     ProductionPhase.JUDGMENT,
     ProductionPhase.JUDGMENT_WUXIE,
     ProductionPhase.DRAW,
@@ -564,6 +568,11 @@ FINISHED_TRANSIENT_RUNTIME_FIELDS: frozenset[str] = frozenset({
     "pending_discard_two",
     "pending_hanbing_discard",
     "processed_judgment_instance_ids",
+    "feiyang_window_id",
+    "feiyang_handles",
+    "feiyang_snapshot_digest",
+    "feiyang_selected_ids",
+    "feiyang_judgment_choice",
 })
 
 # R2-NEW-001：execution snapshot/hash 的运行时字段清单（A 类＝会改变未来
@@ -683,6 +692,14 @@ class _BatchRuntime:
     pending_damage_death_reason: str | None = None
     pending_chain: _PendingChainDamage | None = None
     winner_id: str | None = None
+    # POST-B C3：终局原因（"victory" | 模式平局原因如 "2v2_draw_deck_exhausted"）。
+    game_over_reason: str | None = None
+    # POST-B C3 飞扬窗口状态（2v2 4号位首轮判定阶段开始）。
+    feiyang_window_id: str | None = None
+    feiyang_handles: Mapping[str, str] = MappingProxyType({})
+    feiyang_snapshot_digest: str | None = None
+    feiyang_selected_ids: tuple[str, ...] = ()
+    feiyang_judgment_choice: str | None = None
     bagua_attempted: bool = False
     # CP-04O 批量弃牌：选择窗口只累积待选集合，最终确认前不移动任何牌
     discard_phase_window_id: str | None = None
@@ -830,6 +847,12 @@ class _BatchRuntime:
                 self.borrowed_sword_slash_snapshot_digest
             ),
             "winner_id": self.winner_id,
+            "game_over_reason": self.game_over_reason,
+            "feiyang_window_id": self.feiyang_window_id,
+            "feiyang_handles": dict(self.feiyang_handles),
+            "feiyang_snapshot_digest": self.feiyang_snapshot_digest,
+            "feiyang_selected_ids": list(self.feiyang_selected_ids),
+            "feiyang_judgment_choice": self.feiyang_judgment_choice,
             "bagua_attempted": self.bagua_attempted,
             "discard_phase_window_id": self.discard_phase_window_id,
             "discard_phase_selected_ids": list(
@@ -1306,6 +1329,93 @@ def _zone_from_id(zone_id: object, owner_id: str) -> ZoneRef:
 
 HAND_CHOICE_HANDLE_PREFIX = "h_"
 HAND_CHOICE_HANDLE_HEX_CHARS = 32
+
+FEIYANG_HANDLE_PREFIX = "fy_"
+FEIYANG_HANDLE_HEX_CHARS = 32
+
+
+def _feiyang_handle_message(
+    session_id: str,
+    window_id: str,
+    actor_id: str,
+    snapshot_digest: str,
+    instance_id: str,
+    kind: str,
+) -> str:
+    """构造飞扬窗口候选实体句柄的HMAC消息（POST-B C3）。
+
+    kind 绑定候选所在区域（hand/judgment），防止手牌候选句柄被挪用到
+    判定区槽位；消息其余部分与窗口快照摘要、窗口ID、行动角色绑定。
+    """
+    return canonical_json(
+        {
+            "session_id": session_id,
+            "feiyang_window": window_id,
+            "actor_id": actor_id,
+            "feiyang_snapshot_sha256": snapshot_digest,
+            "instance_id": instance_id,
+            "kind": kind,
+        }
+    )
+
+
+def _feiyang_handle(
+    session_id: str,
+    session_secret: bytes,
+    window_id: str,
+    actor_id: str,
+    snapshot_digest: str,
+    instance_id: str,
+    kind: str,
+) -> str:
+    """生成绑定当前飞扬窗口快照的候选实体不透明句柄。"""
+    digest = hmac.new(
+        session_secret,
+        _feiyang_handle_message(
+            session_id,
+            window_id,
+            actor_id,
+            snapshot_digest,
+            instance_id,
+            kind,
+        ).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return FEIYANG_HANDLE_PREFIX + digest[:FEIYANG_HANDLE_HEX_CHARS]
+
+
+def _resolve_feiyang_handle(
+    session_id: str,
+    session_secret: bytes,
+    window_id: str,
+    actor_id: str,
+    snapshot_digest: str,
+    handle: object,
+    instance_id: str,
+    kind: str,
+) -> bool:
+    """把提交的飞扬候选句柄与窗口快照逐实体重算比对；不符返回False。"""
+    if not isinstance(handle, str):
+        return False
+    expected = _feiyang_handle(
+        session_id,
+        session_secret,
+        window_id,
+        actor_id,
+        snapshot_digest,
+        instance_id,
+        kind,
+    )
+    return hmac.compare_digest(expected, handle)
+
+
+def _feiyang_snapshot_digest(
+    hand_ids: Sequence[str], judgment_ids: Sequence[str]
+) -> str:
+    """飞扬窗口候选快照摘要：手牌候选与判定区候选的有序实体ID对。"""
+    return sha256_value(
+        (tuple(sorted(hand_ids)), tuple(sorted(judgment_ids)))
+    )
 
 
 def _hand_choice_message(
@@ -1822,6 +1932,17 @@ def _assert_deck_available(
         )
 
 
+class _DeckExhaustedDraw(Exception):
+    """POST-B C3 内部信号：no_reshuffle_draw 模式下牌堆不足以完成原子取牌。
+
+    在任何状态/事件/RNG 变化之前抛出；step() 捕获并形成正式平局终局。
+    """
+
+    def __init__(self, label: str) -> None:
+        super().__init__(label)
+        self.label = label
+
+
 @dataclass(frozen=True, slots=True)
 class ArmorDamageResolution:
     """统一防具伤害修正结果（CP-04M）。
@@ -2317,6 +2438,24 @@ class ProductionBasicCardBatch:
     def outcome_policy(self) -> OutcomePolicy | None:
         return self._outcome_policy
 
+    @property
+    def mode_policy(self) -> object | None:
+        """POST-B C3：模式层策略（None=通用生产批次）。"""
+        return self._mode_policy
+
+    @property
+    def deck_supply_mode(self) -> str:
+        """牌堆供给口径：reshuffle（默认）| no_reshuffle_draw（2v2 §2.11）。"""
+        policy = self._mode_policy
+        if policy is not None and hasattr(policy, "deck_supply_mode"):
+            value = policy.deck_supply_mode
+            if value not in ("reshuffle", "no_reshuffle_draw"):
+                raise ProductionBatchError(
+                    f"模式层牌堆供给口径{value!r}不受支持"
+                )
+            return value
+        return "reshuffle"
+
     def _response_order_from_turn_player(
         self, state: GameState, runtime: _BatchRuntime
     ) -> tuple[str, ...]:
@@ -2339,6 +2478,12 @@ class ProductionBasicCardBatch:
         player_ids: tuple[str, ...] | None = None,
         outcome_policy: OutcomePolicy | None = None,
         initial_hand_count: int = 4,
+        # POST-B C3：按座次的初始手牌数（2v2 3/4/4/5，§2.3）；None=均匀。
+        initial_hand_counts: tuple[int, ...] | None = None,
+        # POST-B C3：确定性先手（2v2=1号位）；None=沿用随机选择。
+        first_player_id: str | None = None,
+        # POST-B C3：模式层策略（初始化输入、阶段钩子、牌堆供给口径）。
+        mode_policy: object | None = None,
         shuffle: bool = True,
         session_id: str | None = None,
         session_secret: bytes | None = None,
@@ -2371,6 +2516,7 @@ class ProductionBasicCardBatch:
         ):
             raise TypeError("模式胜负策略必须是OutcomePolicy或None")
         self._outcome_policy = outcome_policy
+        self._mode_policy = mode_policy
         self._player_ids = prepared_player_ids
         if (
             isinstance(initial_hand_count, bool)
@@ -2378,6 +2524,31 @@ class ProductionBasicCardBatch:
             or initial_hand_count < 1
         ):
             raise ValueError("初始手牌数必须是正整数")
+        if initial_hand_counts is None:
+            hand_counts = tuple(
+                initial_hand_count for _ in prepared_player_ids
+            )
+        else:
+            if (
+                not isinstance(initial_hand_counts, tuple)
+                or len(initial_hand_counts) != len(prepared_player_ids)
+                or any(
+                    isinstance(value, bool)
+                    or not isinstance(value, int)
+                    or value < 1
+                    for value in initial_hand_counts
+                )
+            ):
+                raise ValueError(
+                    "initial_hand_counts必须是长度与玩家数一致的正整数元组"
+                )
+            hand_counts = tuple(initial_hand_counts)
+        if first_player_id is not None:
+            if (
+                not isinstance(first_player_id, str)
+                or first_player_id not in prepared_player_ids
+            ):
+                raise ValueError("first_player_id必须是已注册的玩家ID")
         if not isinstance(shuffle, bool):
             raise TypeError("shuffle必须是布尔值")
 
@@ -2402,7 +2573,8 @@ class ProductionBasicCardBatch:
         self._formal_registry = FormalCardRegistry(records, session=self)
         self._formal_registry.ensure_all_basic_cards_implemented()
 
-        first_player_id = self._rng.choice(prepared_player_ids)
+        if first_player_id is None:
+            first_player_id = self._rng.choice(prepared_player_ids)
         self._first_player_id = first_player_id
         ordered_ids = [record.instance_id for record in records]
         if shuffle:
@@ -2410,13 +2582,14 @@ class ProductionBasicCardBatch:
         hands: dict[str, list[str]] = {
             player_id: [] for player_id in prepared_player_ids
         }
-        for round_index in range(initial_hand_count):
+        # POST-B C3：按座次计数轮转发牌（均匀计数与既有逐张顺序一致）。
+        deck_index = 0
+        for round_index in range(max(hand_counts)):
             for player_index, player_id in enumerate(prepared_player_ids):
-                hands[player_id].append(
-                    ordered_ids[
-                        round_index * len(prepared_player_ids) + player_index
-                    ]
-                )
+                if round_index >= hand_counts[player_index]:
+                    continue
+                hands[player_id].append(ordered_ids[deck_index])
+                deck_index += 1
         dealt = {
             instance_id for hand in hands.values() for instance_id in hand
         }
@@ -2655,6 +2828,8 @@ class ProductionBasicCardBatch:
             ProductionPhase.PLAY,
             ProductionPhase.DISCARD,
             ProductionPhase.END,
+            # POST-B C3：飞扬窗口由当前回合角色决策。
+            ProductionPhase.FEIYANG_ACTIVATE,
         ):
             return runtime.current_player_id
         if runtime.phase is ProductionPhase.JUDGMENT_WUXIE:
@@ -2876,9 +3051,17 @@ class ProductionBasicCardBatch:
         legal = enumerate_legal_actions(self.state, context, self.registry)
         chosen = selected.choose(legal, context)
         validated = validate_action(self.state, context, chosen, self.registry)
-        self._state = apply_action(
-            self.state, context, validated, self.registry
-        )
+        try:
+            self._state = apply_action(
+                self.state, context, validated, self.registry
+            )
+        except _DeckExhaustedDraw:
+            # POST-B C3（§2.11）：必须从牌堆取牌的原子步骤开始时剩余不足
+            # → 不执行半截取牌，直接形成平局（预检发生在任何状态/RNG
+            # 变化之前，平局终局使用预检时的权威状态）。
+            self._state, self._runtime = self._finish_game_as_draw(
+                self.state, self._runtime
+            )
         self._step_count += 1
         self._state.assert_card_conservation()
         self.assert_resolution_invariants()
@@ -2975,9 +3158,17 @@ class ProductionBasicCardBatch:
                 "终止不变量失败：FINISHED 时仍残留挂起状态："
                 + "、".join(cleared)
             )
-        if runtime.winner_id is None:
+        if runtime.winner_id is None and runtime.game_over_reason is None:
             raise ProductionBatchError(
-                "终止不变量失败：FINISHED 时缺少胜者"
+                "终止不变量失败：FINISHED 时缺少胜者或平局终局原因"
+            )
+        if (
+            runtime.winner_id is not None
+            and runtime.game_over_reason is not None
+            and runtime.game_over_reason.startswith("2v2_draw")
+        ):
+            raise ProductionBatchError(
+                "终止不变量失败：平局终局不能同时存在胜者"
             )
         if runtime.rescue_order or runtime.response_window_order:
             raise ProductionBatchError(
@@ -3039,6 +3230,20 @@ class ProductionBasicCardBatch:
                     else "unregistered_outcome_policy"
                 )
             ),
+            # POST-B C3：模式层身份与队伍映射进入执行快照（2v2 队伍映射
+            # 是初始化输入，不按座次奇偶在运行态推导）。
+            "mode_policy_identity": (
+                self._mode_policy.identity
+                if self._mode_policy is not None
+                and hasattr(self._mode_policy, "identity")
+                else None
+            ),
+            "teams": (
+                dict(self._mode_policy.teams)
+                if self._mode_policy is not None
+                and hasattr(self._mode_policy, "teams")
+                else None
+            ),
             "runtime": self._runtime.audit_value(),
             "first_player_id": self.first_player_id,
             "current_actor_id": (
@@ -3087,6 +3292,36 @@ class ProductionBasicCardBatch:
                     payload={"operation": "proceed_prepare"},
                 )
             )
+        elif self.phase is ProductionPhase.FEIYANG_ACTIVATE:
+            # POST-B C3：飞扬窗口——不发动；或弃置2张手牌+1张判定区牌
+            # （全部代价/收益组合按实体ID序确定性枚举）。
+            actions.append(
+                LegalAction(
+                    action_type=ActionType.PASS,
+                    actor_id=actor,
+                    payload={"operation": "feiyang_decline"},
+                )
+            )
+            hand_ids = tuple(
+                sorted(state.card_ids_in(ZoneRef.hand(actor)))
+            )
+            judgment_ids = tuple(
+                sorted(state.card_ids_in(ZoneRef.judgment(actor)))
+            )
+            for index, first_id in enumerate(hand_ids):
+                for second_id in hand_ids[index + 1 :]:
+                    for judgment_id in judgment_ids:
+                        actions.append(
+                            LegalAction(
+                                action_type=ActionType.CHOOSE_OPTION,
+                                actor_id=actor,
+                                payload={
+                                    "operation": "feiyang_activate",
+                                    "hand_ids": [first_id, second_id],
+                                    "judgment_id": judgment_id,
+                                },
+                            )
+                        )
         elif self.phase is ProductionPhase.JUDGMENT:
             actions.append(
                 LegalAction(
@@ -3824,6 +4059,19 @@ class ProductionBasicCardBatch:
                 return self.apply_proceed_prepare(state, context, action)
             raise InvalidActionError("准备阶段只能推进判定阶段")
 
+        if self.phase is ProductionPhase.FEIYANG_ACTIVATE:
+            if action.action_type is ActionType.PASS and operation == (
+                "feiyang_decline"
+            ):
+                return self.apply_feiyang_decline(state, context, action)
+            if action.action_type is ActionType.CHOOSE_OPTION and operation == (
+                "feiyang_activate"
+            ):
+                return self.apply_feiyang_activate(state, context, action)
+            raise InvalidActionError(
+                "飞扬窗口只能执行feiyang_decline或feiyang_activate"
+            )
+
         if self.phase is ProductionPhase.JUDGMENT:
             if action.action_type is ActionType.PASS and operation == (
                 "proceed_judgment"
@@ -4245,6 +4493,13 @@ class ProductionBasicCardBatch:
             pending_discard_two=None,
             pending_hanbing_discard=None,
             damage_card_already_finished=False,
+            # POST-B C3：飞扬窗口状态在根结算恢复时一并清理（窗口只在
+            # 判定阶段入口打开，正常流程不会残留；防御性清理保持一致）。
+            feiyang_window_id=None,
+            feiyang_handles=MappingProxyType({}),
+            feiyang_snapshot_digest=None,
+            feiyang_selected_ids=(),
+            feiyang_judgment_choice=None,
         )
 
     # ------------------------------------------------------------------
@@ -5756,6 +6011,12 @@ class ProductionBasicCardBatch:
         )
         self._events.extend(draw_events)
         runtime = self._runtime
+        next_state, draw_check = self._check_2v2_draw_after_consumption(
+            next_state, runtime
+        )
+        if draw_check.game_over_reason is not None:
+            self._commit_runtime(runtime, draw_check)
+            return next_state
         next_state, next_runtime = self._resume_slash_after_cixiong(
             next_state, replace(runtime, pending_cixiong_choice=None)
         )
@@ -7591,6 +7852,14 @@ class ProductionBasicCardBatch:
                         state, trick.target_id, 2
                     )
                     self._events.extend(draw_events)
+                    next_state, draw_check = (
+                        self._check_2v2_draw_after_consumption(
+                            next_state, runtime
+                        )
+                    )
+                    if draw_check.game_over_reason is not None:
+                        self._commit_runtime(runtime, draw_check)
+                        return next_state
                     next_state, finish_event = self._finish_processing(
                         next_state,
                         trick.trick_instance_id,
@@ -9464,7 +9733,7 @@ class ProductionBasicCardBatch:
             raise InvalidActionError("【八卦阵】发动动作负载与适配器卡牌键不一致")
 
         # 判定（原子）：先预检牌量，再取判定牌公开并弃置
-        _assert_deck_available(state, 1, "八卦阵判定需要1张牌")
+        self._deck_supply_precheck(state, 1, "八卦阵判定需要1张牌")
         started_event = GameEvent(
             event_type=EventType.ARMOR_JUDGMENT_STARTED,
             card_instance_id=armor_id,
@@ -9508,6 +9777,14 @@ class ProductionBasicCardBatch:
             },
         )
         self._events.extend((started_event, *take_events, result_event))
+        # POST-B C3（§2.11-2）：八卦判定取牌完整执行后牌堆变为0 →
+        # 立即平局；平局终局优先于八卦成功/失败的后续响应结算。
+        next_state, draw_check = self._check_2v2_draw_after_consumption(
+            next_state, runtime
+        )
+        if draw_check.game_over_reason is not None:
+            self._commit_runtime(runtime, draw_check)
+            return next_state
         next_runtime = replace(runtime, bagua_attempted=True)
         if not success:
             # 判定失败：保持当前响应窗口，角色仍可选择真实【闪】或不响应。
@@ -9612,7 +9889,7 @@ class ProductionBasicCardBatch:
         判定牌弃置去向）；判定牌与防具本体实例ID必须不同；结束后
         REVEALED 不得残留。"""
 
-        _assert_deck_available(state, 1, "八卦阵判定需要1张牌")
+        self._deck_supply_precheck(state, 1, "八卦阵判定需要1张牌")
         next_state = state
         events: list[GameEvent] = []
         if not next_state.card_ids_in(DRAW_PILE):
@@ -11112,7 +11389,7 @@ class ProductionBasicCardBatch:
         逻辑。
         """
 
-        _assert_deck_available(state, count, f"展示{count}张牌")
+        self._deck_supply_precheck(state, count, f"展示{count}张牌")
         next_state = state
         events: list[GameEvent] = []
         for pool_index in range(count):
@@ -11205,8 +11482,9 @@ class ProductionBasicCardBatch:
                 "【五谷丰登】当前没有合法目标，不能使用"
             )
 
-        # 原子性预检：展示牌量不足必须在任何事件登记前失败关闭。
-        _assert_deck_available(
+        # 原子性预检：展示牌量不足必须在任何事件登记前失败关闭
+        # （no_reshuffle_draw 模式不足时直接形成平局，§2.11-3）。
+        self._deck_supply_precheck(
             state, len(sequence), f"五谷丰登展示{len(sequence)}张牌"
         )
 
@@ -11245,6 +11523,15 @@ class ProductionBasicCardBatch:
             reason="wugu_reveal",
         )
         self._events.extend(reveal_events)
+        # POST-B C3（§2.11-2）：展示原子步骤完整执行后牌堆变为0 →
+        # 立即平局；平局终局优先于逐目标选牌（展示池由平局清理进入
+        # 弃牌堆）。
+        pool_state, draw_check = self._check_2v2_draw_after_consumption(
+            pool_state, runtime
+        )
+        if draw_check.game_over_reason is not None:
+            self._commit_runtime(runtime, draw_check)
+            return pool_state
         pool = tuple(pool_state.card_ids_in(REVEALED_ZONE))
         if len(pool) != len(sequence):
             raise ProductionBatchError(
@@ -11649,6 +11936,12 @@ class ProductionBasicCardBatch:
             next_state, context.actor_id, 1, reason="tiesuo_recast"
         )
         self._events.extend((recast_event, *draw_events))
+        runtime = self._runtime
+        next_state, draw_check = self._check_2v2_draw_after_consumption(
+            next_state, runtime
+        )
+        if draw_check.game_over_reason is not None:
+            self._commit_runtime(runtime, draw_check)
         return next_state
 
     def _apply_group_trick_damage(
@@ -12663,6 +12956,23 @@ class ProductionBasicCardBatch:
             # 根牌（闪电）完成时点由本路径统一清理
             finish_events = []
         elif (
+            chain is not None
+            and dying_id == chain.original_target_id
+            and resolve_victory_after_death(
+                PlayerTopology.from_state(
+                    _replace_player(next_state, dying_id, alive=False)
+                ),
+                dying_id,
+                policy=self._outcome_policy,
+                explicit_two_player_fallback=True,
+            )
+            is None
+        ):
+            # POST-B C3：2v2 非终局死亡的传导原始受伤者——根牌 finalize
+            # 由 _resume_chain_after_rescue(rescued=False) 统一执行
+            # （与救援成功路径同一口径），不得在此提前离开处理区。
+            finish_events: list[GameEvent] = []
+        elif (
             runtime.pending_group_trick is not None
             and runtime.pending_wugu is None
             and runtime.pending_chain is None
@@ -12757,11 +13067,25 @@ class ProductionBasicCardBatch:
         )
         if winner is None:
             # POST-B C1/C2：多人对局中的非终局死亡——不产生 VICTORY，
-            # 对局继续。已证明两条继续路径：群体锦囊目标死亡后继续目标
-            # 队列（C1）、方天画戟多目标【杀】目标死亡后继续后续目标
-            # （C2）。其余挂起根（五谷/传导/判定/借刀/单体根牌）的死亡
-            # 继续结算尚未由正式多人语义证明，一律失败关闭，不猜测
-            # 2v2/身份场/最后一人生存等模式规则。
+            # 对局继续。事件顺序：根牌收尾 → 死亡区域清理 → 死亡 →
+            # 模式死亡奖励（2v2 §2.7）→ 继续结算/平局终局。
+            mode_policy = self._mode_policy
+            self._events.extend(
+                [*finish_events, *cleanup_events, death_event]
+            )
+            if mode_policy is not None and hasattr(
+                mode_policy, "death_confirmed_hook"
+            ):
+                # POST-B C3：模式层死亡确认钩子（2v2 死亡奖励：存活队友
+                # 摸1张，§2.7；只在胜负未成立时触发）。钩子可能触发
+                # 牌堆耗尽平局——此时终局优先于继续结算。
+                pre_hook_runtime = runtime
+                next_state, runtime = mode_policy.death_confirmed_hook(
+                    self, next_state, runtime, dying_id
+                )
+                if runtime.game_over_reason is not None:
+                    self._commit_runtime(pre_hook_runtime, runtime)
+                    return next_state
             pending_slash = runtime.pending_slash
             if (
                 runtime.pending_group_trick is not None
@@ -12770,9 +13094,8 @@ class ProductionBasicCardBatch:
                 and pending_judgment is None
                 and borrowed is None
             ):
-                self._events.extend(
-                    [*finish_events, *cleanup_events, death_event]
-                )
+                # 群体锦囊目标死亡后继续目标队列（C1 已证明；模式层存在时
+                # 同一路径）。根锦囊保持处理区直到全部目标完成。
                 next_state, next_runtime = self._resume_group_after_damage(
                     next_state, runtime, dying_id, rescued=False
                 )
@@ -12794,9 +13117,6 @@ class ProductionBasicCardBatch:
             ):
                 # 方天画戟多目标：死亡目标结算完成，推进到快照中的下一
                 # 目标；根【杀】保持在处理区（与群体锦囊同一口径）。
-                self._events.extend(
-                    [*finish_events, *cleanup_events, death_event]
-                )
                 next_state, next_runtime = self._advance_slash_target(
                     next_state,
                     replace(
@@ -12810,6 +13130,62 @@ class ProductionBasicCardBatch:
                         ),
                     ),
                 )
+                self._commit_runtime(runtime, next_runtime)
+                return next_state
+            if mode_policy is not None:
+                # POST-B C3：正式2v2非终局死亡继续（§2.9 当前确认：一名
+                # 队友死亡游戏继续）。根牌 finalize 已在死亡处理前段统一
+                # 完成；借刀根已由前段清理、闪电 pending_judgment 已由
+                # 前段清理。传导根由既有 _advance_chain 恢复（候选按
+                # 已证明语义逐名重读存活/横置、死亡跳过；C3 只接线，
+                # 不修改传导生产语义）。当前回合角色死亡（闪电/决斗自伤）
+                # 时其回合立即结束并推进到下一存活角色（标准三国杀）。
+                if runtime.pending_chain is not None:
+                    base_runtime = replace(
+                        runtime,
+                        pending_judgment=None,
+                        judgment_entry_indices=(
+                            judgment_entry_indices_after_death
+                        ),
+                    )
+                    next_state, next_runtime = (
+                        self._resume_chain_after_rescue(
+                            next_state,
+                            base_runtime,
+                            dying_id,
+                            rescued=False,
+                        )
+                    )
+                    if next_runtime.current_player_id == dying_id:
+                        next_state, next_runtime = (
+                            self._end_turn_after_current_death(
+                                next_state,
+                                next_runtime,
+                                judgment_entry_indices_after_death,
+                            )
+                        )
+                elif runtime.current_player_id == dying_id:
+                    next_state, next_runtime = (
+                        self._end_turn_after_current_death(
+                            next_state,
+                            runtime,
+                            judgment_entry_indices_after_death,
+                        )
+                    )
+                else:
+                    base_runtime = replace(
+                        runtime,
+                        pending_judgment=None,
+                        pending_borrowed_sword=None,
+                        judgment_entry_indices=(
+                            judgment_entry_indices_after_death
+                        ),
+                    )
+                    next_state, next_runtime = (
+                        self._complete_root_resolution(
+                            next_state, base_runtime
+                        )
+                    )
                 self._commit_runtime(runtime, next_runtime)
                 return next_state
             raise UnsupportedRuleError(
@@ -12901,6 +13277,13 @@ class ProductionBasicCardBatch:
             bagua_attempted=False,
             wine_buff_owner_id=None,
             wine_buff_used_this_play_phase=False,
+            # POST-B C3：终局必须覆盖 FINISHED_TRANSIENT_RUNTIME_FIELDS
+            # 中的飞扬窗口/决策痕迹字段。
+            feiyang_window_id=None,
+            feiyang_handles=MappingProxyType({}),
+            feiyang_snapshot_digest=None,
+            feiyang_selected_ids=(),
+            feiyang_judgment_choice=None,
         )
         self._commit_runtime(runtime, next_runtime)
         return next_state
@@ -13006,9 +13389,251 @@ class ProductionBasicCardBatch:
             raise InvalidActionError("只有准备阶段可以进入判定阶段")
         if context.actor_id != runtime.current_player_id:
             raise InvalidActionError("只有当前回合角色可以推进准备阶段")
-        next_runtime = replace(runtime, phase=ProductionPhase.JUDGMENT)
+        # POST-B C3：模式层判定阶段入口钩子——4号位首轮“飞扬”窗口
+        # （§2.6）。窗口可用且存在合法代价/收益时进入飞扬阶段，否则
+        # 直接进入判定阶段（不可用时窗口不打开，不产生额外动作）。
+        feiyang_runtime = self._open_feiyang_window(state, runtime)
+        next_runtime = (
+            feiyang_runtime
+            if feiyang_runtime is not None
+            else replace(runtime, phase=ProductionPhase.JUDGMENT)
+        )
         self._commit_runtime(runtime, next_runtime)
         return state
+
+    def _open_feiyang_window(
+        self, state: GameState, runtime: _BatchRuntime
+    ) -> _BatchRuntime | None:
+        """POST-B C3：4号位首轮判定阶段开始“飞扬”窗口（§2.6 当前确认）。
+
+        可用性由模式层判定（feiyang_available：座次+首轮+每回合独立额度），
+        可行性由权威状态判定（≥2张手牌代价与≥1张判定区牌收益），两者
+        同时满足才打开窗口；不满足直接进入判定阶段。窗口快照（手牌候选+
+        判定区候选实体ID摘要）与逐候选HMAC句柄冻结在运行态，用于严格
+        回放与可见性脱敏。
+        """
+        mode_policy = self._mode_policy
+        if mode_policy is None or not hasattr(mode_policy, "feiyang_available"):
+            return None
+        player_id = runtime.current_player_id
+        seat = self._seat_of(player_id)
+        if not bool(
+            mode_policy.feiyang_available(
+                player_id=player_id,
+                seat=seat,
+                turn_number=runtime.turn_number,
+            )
+        ):
+            return None
+        hand_ids = tuple(
+            sorted(state.card_ids_in(ZoneRef.hand(player_id)))
+        )
+        judgment_ids = tuple(
+            sorted(state.card_ids_in(ZoneRef.judgment(player_id)))
+        )
+        if len(hand_ids) < 2 or not judgment_ids:
+            # 无可执行的代价/收益组合：按无可用窗口处理（不产生窗口）。
+            return None
+        window_id = f"feiyang:{runtime.turn_number}:{player_id}"
+        snapshot_digest = _feiyang_snapshot_digest(hand_ids, judgment_ids)
+        handles: dict[str, str] = {}
+        for instance_id in hand_ids:
+            handles[instance_id] = _feiyang_handle(
+                self._session_id,
+                self._session_secret,
+                window_id,
+                player_id,
+                snapshot_digest,
+                instance_id,
+                "hand",
+            )
+        for instance_id in judgment_ids:
+            handles[instance_id] = _feiyang_handle(
+                self._session_id,
+                self._session_secret,
+                window_id,
+                player_id,
+                snapshot_digest,
+                instance_id,
+                "judgment",
+            )
+        return replace(
+            runtime,
+            phase=ProductionPhase.FEIYANG_ACTIVATE,
+            feiyang_window_id=window_id,
+            feiyang_handles=MappingProxyType(handles),
+            feiyang_snapshot_digest=snapshot_digest,
+            feiyang_selected_ids=(),
+            feiyang_judgment_choice=None,
+        )
+
+    def _seat_of(self, player_id: str) -> int:
+        """按初始化 player_ids 顺序返回座次（1-based）。"""
+        try:
+            return self._player_ids.index(player_id) + 1
+        except ValueError as exc:
+            raise ProductionBatchError(
+                f"角色{player_id!r}未注册座次"
+            ) from exc
+
+    def _assert_feiyang_window(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        context: ActionContext,
+    ) -> None:
+        del state
+        if runtime.phase is not ProductionPhase.FEIYANG_ACTIVATE:
+            raise InvalidActionError("只有飞扬窗口阶段可以执行飞扬动作")
+        if context.actor_id != runtime.current_player_id:
+            raise InvalidActionError("只有当前回合角色可以执行飞扬")
+        if runtime.feiyang_window_id is None:
+            raise ProductionBatchError("飞扬窗口状态缺失；失败关闭")
+
+    @staticmethod
+    def _close_feiyang_window(
+        runtime: _BatchRuntime,
+        *,
+        selected_ids: tuple[str, ...] = (),
+        judgment_choice: str | None = None,
+    ) -> _BatchRuntime:
+        """关闭飞扬窗口：记录决策痕迹并返回判定阶段。"""
+        return replace(
+            runtime,
+            phase=ProductionPhase.JUDGMENT,
+            feiyang_window_id=None,
+            feiyang_handles=MappingProxyType({}),
+            feiyang_snapshot_digest=None,
+            feiyang_selected_ids=selected_ids,
+            feiyang_judgment_choice=judgment_choice,
+        )
+
+    def apply_feiyang_decline(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        """POST-B C3：飞扬窗口不发动，直接进入判定阶段（§2.6）。"""
+        del action
+        runtime = self._runtime
+        self._assert_feiyang_window(state, runtime, context)
+        next_runtime = self._close_feiyang_window(runtime)
+        self._commit_runtime(runtime, next_runtime)
+        return state
+
+    def apply_feiyang_activate(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        """POST-B C3：飞扬发动——弃置2张手牌，弃置自己判定区1张牌（§2.6）。
+
+        代价与收益作为一次原子动作：实体移动（弃置）使用独立 reason
+        （feiyang_cost / feiyang_judgment_discard），不计入通用弃置口径
+        （出牌阶段弃牌额度、阶段弃牌、响应弃置均不受影响）。判定区实体
+        离开后其 judgment_zone_entry_index 一并移除。
+        """
+        runtime = self._runtime
+        self._assert_feiyang_window(state, runtime, context)
+        actor = runtime.current_player_id
+        payload = action.payload
+        hand_ids_raw = payload.get("hand_ids")
+        judgment_id_raw = payload.get("judgment_id")
+        if (
+            not isinstance(hand_ids_raw, (list, tuple))
+            or len(hand_ids_raw) != 2
+        ):
+            raise InvalidActionError("飞扬发动必须且只能选择2张手牌作为代价")
+        hand_ids = tuple(hand_ids_raw)
+        if len(set(hand_ids)) != 2 or any(
+            not isinstance(value, str) or not value.strip()
+            for value in hand_ids
+        ):
+            raise InvalidActionError("飞扬代价必须是2张互不相同的手牌实体ID")
+        if not isinstance(judgment_id_raw, str) or not judgment_id_raw.strip():
+            raise InvalidActionError("飞扬发动必须选择自己判定区的一张牌")
+        judgment_id = judgment_id_raw
+        for instance_id in hand_ids:
+            if instance_id not in state.card_ids_in(ZoneRef.hand(actor)):
+                raise InvalidActionError("飞扬代价必须是当前真实手牌中的实体牌")
+        if judgment_id not in state.card_ids_in(ZoneRef.judgment(actor)):
+            raise InvalidActionError("飞扬收益必须是当前自己判定区中的实体牌")
+        if judgment_id in hand_ids:
+            raise InvalidActionError("飞扬代价与收益不能选择同一实体牌")
+        window_id = runtime.feiyang_window_id
+        snapshot_digest = runtime.feiyang_snapshot_digest
+        if window_id is None or snapshot_digest is None:
+            raise ProductionBatchError("飞扬窗口快照缺失；失败关闭")
+        # 会话秘密绑定的句柄校验：提交实体必须属于当前窗口快照。
+        for instance_id in hand_ids:
+            handle = runtime.feiyang_handles.get(instance_id)
+            if handle is None or not _resolve_feiyang_handle(
+                self._session_id,
+                self._session_secret,
+                window_id,
+                actor,
+                snapshot_digest,
+                handle,
+                instance_id,
+                "hand",
+            ):
+                raise InvalidActionError("飞扬代价实体不属于当前窗口快照")
+        judgment_handle = runtime.feiyang_handles.get(judgment_id)
+        if judgment_handle is None or not _resolve_feiyang_handle(
+            self._session_id,
+            self._session_secret,
+            window_id,
+            actor,
+            snapshot_digest,
+            judgment_handle,
+            judgment_id,
+            "judgment",
+        ):
+            raise InvalidActionError("飞扬收益实体不属于当前窗口快照")
+        events: list[GameEvent] = []
+        next_state = state
+        for instance_id in hand_ids:
+            source = next_state.location_of(instance_id)
+            next_state = next_state.move_card(instance_id, DISCARD_PILE)
+            events.append(
+                GameEvent(
+                    event_type=EventType.CARD_MOVED,
+                    card_instance_id=instance_id,
+                    card_key=_card_key(state, instance_id),
+                    card_user=actor,
+                    payload={
+                        "source": _zone_payload(source),
+                        "destination": _zone_payload(DISCARD_PILE),
+                        "reason": "feiyang_cost",
+                        "window_id": window_id,
+                    },
+                )
+            )
+        judgment_source = next_state.location_of(judgment_id)
+        next_state = next_state.move_card(judgment_id, DISCARD_PILE)
+        events.append(
+            GameEvent(
+                event_type=EventType.CARD_MOVED,
+                card_instance_id=judgment_id,
+                card_key=_card_key(state, judgment_id),
+                card_user=actor,
+                payload={
+                    "source": _zone_payload(judgment_source),
+                    "destination": _zone_payload(DISCARD_PILE),
+                    "reason": "feiyang_judgment_discard",
+                    "window_id": window_id,
+                },
+            )
+        )
+        self._events.extend(tuple(events))
+        next_runtime = self._close_feiyang_window(
+            replace(
+                runtime,
+                judgment_entry_indices=self._without_judgment_index(
+                    runtime, judgment_id
+                ),
+            ),
+            selected_ids=hand_ids,
+            judgment_choice=judgment_id,
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
 
     def apply_proceed_judgment(
         self, state: GameState, context: ActionContext, action: LegalAction
@@ -13046,6 +13671,12 @@ class ProductionBasicCardBatch:
             state, runtime.current_player_id, 2, reason="draw_phase"
         )
         self._events.extend(draw_events)
+        next_state, draw_check = self._check_2v2_draw_after_consumption(
+            next_state, runtime
+        )
+        if draw_check.game_over_reason is not None:
+            self._commit_runtime(runtime, draw_check)
+            return next_state
         events: list[GameEvent] = []
         next_phase = ProductionPhase.PLAY
         if "play" in runtime.skipped_phases:
@@ -13284,6 +13915,13 @@ class ProductionBasicCardBatch:
             state, runtime, pending
         )
         self._events.extend(take_events)
+        # POST-B C3（§2.11-2）：判定取牌完整执行后牌堆变为0 → 立即平局；
+        # 平局终局优先于判定效果结算。
+        next_state, draw_check = self._check_2v2_draw_after_consumption(
+            next_state, runtime
+        )
+        if draw_check.game_over_reason is not None:
+            return next_state, draw_check
         return self._apply_delayed_trick_judged(
             next_state, runtime, pending, result
         )
@@ -13340,7 +13978,7 @@ class ProductionBasicCardBatch:
     ) -> tuple[GameState, tuple[GameEvent, ...], dict[str, object]]:
         """原子取判定牌：预检→重洗→牌堆顶→REVEALED→公开→结果→弃置。"""
         # 原子预检：牌堆 + 可重洗弃牌堆 >= 1（在任何状态/RNG变化前失败关闭）
-        _assert_deck_available(state, 1, "判定需要1张牌")
+        self._deck_supply_precheck(state, 1, "判定需要1张牌")
         next_state = state
         if not next_state.card_ids_in(DRAW_PILE):
             next_state, reshuffle_events = self._reshuffle_discard_into_draw(
@@ -14188,9 +14826,112 @@ class ProductionBasicCardBatch:
             discard_phase_snapshot_digest=None,
             pending_cixiong_choice=None,
             pending_weapon_choice=None,
+            # POST-B C3：飞扬决策痕迹按回合清理。
+            feiyang_window_id=None,
+            feiyang_handles=MappingProxyType({}),
+            feiyang_snapshot_digest=None,
+            feiyang_selected_ids=(),
+            feiyang_judgment_choice=None,
         )
         self._commit_runtime(runtime, next_runtime)
         return next_state
+
+    def _end_turn_after_current_death(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        judgment_entry_indices: Mapping[str, int],
+    ) -> tuple[GameState, _BatchRuntime]:
+        """POST-B C3：当前回合角色在自身回合确认死亡（闪电/决斗自伤等）。
+
+        标准三国杀：回合角色死亡时其回合立即结束，推进到下一存活角色的
+        准备阶段。重置口径与 _apply_end_turn 一致，并携带死亡角色判定区
+        entry_index 清理结果。调用前提：死亡区域清理与死亡事件已入队、
+        根牌已 finalize。
+        """
+        topology = PlayerTopology.from_state(state)
+        alive_ids = topology.alive_ids
+        dead_seat = state.players_by_id[runtime.current_player_id].seat
+        # 已死亡锚点不参与存活环：下家=座次大于死亡角色座次的最小存活
+        # 角色；不存在则环回最小座次存活角色（标准“下家”死亡语义）。
+        next_player = next(
+            (
+                player_id
+                for player_id in alive_ids
+                if state.players_by_id[player_id].seat > dead_seat
+            ),
+            alive_ids[0],
+        )
+        next_runtime = replace(
+            runtime,
+            current_player_id=next_player,
+            turn_number=runtime.turn_number + 1,
+            phase=ProductionPhase.PREPARE,
+            slash_used_counts=MappingProxyType(
+                {**runtime.slash_used_counts, next_player: 0}
+            ),
+            wine_buff_owner_id=None,
+            wine_buff_used_this_play_phase=False,
+            pending_slash=None,
+            pending_trick=None,
+            trick_effect_active=False,
+            trick_consecutive_passes=0,
+            trick_response_order=(),
+            trick_response_index=0,
+            trick_decision_count=0,
+            trick_direct_response_to=None,
+            pending_dying_id=None,
+            rescue_order=(),
+            rescue_index=0,
+            rescue_decision_count=0,
+            response_window_id=None,
+            response_window_order=(),
+            response_window_source_sequence=None,
+            pending_zone_choice=None,
+            zone_choice_handles=MappingProxyType({}),
+            zone_choice_snapshot_digest=None,
+            pending_duel=None,
+            pending_fire_attack=None,
+            fire_attack_reveal_handles=MappingProxyType({}),
+            pending_group_trick=None,
+            group_response_handles=MappingProxyType({}),
+            group_response_snapshot_digest=None,
+            pending_wugu=None,
+            pending_borrowed_sword=None,
+            borrowed_sword_slash_handles=MappingProxyType({}),
+            borrowed_sword_slash_snapshot_digest=None,
+            pending_damage_card_id=None,
+            pending_damage_source_id=None,
+            pending_damage_kill_credit=None,
+            pending_damage_rescue_reason=None,
+            pending_damage_death_reason=None,
+            pending_chain=None,
+            processed_judgment_instance_ids=(),
+            pending_judgment=None,
+            skipped_phases=MappingProxyType({}),
+            phase_skip_reasons=MappingProxyType({}),
+            defer_damage_card_finish=False,
+            damage_card_already_finished=False,
+            bagua_attempted=False,
+            judgment_entry_indices=MappingProxyType(
+                dict(judgment_entry_indices)
+            ),
+            discard_phase_window_id=None,
+            discard_phase_selected_ids=(),
+            discard_phase_handles=MappingProxyType({}),
+            discard_phase_snapshot_digest=None,
+            pending_cixiong_choice=None,
+            pending_weapon_choice=None,
+            pending_slash_choice=None,
+            pending_discard_two=None,
+            pending_hanbing_discard=None,
+            feiyang_window_id=None,
+            feiyang_handles=MappingProxyType({}),
+            feiyang_snapshot_digest=None,
+            feiyang_selected_ids=(),
+            feiyang_judgment_choice=None,
+        )
+        return state, next_runtime
 
     # ------------------------------------------------------------------
     # 实体牌移动与摸牌事务（真实 move_card / move_cards 原子移动）
@@ -14303,6 +15044,99 @@ class ProductionBasicCardBatch:
         )
         return next_state, events
 
+    def _deck_supply_precheck(
+        self, state: GameState, count: int, label: str
+    ) -> None:
+        """POST-B C3：牌堆供给预检（原子取牌前、任何变化前）。
+
+        reshuffle 模式沿用既有“牌堆+可重洗弃牌堆”预检；no_reshuffle_draw
+        模式（2v2 §2.11）只检查牌堆本身，不足即抛出 _DeckExhaustedDraw
+        信号（不执行半截取牌，直接形成平局）。
+        """
+        if self.deck_supply_mode == "no_reshuffle_draw":
+            if len(state.card_ids_in(DRAW_PILE)) < count:
+                raise _DeckExhaustedDraw(label)
+            return
+        _assert_deck_available(state, count, label)
+
+    def _check_2v2_draw_after_consumption(
+        self, state: GameState, runtime: _BatchRuntime
+    ) -> tuple[GameState, _BatchRuntime]:
+        """POST-B C3（§2.11-2）：原子取牌完整执行后牌堆变为0 → 立即平局。"""
+        if self.deck_supply_mode != "no_reshuffle_draw":
+            return state, runtime
+        if state.card_ids_in(DRAW_PILE):
+            return state, runtime
+        return self._finish_game_as_draw(state, runtime)
+
+    def _mode_death_reward_draw(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        player_id: str,
+        count: int,
+        *,
+        reason: str = "death_reward_teammate_draw",
+    ) -> tuple[GameState, _BatchRuntime]:
+        """POST-B C3：模式层死亡奖励摸牌事务（2v2 §2.7）。
+
+        只在胜负未成立（死亡确认后游戏继续）时由模式钩子调用。牌量
+        预检不足 → 就地转换为平局终局（终局状态=死亡已成立的权威状态，
+        奖励摸牌不执行半截）；完整执行后牌堆变为0 → 立即平局
+        （§2.11-2）。_DeckExhaustedDraw 不得再向上传播到 step() 的
+        通用预检捕获（那里的终局使用预检前状态，会丢失已成立的死亡）。
+        """
+        try:
+            next_state, draw_events = self._draw_cards(
+                state, player_id, count, reason=reason
+            )
+        except _DeckExhaustedDraw:
+            return self._finish_game_as_draw(state, runtime)
+        self._events.extend(draw_events)
+        return self._check_2v2_draw_after_consumption(next_state, runtime)
+
+    def _finish_game_as_draw(
+        self, state: GameState, runtime: _BatchRuntime
+    ) -> tuple[GameState, _BatchRuntime]:
+        """POST-B C3：正式平局终局（牌堆耗尽，winner=None）。
+
+        清理所有挂起根与临时区（PROCESSING/REVEALED 按区域顺序进入
+        弃牌堆），设置 FINISHED + game_over_reason=策略平局原因，并
+        发出 DRAW 终局事件。严格回放按同一确定性路径重放。
+        """
+        policy = self._outcome_policy
+        draw_reason = (
+            policy.draw_finish_reason
+            if policy is not None and policy.draw_finish_reason is not None
+            else "draw_deck_exhausted"
+        )
+        events: list[GameEvent] = [
+            GameEvent(
+                event_type=EventType.DRAW,
+                target_ids=(),
+                payload={"reason": draw_reason},
+            )
+        ]
+        next_state = state
+        for instance_id in list(next_state.card_ids_in(PROCESSING_ZONE)):
+            next_state, finish_event = self._finish_processing(
+                next_state, instance_id, "draw_game_over_cleanup"
+            )
+            events.append(finish_event)
+        for instance_id in list(next_state.card_ids_in(REVEALED_ZONE)):
+            next_state, reveal_event = self._finish_processing(
+                next_state, instance_id, "draw_game_over_cleanup"
+            )
+            events.append(reveal_event)
+        self._events.extend(tuple(events))
+        base_runtime = self._return_to_play(runtime)
+        next_runtime = replace(
+            base_runtime,
+            phase=ProductionPhase.FINISHED,
+            game_over_reason=draw_reason,
+        )
+        return next_state, next_runtime
+
     def _draw_cards(
         self,
         state: GameState,
@@ -14311,7 +15145,7 @@ class ProductionBasicCardBatch:
         *,
         reason: str = "draw_phase",
     ) -> tuple[GameState, tuple[GameEvent, ...]]:
-        _assert_deck_available(state, count, f"摸{count}张牌")
+        self._deck_supply_precheck(state, count, f"摸{count}张牌")
         next_state = state
         events: list[GameEvent] = []
         for _ in range(count):

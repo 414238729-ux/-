@@ -90,6 +90,10 @@ _R8_ERA_SHA256_FOR_POST_B_CHANGED_FILES = {
     "tests/test_sgs_production_borrowed_sword_weapon_system.py": (
         "d1af6685f4349dfbea6d652d9ed9ea6ecece2098cf78b0323b2010b7ccfee088"
     ),
+    # POST-B C3 合法修改（DRAW 平局终局事件类型）。
+    "scripts/sgs_engine/events.py": (
+        "be11edff8512fd23c72160b31c78c5e31c18120aec39f088af27e6a800c62439"
+    ),
 }
 
 
@@ -213,6 +217,9 @@ def test_finished_transient_inventory_covers_all_transient_fields() -> None:
         "slash_used_counts",
         "judgment_entry_indices",
         "judgment_entry_counter",
+        # POST-B C3：终局原因（A 类永久终局结果字段；平局时非空，
+        # 与 winner_id 同级，不是 transient/pending）。
+        "game_over_reason",
     }
     known_transient = set(FINISHED_TRANSIENT_RUNTIME_FIELDS)
     unclassified = runtime_fields - permanent - known_transient - {"winner_id"}

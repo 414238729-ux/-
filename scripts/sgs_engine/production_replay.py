@@ -17,6 +17,7 @@ from typing import Any, Mapping, Sequence
 
 from .actions import ActionContext, LegalAction
 from .engine import ENGINE_VERSION, canonical_state_snapshot
+from .mode_2v2 import FORMAL_NO_SKILL_2V2_MODE
 from .production_batch import (
     FORMAL_NO_SKILL_DUEL_MODE,
     PRODUCTION_BASIC_CARDS_MODE,
@@ -31,6 +32,15 @@ from .replay import canonical_json, sha256_value, state_sha256
 REEXECUTION_SCHEMA = "sgs-production-basic-batch-reexecution-v1"
 _EVENT_CHAIN_ANCHOR = sha256_value(
     {"schema": REEXECUTION_SCHEMA, "stream": "event_hash_chain"}
+)
+
+# POST-B C3：严格回放可信模式白名单（2v2 平局终局/队伍映射已支持）。
+SUPPORTED_REPLAY_MODES: frozenset[str] = frozenset(
+    {
+        PRODUCTION_BASIC_CARDS_MODE,
+        FORMAL_NO_SKILL_DUEL_MODE,
+        FORMAL_NO_SKILL_2V2_MODE,
+    }
 )
 
 
@@ -280,6 +290,14 @@ _FORMAL_DUEL_INITIAL_CONFIGURATION_FIELDS = {
     "analysis_only",
     "max_steps",
 }
+# POST-B C3：正式2v2回放一等输入：canonical 配置 + 显式序列化队伍映射
+# （队伍初始化后固定，不按座次奇偶在重执行时推导）。
+_FORMAL_2V2_INITIAL_CONFIGURATION_FIELDS = {
+    "formal_2v2_configuration",
+    "teams",
+    "analysis_only",
+    "max_steps",
+}
 
 _PRIVATE_FIELDS = {
     "schema",
@@ -289,9 +307,10 @@ _PRIVATE_FIELDS = {
 
 AUTHORITATIVE_PRIVATE_SCHEMA = "sgs-authoritative-private-v1"
 
-# 初始发牌、摸牌阶段与普通摸牌的非公开获得reason；对手/旁观者视图必须脱敏
+# 初始发牌、摸牌阶段、普通摸牌与2v2死亡奖励摸牌（§2.7）的非公开获得
+# reason；对手/旁观者视图必须脱敏（队友视图由 visible_ids 扩展）。
 _PRIVATE_GAIN_REASONS: frozenset[str] = frozenset(
-    {"initial_hand", "draw_phase"}
+    {"initial_hand", "draw_phase", "death_reward_teammate_draw"}
 )
 
 # 绑定隐藏权威状态的摘要键：公开投影必须递归移除（B1-a）。
@@ -343,14 +362,21 @@ def _redact_hidden_digests(value: object) -> object:
 
 
 def _redact_private_hand_event(
-    event: Mapping[str, object], viewer_id: str | None
+    event: Mapping[str, object],
+    viewer_id: str | None,
+    visible_ids: frozenset[str] | None = None,
 ) -> dict[str, object]:
     """按观察者身份脱敏事件中的隐藏手牌实体信息（CP-04L）。
 
     公开获得路径（五谷公开选择、顺手牵羊公开获得、借刀交武器等）保持公开；
     仅对初始发牌、摸牌等非公开获得按“接收者本人可见、其他人只见数量与
-    reason”规则处理。"""
+    reason”规则处理。POST-B C3：2v2 队友可见（§2.4 当前确认）由调用方
+    通过 ``visible_ids``（viewer ∪ 同队队友）扩展可见集合。"""
 
+    visible_set = frozenset(
+        ([viewer_id] if viewer_id is not None else [])
+        + (list(visible_ids or ()))
+    )
     event_type = event.get("event_type")
     if event_type == "card_gained":
         payload = event.get("payload", {})
@@ -359,7 +385,7 @@ def _redact_private_hand_event(
         recipient = None
         if isinstance(target_ids, (list, tuple)) and target_ids:
             recipient = target_ids[0]
-        if reason in _PRIVATE_GAIN_REASONS and recipient != viewer_id:
+        if reason in _PRIVATE_GAIN_REASONS and recipient not in visible_set:
             redacted: dict[str, object] = dict(event)
             redacted["card_instance_id"] = None
             redacted["card_key"] = None
@@ -383,7 +409,7 @@ def _redact_private_hand_event(
             and destination.get("kind") == "hand"
         ):
             owner = destination.get("owner_id")
-            if owner != viewer_id:
+            if owner not in visible_set:
                 redacted = dict(event)
                 redacted["card_instance_id"] = None
                 redacted["card_key"] = None
@@ -433,14 +459,17 @@ def _redact_discard_selection_handle(
 
 
 def _project_public_context(
-    context: Mapping[str, object], viewer_id: str | None
+    context: Mapping[str, object],
+    viewer_id: str | None,
+    visible_ids: frozenset[str] | None = None,
 ) -> dict[str, object]:
     """投影单步公开上下文，防止运行时私有选择状态旁路泄露。
 
     ``ActionContext`` 是权威重执行材料，不天然等于公开信息。弃牌阶段的
     ``discard_phase_selected_ids`` 是行动者仍在手牌中的实体 ID；对手或
-    旁观者只能知道选择进度，不能看到这些 ID。投影同时递归移除绑定隐藏
-    状态的摘要，随后由调用方对公开 context 重新计算 ``context_sha256``。
+    旁观者只能知道选择进度，不能看到这些 ID（2v2 同队队友可见，§2.4）。
+    投影同时递归移除绑定隐藏状态的摘要，随后由调用方对公开 context 重新
+    计算 ``context_sha256``。
     """
 
     projected = _redact_hidden_digests(context)
@@ -448,20 +477,51 @@ def _project_public_context(
         raise ProductionReplayFormatError("决策context必须是JSON对象")
     result = dict(projected)
     actor_id = str(result.get("actor_id", ""))
+    visible_set = frozenset(
+        ([viewer_id] if viewer_id is not None else [])
+        + (list(visible_ids or ()))
+    )
     metadata = result.get("metadata")
     if isinstance(metadata, Mapping):
         public_metadata = dict(metadata)
         selected = public_metadata.get("discard_phase_selected_ids")
-        if viewer_id != actor_id and isinstance(selected, (list, tuple)):
+        if actor_id not in visible_set and isinstance(selected, (list, tuple)):
             public_metadata.pop("discard_phase_selected_ids", None)
             public_metadata["discard_phase_selected_count"] = len(selected)
         result["metadata"] = public_metadata
     return result
 
 
+def _teams_from_record(value: Mapping[str, object]) -> Mapping[str, str] | None:
+    """从权威回放一等输入读取正式2v2队伍映射（POST-B C3）。
+
+    队伍映射是初始化输入，可见性策略不按座次奇偶推导；非2v2记录或结构
+    非法返回 None（调用方按单人视图处理）。
+    """
+    header = value.get("header")
+    if not isinstance(header, Mapping):
+        return None
+    if header.get("mode_id") != FORMAL_NO_SKILL_2V2_MODE:
+        return None
+    config = header.get("initial_configuration")
+    if not isinstance(config, Mapping):
+        return None
+    teams = config.get("teams")
+    if not isinstance(teams, Mapping):
+        return None
+    result: dict[str, str] = {}
+    for key, item in teams.items():
+        if isinstance(key, str) and isinstance(item, str):
+            result[key] = item
+    if len(result) != 4 or set(result.values()) != {"team_a", "team_b"}:
+        return None
+    return result
+
+
 def _project_public_events(
     events: Sequence[Mapping[str, object]],
     viewer_id: str | None,
+    visible_ids: frozenset[str] | None = None,
 ) -> tuple[dict[str, object], ...]:
     """按观察者身份投影公开事件流（CP-04L 审计修复 B1）。
 
@@ -475,6 +535,8 @@ def _project_public_events(
     （initial_hand／draw_phase／tiesuo_recast／无中生有等），其牌面实体
     信息默认只对获得者本人可见；对手与公共视图只见获得数量、recipient
     与 reason。公开区域（REVEALED／装备区等）进入手牌保持公开。
+
+    POST-B C3：2v2 队友可见（§2.4）由 ``visible_ids`` 扩展可见集合。
     """
 
     hidden_draw_recipients: dict[str, str] = {}
@@ -513,14 +575,17 @@ def _project_public_events(
         return False
 
     def _redact_for_viewer(event: Mapping[str, object]) -> dict[str, object]:
-        redacted = _redact_private_hand_event(event, viewer_id)
+        redacted = _redact_private_hand_event(event, viewer_id, visible_ids)
         if redacted.get("event_type") == "card_gained":
             instance_id = redacted.get("card_instance_id")
             recipient = (redacted.get("target_ids") or [None])[0]
             if (
                 instance_id in hidden_draw_recipients
                 and hidden_draw_recipients[instance_id] == recipient
-                and recipient != viewer_id
+                and recipient not in frozenset(
+                    ([viewer_id] if viewer_id is not None else [])
+                    + (list(visible_ids or ()))
+                )
             ):
                 redacted = dict(redacted)
                 redacted["card_instance_id"] = None
@@ -757,10 +822,7 @@ class ProductionReexecutionReplay:
 
         if header["schema_version"] != REEXECUTION_SCHEMA:
             raise ProductionReplayFormatError("不支持的规则重执行回放schema")
-        if header["mode_id"] not in {
-            PRODUCTION_BASIC_CARDS_MODE,
-            FORMAL_NO_SKILL_DUEL_MODE,
-        }:
+        if header["mode_id"] not in SUPPORTED_REPLAY_MODES:
             raise ProductionReplayFormatError(
                 "规则重执行回放模式不属于可信生产模式白名单"
             )
@@ -769,13 +831,16 @@ class ProductionReexecutionReplay:
                 "生产基本牌批次回放必须标记test_only=false"
             )
         if header["formal_result"] is not False:
-            # Milestone B 正式 release 后，正式单挑回放允许 formal_result=true；
-            # 防伪要求：仅正式单挑模式，且 initial_configuration 必须绑定
+            # 正式 release 后，正式单挑与正式2v2回放允许 formal_result=true；
+            # 防伪要求：仅这两种正式模式，且 initial_configuration 必须绑定
             # 项目 canonical formal profile 且 analysis_only=false（在下方
-            # 正式单挑配置解析中继续校验）。
-            if header["mode_id"] != FORMAL_NO_SKILL_DUEL_MODE:
+            # 正式配置解析中继续校验）。
+            if header["mode_id"] not in {
+                FORMAL_NO_SKILL_DUEL_MODE,
+                FORMAL_NO_SKILL_2V2_MODE,
+            }:
                 raise ProductionReplayFormatError(
-                    "正式结果只能出现在正式单挑模式回放中"
+                    "正式结果只能出现在正式单挑或正式2v2模式回放中"
                 )
         if header["production_basic_cards_batch"] is not True:
             raise ProductionReplayFormatError(
@@ -815,6 +880,56 @@ class ProductionReexecutionReplay:
                 if canonical_replay_config is None:
                     raise ProductionReplayFormatError(
                         "正式结果回放必须绑定项目canonical formal profile"
+                    )
+        elif header["mode_id"] == FORMAL_NO_SKILL_2V2_MODE:
+            _require_exact_fields(
+                initial_configuration,
+                _FORMAL_2V2_INITIAL_CONFIGURATION_FIELDS,
+                "正式2v2 initial_configuration",
+            )
+            if not isinstance(initial_configuration["analysis_only"], bool):
+                raise ProductionReplayFormatError(
+                    "正式2v2 initial_configuration.analysis_only必须是布尔值"
+                )
+            raw_teams = initial_configuration["teams"]
+            if (
+                not isinstance(raw_teams, Mapping)
+                or len(raw_teams) != 4
+                or any(
+                    not isinstance(key, str) or not isinstance(value, str)
+                    for key, value in raw_teams.items()
+                )
+            ):
+                raise ProductionReplayFormatError(
+                    "正式2v2 initial_configuration.teams必须是4项角色→队伍映射"
+                )
+            if header["formal_result"] is not False:
+                if initial_configuration["analysis_only"] is not False:
+                    raise ProductionReplayFormatError(
+                        "正式结果回放禁止analysis_only"
+                    )
+                from .mode_2v2 import Formal2v2Configuration
+
+                raw_config = initial_configuration.get(
+                    "formal_2v2_configuration"
+                )
+                try:
+                    canonical_replay_config = (
+                        Formal2v2Configuration.from_canonical_profile_value(
+                            raw_config
+                        )
+                    )
+                except Exception:
+                    canonical_replay_config = None
+                if canonical_replay_config is None:
+                    raise ProductionReplayFormatError(
+                        "正式结果回放必须绑定项目canonical formal profile"
+                    )
+                if dict(raw_teams) != dict(
+                    canonical_replay_config.teams_by_player()
+                ):
+                    raise ProductionReplayFormatError(
+                        "正式2v2回放的队伍映射与canonical profile不一致"
                     )
         else:
             _require_exact_fields(
@@ -978,6 +1093,23 @@ class ProductionReexecutionReplay:
                 )
 
         value = self._material_dict()
+        # POST-B C3：2v2 队友可见（§2.4 当前确认）——可见集合=观察者∪同队
+        # 队友；队伍映射来自回放一等输入 initial_configuration.teams。
+        visible_hand_ids: frozenset[str] = frozenset()
+        if viewer_id is not None:
+            teams = _teams_from_record(value)
+            if teams is not None and viewer_id in teams:
+                team = teams[viewer_id]
+                visible_hand_ids = frozenset(
+                    {
+                        viewer_id,
+                        *(
+                            player_id
+                            for player_id, player_team in teams.items()
+                            if player_team == team
+                        ),
+                    }
+                )
         del value["authoritative_private"]
         header = dict(_plain(value["header"]))
         for key in ("seed", "initial_rng_state", "initial_rng_state_sha256"):
@@ -989,7 +1121,7 @@ class ProductionReexecutionReplay:
         value["random_consumptions"] = []
         value["random_consumption_count"] = len(self.random_consumptions)
         value["events"] = list(
-            _project_public_events(value["events"], viewer_id)
+            _project_public_events(value["events"], viewer_id, visible_hand_ids)
         )
         # 哈希旁路防护：权威事件哈希链与权威状态/执行哈希绑定未脱敏材料，
         # 小候选空间（如两张牌重洗的两种排列）可被穷举恢复，必须从公开
@@ -1018,13 +1150,19 @@ class ProductionReexecutionReplay:
             raw_context = decision.get("context", {})
             if not isinstance(raw_context, Mapping):
                 raise ProductionReplayFormatError("决策context必须是JSON对象")
-            public_context = _project_public_context(raw_context, viewer_id)
+            public_context = _project_public_context(
+                raw_context, viewer_id, visible_hand_ids
+            )
             redacted_decision["context"] = public_context
             # 原 context_sha256 绑定权威 context（可能包含隐藏手牌实体ID），
             # 不能保留；公开视图只发布脱敏 context 的独立哈希。
             redacted_decision["context_sha256"] = sha256_value(public_context)
             actor_id = str(raw_context.get("actor_id", ""))
-            if viewer_id == actor_id:
+            actor_visible_set = frozenset(
+                ([viewer_id] if viewer_id is not None else [])
+                + (list(visible_hand_ids))
+            )
+            if actor_id in actor_visible_set:
                 # 行动者本人视图：保留本人当时的合法动作，但递归移除
                 # 全部权威状态摘要（B1-a）并稳定排序（不保留手牌区域
                 # 顺序）；本人动作负载中其他角色的隐藏句柄等仍按项目
@@ -1132,7 +1270,7 @@ class ProductionReexecutionReplay:
 @dataclass(frozen=True, slots=True)
 class ProductionReplayVerificationResult:
     verified: bool
-    winner_id: str
+    winner_id: str | None  # POST-B C3：2v2 平局终局为 None
     decision_count: int
     random_consumption_count: int
     event_count: int
@@ -1169,13 +1307,11 @@ def record_reference_production_batch(
     else:
         if not isinstance(_game, ProductionBasicCardBatch):
             raise TypeError("内部生产回放工厂必须返回ProductionBasicCardBatch")
-        if _game.mode_id not in {
-            PRODUCTION_BASIC_CARDS_MODE,
-            FORMAL_NO_SKILL_DUEL_MODE,
-        }:
+        if _game.mode_id not in SUPPORTED_REPLAY_MODES:
             raise ProductionReplayFormatError("内部生产回放模式不在可信白名单")
         game = _game
     formal_game = game.mode_id == FORMAL_NO_SKILL_DUEL_MODE
+    two_vs_two_game = game.mode_id == FORMAL_NO_SKILL_2V2_MODE
     if formal_game:
         from .formal_duel import FormalNoSkillDuelSession
 
@@ -1183,9 +1319,20 @@ def record_reference_production_batch(
             raise ProductionReplayFormatError(
                 "正式单挑回放必须来自canonical FormalNoSkillDuelSession"
             )
+    if two_vs_two_game:
+        from .mode_2v2 import Formal2v2Session
+
+        if type(game) is not Formal2v2Session:
+            raise ProductionReplayFormatError(
+                "正式2v2回放必须来自canonical Formal2v2Session"
+            )
     if formal_game and fixture is not None:
         raise ProductionReplayFormatError(
             "正式单挑回放禁止夹具；必须从canonical配置自然初始化"
+        )
+    if two_vs_two_game and fixture is not None:
+        raise ProductionReplayFormatError(
+            "正式2v2回放禁止夹具；必须从canonical配置自然初始化"
         )
     if fixture is not None:
         # 测试与编排专用：在初始装配后、任何决策前应用确定性夹具；
@@ -1214,6 +1361,22 @@ def record_reference_production_batch(
             "analysis_only": bool(getattr(game, "analysis_only", True)),
             "max_steps": max_steps,
         }
+    elif two_vs_two_game:
+        formal_configuration = getattr(game, "formal_configuration", None)
+        if formal_configuration is None or not hasattr(
+            formal_configuration, "to_dict"
+        ):
+            raise ProductionReplayFormatError(
+                "正式2v2会话缺少可重建的Formal2v2Configuration"
+            )
+        # POST-B C3：队伍映射显式序列化（初始化后固定），不按座次奇偶
+        # 在重执行时推导；重执行时与配置重建值逐项比对（篡改失败关闭）。
+        initial_configuration = {
+            "formal_2v2_configuration": formal_configuration.to_dict(),
+            "teams": dict(formal_configuration.teams_by_player()),
+            "analysis_only": bool(getattr(game, "analysis_only", True)),
+            "max_steps": max_steps,
+        }
     else:
         initial_configuration = {
             "deck_path": str(deck_path),
@@ -1238,7 +1401,9 @@ def record_reference_production_batch(
         "mode_id": game.mode_id,
         "test_only": False,
         "formal_result": (
-            game.formal_result_eligible if formal_game else False
+            game.formal_result_eligible
+            if (formal_game or two_vs_two_game)
+            else False
         ),
         "production_basic_cards_batch": True,
         "ruleset_version": ruleset["ruleset_version"],
@@ -1297,15 +1462,22 @@ def record_reference_production_batch(
             }
         )
 
-    assert game.winner_id is not None
+    if game.winner_id is None and game._runtime.game_over_reason is None:
+        raise ProductionReplayFormatError(
+            "对局必须以胜者或正式平局终局结束；禁止截断收尾"
+        )
     game.assert_finished_state_invariants()
     event_values = tuple(_event_values(game))
     outcome = {
         "winner_id": game.winner_id,
         "finish_reason": (
-            game.outcome_policy.finish_reason
-            if game.outcome_policy is not None
-            else "opponent_confirmed_dead"
+            game._runtime.game_over_reason
+            if game._runtime.game_over_reason is not None
+            else (
+                game.outcome_policy.finish_reason
+                if game.outcome_policy is not None
+                else "opponent_confirmed_dead"
+            )
         ),
         "step_count": game.step_count,
         "turn_count": game._runtime.turn_number,
@@ -1362,6 +1534,44 @@ def record_reference_formal_duel(
     return record_reference_production_batch(
         seed,
         controller=controller or FormalDuelReferenceController(),
+        max_steps=max_steps,
+        _game=game,
+    )
+
+
+def record_reference_formal_2v2(
+    seed: int,
+    *,
+    configuration: object,
+    analysis_only: bool = True,
+    controller: Any | None = None,
+    max_steps: int = 2000,
+) -> ProductionReexecutionReplay:
+    """从可信 formal 2v2 factory 录制同一生产核心的严格规则重执行回放。
+
+    不接受牌堆路径、洗牌开关或夹具；canonical profile 与正式执行哨兵由
+    Formal2v2Session 边界校验。analysis_only=false 时只接受 trusted
+    canonical profile，终局允许队伍胜（team_a/team_b）或牌堆耗尽平局
+    （winner=None + 2v2_draw_deck_exhausted）。
+    """
+
+    from .mode_2v2 import (
+        Formal2v2Configuration,
+        Formal2v2Session,
+    )
+
+    if not isinstance(configuration, Formal2v2Configuration):
+        raise TypeError("正式2v2回放必须接收Formal2v2Configuration")
+    if not isinstance(analysis_only, bool):
+        raise TypeError("analysis_only必须是布尔值")
+    game = Formal2v2Session(
+        seed=seed,
+        configuration=configuration,
+        analysis_only=analysis_only,
+    )
+    return record_reference_production_batch(
+        seed,
+        controller=controller or BatchReferenceController(),
         max_steps=max_steps,
         _game=game,
     )
@@ -1528,11 +1738,59 @@ def reexecute_production_replay(
             session_id=session_id,
             session_secret=session_secret,
         )
+    elif mode_id == FORMAL_NO_SKILL_2V2_MODE:
+        from .mode_2v2 import Formal2v2Configuration, Formal2v2Session
+
+        if header.get("fixture_applied") is not False:
+            raise ProductionReplayFormatError("正式2v2回放不得包含初始化夹具")
+        formal_value = _require_mapping(
+            config.get("formal_2v2_configuration"),
+            "initial_configuration.formal_2v2_configuration",
+        )
+        analysis_only = config.get("analysis_only")
+        if not isinstance(analysis_only, bool):
+            raise ProductionReplayFormatError(
+                "正式2v2 initial_configuration.analysis_only必须是布尔值"
+            )
+        recorded_teams = _require_mapping(
+            config.get("teams"), "initial_configuration.teams"
+        )
+        if analysis_only:
+            # analysis-only 记录只重建分析约定配置，不授予可信来源；
+            # 会话以 analysis_only=True 运行，不产生正式结果。
+            formal_configuration = Formal2v2Configuration.from_dict(
+                formal_value
+            )
+        else:
+            # 正式记录必须与 canonical formal profile 逐字段一致；验证的
+            # 是 canonical 内容，而不是让 payload 自行获得 trusted
+            # provenance。
+            formal_configuration = (
+                Formal2v2Configuration.from_canonical_profile_value(
+                    formal_value
+                )
+            )
+        if dict(recorded_teams) != dict(
+            formal_configuration.teams_by_player()
+        ):
+            raise ProductionReplayFormatError(
+                "正式2v2回放的队伍映射与配置重建值不一致；失败关闭"
+            )
+        game = Formal2v2Session(
+            seed=int(header["seed"]),
+            configuration=formal_configuration,
+            analysis_only=analysis_only,
+            session_id=session_id,
+            session_secret=session_secret,
+        )
     else:  # ProductionReexecutionReplay 格式校验本应先拒绝该路径
         raise ProductionReplayFormatError("规则重执行模式不属于可信工厂白名单")
     _expect_equal("mode", None, mode_id, game.mode_id, "重建会话模式不一致")
-    if mode_id == FORMAL_NO_SKILL_DUEL_MODE and fixture is not None:
-        raise ProductionReplayFormatError("正式单挑规则重执行不得注入夹具")
+    if (
+        mode_id in {FORMAL_NO_SKILL_DUEL_MODE, FORMAL_NO_SKILL_2V2_MODE}
+        and fixture is not None
+    ):
+        raise ProductionReplayFormatError("正式模式规则重执行不得注入夹具")
     if header.get("fixture_applied") is True:
         if fixture is None:
             raise ProductionReplayFormatError(
@@ -1680,12 +1938,17 @@ def reexecute_production_replay(
     )
     outcome = record.outcome
     _expect_equal("winner", None, outcome["winner_id"], game.winner_id, "胜者不一致")
-    # POST-B C2：终局原因与已通过身份校验的 OutcomePolicy 产出值一致；
-    # 未注册策略（双人回退）保持历史值 opponent_confirmed_dead。
+    # POST-B C2/C3：终局原因与已通过身份校验的 OutcomePolicy 产出值一致；
+    # 未注册策略（双人回退）保持历史值 opponent_confirmed_dead；2v2 平局
+    # 使用策略 draw_finish_reason（game_over_reason），胜者ID为 None。
     expected_finish_reason = (
-        game.outcome_policy.finish_reason
-        if game.outcome_policy is not None
-        else "opponent_confirmed_dead"
+        game._runtime.game_over_reason
+        if game._runtime.game_over_reason is not None
+        else (
+            game.outcome_policy.finish_reason
+            if game.outcome_policy is not None
+            else "opponent_confirmed_dead"
+        )
     )
     _expect_equal(
         "outcome",
@@ -1717,7 +1980,12 @@ def reexecute_production_replay(
     _expect_equal(
         "state", None, outcome["final_game_state_hash"], _game_state_hash(game), "最终GameState哈希不一致"
     )
-    assert game.winner_id is not None
+    if game.winner_id is None and game._runtime.game_over_reason is None:
+        raise ProductionReplayDivergenceError(
+            "outcome",
+            None,
+            "重执行终局缺少胜者或正式平局原因",
+        )
     return ProductionReplayVerificationResult(
         verified=True,
         winner_id=game.winner_id,
@@ -1735,6 +2003,8 @@ __all__ = [
     "ProductionReplayFormatError",
     "ProductionReplayVerificationResult",
     "REEXECUTION_SCHEMA",
+    "SUPPORTED_REPLAY_MODES",
+    "record_reference_formal_2v2",
     "record_reference_formal_duel",
     "record_reference_production_batch",
     "reexecute_production_replay",

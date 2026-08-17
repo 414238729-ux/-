@@ -19,9 +19,16 @@ DISCARD／END）、正式弃牌阶段（手牌上限默认等于当前体力值�
 VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP；方天画戟：
 MULTIPLAYER/MULTI_TARGET_INFRASTRUCTURE_GAP）。通用 ``CharacterMetadata`` 与
 类型化 ``VirtualCardReference`` 已进入权威数据／动作模型；formal duel 的
-权威角色性别来源、丈八材料生命周期、武将技能、改判、多人模式、AI 和正式
+权威角色性别来源、丈八材料生命周期、武将技能、改判、AI 和正式
 整局验收仍未完成；调用
 ``AuthoritativeCoreSession.run_game`` 会明确抛出 ``UnsupportedRuleError``。
+
+POST-B C3 起：正式无武将技能 2v2 模式层（``mode_2v2``）接入同一生产
+核心——canonical profile（1+4 对 2+3、初始手牌 3/4/4/5、先手 1 号位、
+体力 4/4）、队伍胜负与牌堆耗尽平局 OutcomePolicy、死亡奖励摸牌、
+4 号位首轮“飞扬”窗口、no_reshuffle_draw 牌堆供给与严格回放
+（队伍映射一等输入、平局终局 winner=None）。它不是第二套引擎；斗地主、
+身份模式与武将技能仍在 C3 范围之外。
 """
 
 from .actions import (
@@ -172,6 +179,8 @@ from .production_replay import (
     ProductionReplayDivergenceError,
     ProductionReplayFormatError,
     ProductionReplayVerificationResult,
+    SUPPORTED_REPLAY_MODES,
+    record_reference_formal_2v2,
     record_reference_formal_duel,
     record_reference_production_batch,
     reexecute_production_replay,
@@ -194,6 +203,19 @@ from .formal_duel import (
     FormalNoSkillDuelSession,
     inspect_formal_duel_readiness,
     run_formal_duel_seed_sweep,
+)
+from .mode_2v2 import (
+    FORMAL_NO_SKILL_2V2_MODE,
+    Formal2v2Blocker,
+    Formal2v2Configuration,
+    Formal2v2ConfigurationError,
+    Formal2v2Readiness,
+    Formal2v2Session,
+    TrustedFormal2v2Configuration,
+    TwoVsTwoModePolicy,
+    TwoVsTwoOutcomePolicy,
+    assert_trusted_formal_2v2_configuration,
+    inspect_formal_2v2_readiness,
 )
 
 
@@ -306,7 +328,9 @@ __all__ = [
     "is_valid_slash_target",
     "record_reference_production_batch",
     "record_reference_formal_duel",
+    "record_reference_formal_2v2",
     "reexecute_production_replay",
+    "SUPPORTED_REPLAY_MODES",
     "PlayerTopology",
     "OutcomePolicy",
     "DuelOutcomePolicy",
@@ -346,4 +370,15 @@ __all__ = [
     "inspect_formal_duel_readiness",
     "run_formal_duel_seed_sweep",
     "ALLOWED_RULE_STATUS",
+    "FORMAL_NO_SKILL_2V2_MODE",
+    "Formal2v2Blocker",
+    "Formal2v2Configuration",
+    "Formal2v2ConfigurationError",
+    "Formal2v2Readiness",
+    "Formal2v2Session",
+    "TrustedFormal2v2Configuration",
+    "TwoVsTwoModePolicy",
+    "TwoVsTwoOutcomePolicy",
+    "assert_trusted_formal_2v2_configuration",
+    "inspect_formal_2v2_readiness",
 ]
