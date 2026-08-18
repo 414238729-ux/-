@@ -13,14 +13,13 @@ DISCARD／END）、正式弃牌阶段（手牌上限默认等于当前体力值�
 阶段）、判定牌生命周期、判定前无懈链和动态LIFO判定
 队列，以及四种防具（【八卦阵】、【仁王盾】、【藤甲】、【白银狮子】）与统一
 伤害修正／防止基础设施、两种坐骑与统一有效距离模型已接入生产注册表与权威
-核心调用路径；11种武器中9种完成通用生产语义（诸葛连弩、青釭剑、寒冰剑、
-古锭刀、青龙偃月刀、贯石斧、朱雀羽扇、麒麟弓、雌雄双股剑），2种保持
-全局PARTIAL并按集中式门禁失败关闭（丈八蛇矛：
-VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP；方天画戟：
-MULTIPLAYER/MULTI_TARGET_INFRASTRUCTURE_GAP）。通用 ``CharacterMetadata`` 与
-类型化 ``VirtualCardReference`` 已进入权威数据／动作模型；formal duel 的
-权威角色性别来源、丈八材料生命周期、武将技能、改判、AI 和正式
-整局验收仍未完成；调用
+核心调用路径；11种武器均已完成通用生产语义（诸葛连弩、青釭剑、寒冰剑、
+古锭刀、青龙偃月刀、贯石斧、朱雀羽扇、麒麟弓、雌雄双股剑、丈八蛇矛、
+方天画戟）。丈八材料生命周期为 HAND→PROCESSING→DISCARD
+（``VIRTUAL_CARD_SUBCARD_LIFECYCLE_RULE_GAP`` 已关闭）；方天画戟多人多目标
+语义已在 POST-B C2 闭合（酒强化+方天多目标组合仍失败关闭）。通用
+``CharacterMetadata`` 与类型化 ``VirtualCardReference`` 已进入权威数据／
+动作模型；武将技能、改判、AI 和正式整局验收仍未完成；调用
 ``AuthoritativeCoreSession.run_game`` 会明确抛出 ``UnsupportedRuleError``。
 
 POST-B C3 起：正式无武将技能 2v2 模式层（``mode_2v2``）接入同一生产

@@ -558,9 +558,11 @@ class Formal2v2Readiness:
     unsupported_rules: int
     approximation_count: int
     # 2v2 正式门禁：静态执行资格（canonical factory 可达 + 卡牌语义
-    # 复用 C2 全局闭合 + 严格回放支持 + 无未支持规则近似）。True 只
-    # 表示“可以开始正式执行”，不代表完成 fixed-seed 验收，也不包含
-    # 客户端30分钟墙钟/评分裁定（CONFIRMED_OUT_OF_SIMULATION_SCOPE）。
+    # 复用 C2 全局闭合 + 严格回放支持）。unsupported_rules 由现场
+    # blocker 计数派生，不得硬编码 0 自我证明。True 只表示“可以开始
+    # 正式执行”，不代表 §2.11 全部 sibling 路径已由本函数证明；那些
+    # 路径由 production regression tests 作为证据。也不包含客户端
+    # 30分钟墙钟/评分裁定（CONFIRMED_OUT_OF_SIMULATION_SCOPE）。
     formal_2v2_no_skill_ready: bool
     # 兼容轨命名：2v2_ready == formal_2v2_no_skill_ready（同一门禁）。
     ready_2v2: bool
@@ -601,8 +603,11 @@ def inspect_formal_2v2_readiness() -> Formal2v2Readiness:
 
     ``2v2_ready`` 的精确定义：现场 canonical 会话可达 + 160 张正式牌堆 +
     4 名角色座次/队伍/初始手牌/先手符合 canonical profile + 卡牌语义
-    复用 C2 全局闭合（38/38）+ 严格回放支持正式2v2模式 + 无未支持规则
-    近似。绝不包含客户端30分钟墙钟/评分裁定（§2.12）。
+    复用 C2 全局闭合（38/38）+ 严格回放支持正式2v2模式 + 现场 blocker
+    派生的 unsupported/approximation 为 0。它是静态执行资格，不是
+    §2.11 平局 sibling 路径的自我证明；那些路径由
+    ``tests/test_post_b_c3_2v2_draw_remediation.py`` 等 production
+    regression 作为证据。绝不包含客户端30分钟墙钟/评分裁定（§2.12）。
     """
     from .production_batch import ProductionPhase
     from .production_cards import FormalCardRegistry
@@ -688,12 +693,14 @@ def inspect_formal_2v2_readiness() -> Formal2v2Readiness:
                 "严格回放不支持正式2v2模式（含平局终局与队伍映射）",
             )
         )
-    unsupported_rules = 0
+    # 由现场 blocker 派生，禁止硬编码 0 当作“规则已全部正确”的证明。
+    unsupported_rules = len(blockers)
     approximation_count = 0
     mode_implemented = mode_runtime_reachable and not blockers
     ready = (
         mode_implemented
         and replay_supported
+        and global_card_semantics_complete
         and unsupported_rules == 0
         and approximation_count == 0
     )

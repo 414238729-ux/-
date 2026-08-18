@@ -269,27 +269,49 @@ C3 停止后不自动开始斗地主（§3 模式规则保持 Knowledge-only）�
   队伍映射来自回放一等输入）。
 - 正式门禁 `inspect_formal_2v2_readiness()`：`2v2_ready =
   formal_2v2_no_skill_ready`（canonical factory 可达 + 38/38 卡牌语义
-  复用 + 严格回放支持 + unsupported/approximation=0）；`client_timeout_
-  score_adjudication` 恒 false（§2.12）。`multi_player_production_proven`
-  与 `authoritative_full_game_core` 保持 false（比“正式2v2已验收”更宽的
+  复用 + 严格回放支持）；`unsupported_rules` 由现场 blocker 计数派生，
+  不得硬编码 0 自我证明。`2v2_ready` 只是静态执行资格，不是 §2.11
+  sibling 路径的自证；那些路径由
+  `tests/test_post_b_c3_2v2_draw_remediation.py` 等 production
+  regression 作为证据。`client_timeout_score_adjudication` 恒 false
+  （§2.12）。`multi_player_production_proven` 与
+  `authoritative_full_game_core` 保持 false（比“正式2v2已验收”更宽的
   总声明，本轨不置 true）。
 
-**专项测试**（新增 `tests/test_post_b_c3_2v2_mode.py` 30 项、
-`test_post_b_c3_2v2_replay.py` 8 项、`test_post_b_c3_2v2_visibility.py`
-8 项）：canonical profile/队伍/座次/初始化/回合循环、顺序死亡队伍胜负、
-濒死救援、死亡奖励与单体/群体/传导/当前回合角色死亡的继续路径、飞扬
-窗口全边界、队伍目标合法性、平局（足量/不足两种原子口径）、20 种子
-自然结束+严格重执行、跨会话秘密确定性、safety cap 失败语义、回放
-队伍胜/平局往返与篡改失败关闭、队友可见性。
+**C123 平局 remediation**（实现完成，未独立复审，不做 commit）：
+
+- RC-1：`_finish_game_as_draw` 对 REVEALED 改走
+  `_discard_revealed_zone`（既有 revealed-pool 语义），PROCESSING
+  仍走 `_finish_processing`。区域清理成功后才登记事件。
+- RC-2：胜利与平局共用 `cleanup_finished_transient_runtime()`，由
+  `FINISHED_TRANSIENT_RUNTIME_FIELDS` + `_BatchRuntime` 字段默认值
+  驱动；平局不再用 `_return_to_play` 冒充终局清场。
+- RC-3：`ProductionBatchResult.winner_id: str | None`，并新增
+  `finish_reason`。`run()` 不再因 `winner is None` assert；正式平局
+  仅在 OutcomePolicy 声明 `draw_finish_reason` 时合法。二人单挑仍
+  必须有胜者。
+- C123-004：readiness/status/`__init__.py` 丈八/方天陈旧 PARTIAL
+  文字与真实 C2 COMPLETE 状态对齐。
+
+**专项测试**（`tests/test_post_b_c3_2v2_mode.py`、
+`test_post_b_c3_2v2_replay.py`、`test_post_b_c3_2v2_visibility.py`、
+新增 `test_post_b_c3_2v2_draw_remediation.py`）：canonical profile/
+队伍/座次/初始化/回合循环、顺序死亡队伍胜负、濒死救援、死亡奖励与
+单体/群体/传导/当前回合角色死亡的继续路径、飞扬窗口全边界、队伍
+目标合法性、平局（摸牌/五谷/判定/无中/重铸/死亡奖励/八卦的不足与
+恰好耗尽）、`run()` 正式平局返回、FINISHED transient inventory
+防漂移、复杂平局 record/reexecute 往返、20 种子自然结束+严格
+重执行、跨会话秘密确定性、safety cap 失败语义、回放队伍胜/平局
+往返与篡改失败关闭、队友可见性。
 
 **固定种子**：20 种子（pytest 内，全严格重执行）+ 50 种子独立扫查
 （seed 20–69）：全部自然结束（队伍全灭胜负，`team_eliminated`）、
 unsupported=0、无安全上限触发、严格重执行逐决策验证一致、合法队伍胜者。
 
 **实现身份**：C3_IMPLEMENTATION_IDENTITY =
-`b94d1190e606250a0335bc41a957216443202e5ccee8cd6fb78deb0a5a72297b`
-（冻结 R8 证据 `06c8b2d3…` 仍是历史证据，未被改写；C1/C2 测试语义
-修正后随轨更新当前身份 pin）。
+`620e2a81be4433507e4e076da9f460a8f24fee74488502d1737f998823f2c0a8`
+（冻结 R8 证据 `06c8b2d3…` 仍是历史证据，未被改写；C123 remediation
+后随轨更新当前身份 pin）。未独立复审，不得称为 independently audited。
 
 **formal duel 防回归**：seed 0 → p2/388/43、seed 7 → p2/162/17
 （与 R5/R8 记录一致；全量套件覆盖）。

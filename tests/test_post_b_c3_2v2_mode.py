@@ -655,6 +655,8 @@ def test_formal_2v2_gate_ready() -> None:
     assert readiness.mode_runtime_reachable is True
     assert readiness.global_card_semantics_complete is True
     assert readiness.reexecution_replay_supported is True
+    # unsupported_rules 必须由现场 blocker 派生，不能硬编码自证。
+    assert readiness.unsupported_rules == len(readiness.blockers)
     assert readiness.unsupported_rules == 0
     assert readiness.approximation_count == 0
     assert readiness.formal_2v2_no_skill_ready is True
@@ -664,6 +666,8 @@ def test_formal_2v2_gate_ready() -> None:
     assert readiness.blockers == ()
     payload = readiness.to_dict()
     assert payload["2v2_ready"] is True
+    # 2v2_ready 只是静态执行资格；§2.11 sibling 路径证据见
+    # tests/test_post_b_c3_2v2_draw_remediation.py。
 
 
 # ----------------------------------------------------------------------

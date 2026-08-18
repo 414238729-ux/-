@@ -18,7 +18,7 @@ LegalAction、单一 DeterministicRNG 与状态哈希）之上，为六种基本
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import MISSING, dataclass, fields, replace
 from enum import Enum
 import hashlib
 import hmac
@@ -513,8 +513,9 @@ class _PendingHanbingDiscard:
 # FINISHED 时必须是空/默认值（B 类 transient/pending）。A 类永久/历史
 # 字段（current_player_id、turn_number、phase、slash_used_counts、
 # judgment_entry_indices、judgment_entry_counter）允许存在；winner_id
-# 必须非空。assert_finished_state_invariants 与终局清理都基于本清单，
-# 新增 transient 字段必须同步登记，避免 invariant 成为垃圾隐藏器。
+# 或正式平局 game_over_reason 必须能区分终局。assert_finished_state_invariants
+# 与终局清理都基于本清单，禁止再维护第二份手工字段列表。新增
+# transient 字段必须同步登记并带字段默认值，避免 invariant 成为垃圾隐藏器。
 FINISHED_TRANSIENT_RUNTIME_FIELDS: frozenset[str] = frozenset({
     "pending_judgment",
     "skipped_phases",
@@ -1082,6 +1083,39 @@ class _BatchRuntime:
             "parent": parent,
             "session_id": chain.session_id,
         }
+
+
+def finished_transient_cleanup_values() -> dict[str, object]:
+    """由 ``FINISHED_TRANSIENT_RUNTIME_FIELDS`` 与字段默认值驱动的清场映射。
+
+    胜利与平局终局必须共用这一份映射；不得再手写第二份字段清单。
+    """
+
+    runtime_fields = {item.name: item for item in fields(_BatchRuntime)}
+    values: dict[str, object] = {}
+    missing: list[str] = []
+    for name in sorted(FINISHED_TRANSIENT_RUNTIME_FIELDS):
+        field = runtime_fields.get(name)
+        if field is None:
+            missing.append(name)
+            continue
+        if field.default is not MISSING:
+            values[name] = field.default
+        elif field.default_factory is not MISSING:
+            values[name] = field.default_factory()
+        else:
+            missing.append(name)
+    if missing:
+        raise ProductionBatchError(
+            "FINISHED transient 清理缺少字段默认值：" + "、".join(missing)
+        )
+    return values
+
+
+def cleanup_finished_transient_runtime(runtime: _BatchRuntime) -> _BatchRuntime:
+    """清空 FINISHED transient 全集，不改写 A 类永久字段。"""
+
+    return replace(runtime, **finished_transient_cleanup_values())
 
 
 def _zone_payload(zone: ZoneRef) -> dict[str, object]:
@@ -2376,15 +2410,20 @@ class _BatchRuleAdapter(RuleAdapter):
 
 @dataclass(frozen=True, slots=True)
 class ProductionBatchResult:
-    """生产批处理会话运行结束后的只读结果。"""
+    """生产批处理会话运行结束后的只读结果。
 
-    winner_id: str
+    ``winner_id`` 在正式平局时为 ``None``；此时 ``finish_reason`` 必须是
+    模式策略声明的平局原因（2v2 为 ``2v2_draw_deck_exhausted``）。
+    """
+
+    winner_id: str | None
     step_count: int
     turn_count: int
     final_state: GameState
     events: tuple[GameEvent, ...]
     rng_calls: tuple[RNGCall, ...]
     phase_history: tuple[BatchPhaseEntry, ...]
+    finish_reason: str
 
 class ProductionBasicCardBatch:
     """正式160张牌堆上六种基本牌的生产批处理会话。
@@ -3126,9 +3165,9 @@ class ProductionBasicCardBatch:
         FINISHED 时必须：PROCESSING/REVEALED 临时区为空、所有挂起根、
         响应窗口、濒死与虚拟材料状态均已清理；不允许任何临时 root 悬空。
         检查基于 ``FINISHED_TRANSIENT_RUNTIME_FIELDS`` 完整 inventory
-        （B 类 transient/pending 必须为空），A 类永久字段允许存在，
-        winner_id 必须非空。新增 transient 字段必须登记进 inventory，
-        否则 invariant 会成为垃圾隐藏器。
+        （B 类 transient/pending 必须为空），A 类永久字段允许存在；
+        必须有胜者，或具备模式策略允许的正式平局原因。新增 transient
+        字段必须登记进 inventory，否则 invariant 会成为垃圾隐藏器。
         """
 
         state = self._state
@@ -3202,7 +3241,7 @@ class ProductionBasicCardBatch:
                 f"生产批处理会话在{max_steps}个动作后仍未结束；"
                 "禁止静默判胜或近似收尾"
             )
-        assert self.winner_id is not None
+        finish_reason = self._resolve_public_finish_reason()
         return ProductionBatchResult(
             winner_id=self.winner_id,
             step_count=self.step_count,
@@ -3211,7 +3250,42 @@ class ProductionBasicCardBatch:
             events=self.events,
             rng_calls=self.rng_calls,
             phase_history=self.phase_history,
+            finish_reason=finish_reason,
         )
+
+    def _allowed_draw_finish_reason(self) -> str | None:
+        """模式策略声明的正式平局原因；None 表示该模式不允许平局。"""
+
+        policy = self._outcome_policy
+        if policy is None:
+            return None
+        reason = policy.draw_finish_reason
+        if not isinstance(reason, str) or not reason:
+            return None
+        return reason
+
+    def _resolve_public_finish_reason(self) -> str:
+        """把会话终局翻译为 ``ProductionBatchResult.finish_reason``。
+
+        二人单挑与未声明平局的策略仍要求必须有胜者；只有 OutcomePolicy
+        明确给出 ``draw_finish_reason`` 时，``winner_id is None`` 才是
+        合法公共结果。
+        """
+
+        winner_id = self.winner_id
+        runtime_reason = self._runtime.game_over_reason
+        allowed_draw = self._allowed_draw_finish_reason()
+        if winner_id is None:
+            if allowed_draw is None or runtime_reason != allowed_draw:
+                raise ProductionBatchError(
+                    "当前模式终局必须有胜者；正式平局仅在模式策略明确允许时成立"
+                )
+            return runtime_reason
+        if runtime_reason is not None:
+            return runtime_reason
+        if self._outcome_policy is not None:
+            return self._outcome_policy.finish_reason
+        return "opponent_confirmed_dead"
 
     @property
     def execution_snapshot(self) -> dict[str, object]:
@@ -4447,6 +4521,13 @@ class ProductionBasicCardBatch:
             )
 
     def _return_to_play(self, runtime: _BatchRuntime) -> _BatchRuntime:
+        """根结算结束后回到出牌阶段。
+
+        这不是 FINISHED 清场 primitive：故意保留酒强化、判定挂起等出牌
+        阶段仍有效的 transient。胜利与平局终局必须走
+        ``cleanup_finished_transient_runtime``。
+        """
+
         return replace(
             runtime,
             phase=ProductionPhase.PLAY,
@@ -11340,6 +11421,46 @@ class ProductionBasicCardBatch:
             next_state, runtime, group, target_id
         )
 
+    def _discard_revealed_zone(
+        self,
+        state: GameState,
+        *,
+        reason: str,
+        card_user: str | None = None,
+        extra: Mapping[str, object] | None = None,
+    ) -> tuple[GameState, tuple[GameEvent, ...]]:
+        """把 REVEALED 区实体按权威顺序统一置入弃牌堆。
+
+        这是 REVEALED 的区域清理 primitive；不得对 REVEALED 调用
+        ``_finish_processing``。
+        """
+
+        pool = tuple(state.card_ids_in(REVEALED_ZONE))
+        if not pool:
+            return state, ()
+        next_state = state.move_cards(
+            {instance_id: DISCARD_PILE for instance_id in pool}
+        )
+        events: list[GameEvent] = []
+        for instance_id in pool:
+            payload: dict[str, object] = {
+                "source": _zone_payload(REVEALED_ZONE),
+                "destination": _zone_payload(DISCARD_PILE),
+                "reason": reason,
+            }
+            if extra is not None:
+                payload.update(dict(extra))
+            events.append(
+                GameEvent(
+                    event_type=EventType.CARD_MOVED,
+                    card_instance_id=instance_id,
+                    card_key=_card_key(next_state, instance_id),
+                    card_user=card_user,
+                    payload=payload,
+                )
+            )
+        return next_state, tuple(events)
+
     def _discard_revealed_pool(
         self,
         state: GameState,
@@ -11349,28 +11470,12 @@ class ProductionBasicCardBatch:
     ) -> tuple[GameState, tuple[GameEvent, ...]]:
         """把公共展示池剩余实体按权威顺序统一置入弃牌堆。"""
 
-        pool = tuple(state.card_ids_in(REVEALED_ZONE))
-        if not pool:
-            return state, ()
-        next_state = state.move_cards(
-            {instance_id: DISCARD_PILE for instance_id in pool}
+        return self._discard_revealed_zone(
+            state,
+            reason=reason,
+            card_user=wugu.user_id,
+            extra={"root_trick_instance_id": wugu.trick_instance_id},
         )
-        events = tuple(
-            GameEvent(
-                event_type=EventType.CARD_MOVED,
-                card_instance_id=instance_id,
-                card_key=_card_key(next_state, instance_id),
-                card_user=wugu.user_id,
-                payload={
-                    "source": _zone_payload(REVEALED_ZONE),
-                    "destination": _zone_payload(DISCARD_PILE),
-                    "reason": reason,
-                    "root_trick_instance_id": wugu.trick_instance_id,
-                },
-            )
-            for instance_id in pool
-        )
-        return next_state, events
 
     def _reveal_cards(
         self,
@@ -13219,71 +13324,10 @@ class ProductionBasicCardBatch:
             )
         self._events.extend(final_events)
         next_runtime = replace(
-            runtime,
+            cleanup_finished_transient_runtime(runtime),
             phase=ProductionPhase.FINISHED,
             winner_id=winner,
-            pending_slash=None,
-            pending_dying_id=None,
-            rescue_order=(),
-            rescue_index=0,
-            rescue_decision_count=0,
-            response_window_id=None,
-            response_window_order=(),
-            response_window_source_sequence=None,
-            pending_zone_choice=None,
-            zone_choice_handles=MappingProxyType({}),
-            pending_duel=None,
-            pending_fire_attack=None,
-            fire_attack_reveal_handles=MappingProxyType({}),
-            pending_group_trick=None,
-            group_response_handles=MappingProxyType({}),
-            group_response_snapshot_digest=None,
-            pending_wugu=None,
-            pending_borrowed_sword=None,
-            borrowed_sword_slash_handles=MappingProxyType({}),
-            borrowed_sword_slash_snapshot_digest=None,
-            pending_damage_card_id=None,
-            pending_damage_source_id=None,
-            pending_damage_kill_credit=None,
-            pending_chain=None,
-            pending_judgment=None,
-            processed_judgment_instance_ids=(),
             judgment_entry_indices=judgment_entry_indices_after_death,
-            skipped_phases=MappingProxyType({}),
-            phase_skip_reasons=MappingProxyType({}),
-            defer_damage_card_finish=False,
-            discard_phase_window_id=None,
-            discard_phase_selected_ids=(),
-            discard_phase_handles=MappingProxyType({}),
-            discard_phase_snapshot_digest=None,
-            pending_cixiong_choice=None,
-            pending_weapon_choice=None,
-            pending_slash_choice=None,
-            pending_discard_two=None,
-            pending_hanbing_discard=None,
-            damage_card_already_finished=False,
-            # MB-M-008：终局清理必须覆盖 FINISHED_TRANSIENT_RUNTIME_FIELDS 全部
-            # B 类字段；以下为独立复审在 seed 3 观察到的漏清字段。
-            pending_trick=None,
-            trick_effect_active=False,
-            trick_consecutive_passes=0,
-            trick_response_order=(),
-            trick_response_index=0,
-            trick_decision_count=0,
-            trick_direct_response_to=None,
-            zone_choice_snapshot_digest=None,
-            pending_damage_rescue_reason=None,
-            pending_damage_death_reason=None,
-            bagua_attempted=False,
-            wine_buff_owner_id=None,
-            wine_buff_used_this_play_phase=False,
-            # POST-B C3：终局必须覆盖 FINISHED_TRANSIENT_RUNTIME_FIELDS
-            # 中的飞扬窗口/决策痕迹字段。
-            feiyang_window_id=None,
-            feiyang_handles=MappingProxyType({}),
-            feiyang_snapshot_digest=None,
-            feiyang_selected_ids=(),
-            feiyang_judgment_choice=None,
         )
         self._commit_runtime(runtime, next_runtime)
         return next_state
@@ -15100,9 +15144,12 @@ class ProductionBasicCardBatch:
     ) -> tuple[GameState, _BatchRuntime]:
         """POST-B C3：正式平局终局（牌堆耗尽，winner=None）。
 
-        清理所有挂起根与临时区（PROCESSING/REVEALED 按区域顺序进入
-        弃牌堆），设置 FINISHED + game_over_reason=策略平局原因，并
-        发出 DRAW 终局事件。严格回放按同一确定性路径重放。
+        PROCESSING 走既有 processing finish 路径；REVEALED 走
+        revealed-zone discard primitive，不得调用
+        ``_finish_processing(REVEALED)``。终局 transient 由
+        ``FINISHED_TRANSIENT_RUNTIME_FIELDS`` 驱动清理，不复用
+        ``_return_to_play``。区域清理全部成功后才登记事件，避免
+        event/state divergence。
         """
         policy = self._outcome_policy
         draw_reason = (
@@ -15123,16 +15170,26 @@ class ProductionBasicCardBatch:
                 next_state, instance_id, "draw_game_over_cleanup"
             )
             events.append(finish_event)
-        for instance_id in list(next_state.card_ids_in(REVEALED_ZONE)):
-            next_state, reveal_event = self._finish_processing(
-                next_state, instance_id, "draw_game_over_cleanup"
-            )
-            events.append(reveal_event)
+        extra: dict[str, object] | None = None
+        card_user: str | None = None
+        pending_wugu = runtime.pending_wugu
+        if isinstance(pending_wugu, _PendingWugu):
+            extra = {
+                "root_trick_instance_id": pending_wugu.trick_instance_id
+            }
+            card_user = pending_wugu.user_id
+        next_state, reveal_events = self._discard_revealed_zone(
+            next_state,
+            reason="draw_game_over_cleanup",
+            card_user=card_user,
+            extra=extra,
+        )
+        events.extend(reveal_events)
         self._events.extend(tuple(events))
-        base_runtime = self._return_to_play(runtime)
         next_runtime = replace(
-            base_runtime,
+            cleanup_finished_transient_runtime(runtime),
             phase=ProductionPhase.FINISHED,
+            winner_id=None,
             game_over_reason=draw_reason,
         )
         return next_state, next_runtime
@@ -15200,4 +15257,6 @@ __all__ = [
     "ProductionBasicCardBatch",
     "ProductionPhase",
     "ScriptedBatchController",
+    "cleanup_finished_transient_runtime",
+    "finished_transient_cleanup_values",
 ]
