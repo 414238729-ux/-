@@ -597,6 +597,26 @@ EXECUTION_HASH_RUNTIME_INVENTORY: frozenset[str] = frozenset(
 )
 
 
+# F-006：_PendingSlash 的 A 类 execution 字段。target_sequence 与
+# current_target_index 决定方天后续目标，必须进入 execution snapshot/hash。
+# 本清单必须与 dataclass 字段集合精确一致。
+PENDING_SLASH_EXECUTION_FIELD_INVENTORY: frozenset[str] = frozenset(
+    {
+        "attacker_id",
+        "target_id",
+        "slash_instance_id",
+        "boosted",
+        "ignore_armor",
+        "fire_converted",
+        "virtual",
+        "material_ids",
+        "materials_finalized",
+        "target_sequence",
+        "current_target_index",
+    }
+)
+
+
 # R3-NEW-001（remediation-4）：_PendingWeaponChoice 的 execution 字段
 # 清单。逐字段分类（与 remediation-4 设计一致）：
 #   A 类（影响当前或后续执行语义，必须进入 execution snapshot/hash）：
@@ -885,6 +905,8 @@ class _BatchRuntime:
             "virtual": pending.virtual,
             "material_ids": list(pending.material_ids),
             "materials_finalized": pending.materials_finalized,
+            "target_sequence": list(pending.target_sequence),
+            "current_target_index": pending.current_target_index,
         }
 
     def _pending_slash_choice_value(self) -> dict[str, object] | None:
@@ -2502,10 +2524,22 @@ class ProductionBasicCardBatch:
 
         Knowledge 基础术语第 7 节确认的通用顺序。两人局退化为
         (当前回合角色, 另一名角色)，与既有生产行为完全一致。
+
+        当前回合角色已确认死亡时，不得把死者交给
+        ``alive_ring_from``（该接口对死亡锚点失败关闭）。改为取其座次
+        之后第一名存活角色作为存活环锚点。
         """
-        return PlayerTopology.from_state(state).alive_ring_from(
-            runtime.current_player_id, include_anchor=True
-        )
+        topology = PlayerTopology.from_state(state)
+        anchor_id = runtime.current_player_id
+        if not topology.is_alive(anchor_id):
+            anchor_id = topology.first_alive_after(anchor_id)
+        return topology.alive_ring_from(anchor_id, include_anchor=True)
+
+    def _fangtian_root_still_open(self, runtime: _BatchRuntime) -> bool:
+        """方天多目标根【杀】仍有未完成的 target_sequence。"""
+
+        pending = runtime.pending_slash
+        return pending is not None and bool(pending.target_sequence)
 
     def __init__(
         self,
@@ -13108,11 +13142,27 @@ class ProductionBasicCardBatch:
                 )
             )
             finish_events = list(damage_finish_events)
+        preview_winner = resolve_victory_after_death(
+            PlayerTopology.from_state(
+                _replace_player(next_state, dying_id, alive=False)
+            ),
+            dying_id,
+            policy=self._outcome_policy,
+            explicit_two_player_fallback=True,
+        )
+        # F-005：非终局传导子目标死亡不是闪电胜利清理条件。原受击/
+        # 当前回合角色仍存活时，判定根必须继续拥有闪电父根。
+        is_nonterminal_chain_child = (
+            runtime.pending_chain is not None
+            and dying_id != runtime.current_player_id
+            and preview_winner is None
+        )
         pending_judgment = runtime.pending_judgment
         if (
             pending_judgment is not None
             and pending_judgment.stage == "resolving_effect"
             and not pending_judgment.cleanup_done
+            and not is_nonterminal_chain_child
         ):
             next_state, judgment_finish = self._finish_processing(
                 next_state,
@@ -13246,13 +13296,21 @@ class ProductionBasicCardBatch:
                 # 不修改传导生产语义）。当前回合角色死亡（闪电/决斗自伤）
                 # 时其回合立即结束并推进到下一存活角色（标准三国杀）。
                 if runtime.pending_chain is not None:
-                    base_runtime = replace(
-                        runtime,
-                        pending_judgment=None,
-                        judgment_entry_indices=(
-                            judgment_entry_indices_after_death
-                        ),
-                    )
+                    if is_nonterminal_chain_child:
+                        base_runtime = replace(
+                            runtime,
+                            judgment_entry_indices=(
+                                judgment_entry_indices_after_death
+                            ),
+                        )
+                    else:
+                        base_runtime = replace(
+                            runtime,
+                            pending_judgment=None,
+                            judgment_entry_indices=(
+                                judgment_entry_indices_after_death
+                            ),
+                        )
                     next_state, next_runtime = (
                         self._resume_chain_after_rescue(
                             next_state,
@@ -13261,7 +13319,14 @@ class ProductionBasicCardBatch:
                             rescued=False,
                         )
                     )
-                    if next_runtime.current_player_id == dying_id:
+                    # F-003/F-004：传导恢复后若已打开新濒死窗口，或方天
+                    # 根仍拥有剩余目标，不得结束回合。
+                    if (
+                        next_runtime.current_player_id == dying_id
+                        and next_runtime.phase
+                        is not ProductionPhase.DYING_RESCUE
+                        and not self._fangtian_root_still_open(next_runtime)
+                    ):
                         next_state, next_runtime = (
                             self._end_turn_after_current_death(
                                 next_state,
@@ -14445,7 +14510,21 @@ class ProductionBasicCardBatch:
             # POST-B C2 方天画戟：当前目标结算完成后推进到下一目标，
             # 根【杀】保持在处理区；逐目标独立防具判定/响应/伤害/濒死。
             return self._advance_slash_target(state, runtime)
-        return state, self._return_to_play(runtime)
+        next_runtime = self._return_to_play(runtime)
+        # 只覆盖方天多目标根的 continuation：全部既定目标完成后，若回合
+        # 所有者已确认死亡，才结束其回合。不得改变决斗 / 普通单目标杀 /
+        # 群体锦囊 / 闪电 / 普通 chain 的 _return_to_play 出口。
+        if (
+            pending_slash is not None
+            and pending_slash.target_sequence
+            and not state.players_by_id[next_runtime.current_player_id].alive
+        ):
+            return self._end_turn_after_current_death(
+                state,
+                next_runtime,
+                next_runtime.judgment_entry_indices,
+            )
+        return state, next_runtime
 
     def _advance_slash_target(
         self,
@@ -14894,18 +14973,8 @@ class ProductionBasicCardBatch:
         根牌已 finalize。
         """
         topology = PlayerTopology.from_state(state)
-        alive_ids = topology.alive_ids
-        dead_seat = state.players_by_id[runtime.current_player_id].seat
-        # 已死亡锚点不参与存活环：下家=座次大于死亡角色座次的最小存活
-        # 角色；不存在则环回最小座次存活角色（标准“下家”死亡语义）。
-        next_player = next(
-            (
-                player_id
-                for player_id in alive_ids
-                if state.players_by_id[player_id].seat > dead_seat
-            ),
-            alive_ids[0],
-        )
+        # 已死亡锚点不参与存活环：取其座次之后第一名存活角色。
+        next_player = topology.first_alive_after(runtime.current_player_id)
         next_runtime = replace(
             runtime,
             current_player_id=next_player,

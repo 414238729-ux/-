@@ -106,6 +106,25 @@ class PlayerTopology:
         index = ring.index(anchor_id)
         return ring[(index + 1) % len(ring)]
 
+    def first_alive_after(self, player_id: str) -> str:
+        """从该角色座次之后沿座次递增找到第一名存活角色。
+
+        允许 ``player_id`` 已死亡。与 ``next_alive`` / ``alive_ring_from``
+        不同：那两个接口的通用锚点必须存活（失败关闭）。本方法是死亡
+        座次之后的存活继任，供调用方先取得合法存活锚点，再进入存活环。
+        无存活角色时失败关闭。
+        """
+        player = self.player(player_id)
+        alive = self.alive_players
+        if not alive:
+            raise UnsupportedRuleError(
+                f"角色{player_id!r}座次之后没有存活角色可作为继任锚点"
+            )
+        for candidate in alive:
+            if candidate.seat > player.seat:
+                return candidate.player_id
+        return alive[0].player_id
+
     def alive_ring_from(
         self, anchor_id: str, *, include_anchor: bool = True
     ) -> tuple[str, ...]:

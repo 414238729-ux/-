@@ -308,10 +308,33 @@ C3 停止后不自动开始斗地主（§3 模式规则保持 Knowledge-only）�
 （seed 20–69）：全部自然结束（队伍全灭胜负，`team_eliminated`）、
 unsupported=0、无安全上限触发、严格重执行逐决策验证一致、合法队伍胜者。
 
-**实现身份**：C3_IMPLEMENTATION_IDENTITY =
-`620e2a81be4433507e4e076da9f460a8f24fee74488502d1737f998823f2c0a8`
-（冻结 R8 证据 `06c8b2d3…` 仍是历史证据，未被改写；C123 remediation
-后随轨更新当前身份 pin）。未独立复审，不得称为 independently audited。
+**实现身份**：当前工作树 `implementation_identity()` =
+`474ff7fee7304c03c10ed6d2a4c7d207dd6372a75198bd6665083f152cdc475d`
+（C123 正交 remediation 1 后随源码更新；冻结 R8 证据 `06c8b2d3…`
+仍是历史证据，未被改写）。状态
+`IMPLEMENTED_PENDING_INDEPENDENT_REAUDIT`，不得称为 independently
+audited。
+
+**C123 正交 remediation 1**（F-003～F-006；状态
+`IMPLEMENTED_PENDING_INDEPENDENT_REAUDIT`，不是 CLOSED，不是
+AUDIT_PASSED）：
+
+- F-003：`_response_order_from_turn_player` 在当前回合角色已死亡时，
+  先用 `PlayerTopology.first_alive_after` 取得座次之后第一名存活角色，
+  再交给 `alive_ring_from`。`alive_ring_from` / `next_alive` 的
+  “锚点必须存活”失败关闭契约保持不变。
+- F-004：传导恢复后若方天根仍打开，不调用 `_end_turn_after_current_death`。
+  只在 `_complete_root_resolution` 的最终 `_return_to_play` 出口、且仅当
+  方天多目标根已全部完成、回合所有者已确认死亡时结束回合。不改变决斗 /
+  普通单目标杀 / 群体锦囊 / 闪电 / 普通 chain 的 root completion 出口。
+- F-005：非终局传导子目标死亡不再走 `shandian_victory_cleanup`，也不
+  提前 `pending_judgment=None`。chain 结束后回到正常闪电 root
+  completion：JUDGMENT → DRAW → PLAY。
+- F-006：`_pending_slash_value` 覆盖 `target_sequence` 与
+  `current_target_index`；新增 `PENDING_SLASH_EXECUTION_FIELD_INVENTORY`。
+- 衍生项 D-003-A / D-004-A / D-003-B 由根修复自然消除，未扩大
+  step transaction 重构。
+- 回归：`tests/test_post_b_c123_orthogonal_remediation_1.py`。
 
 **formal duel 防回归**：seed 0 → p2/388/43、seed 7 → p2/162/17
 （与 R5/R8 记录一致；全量套件覆盖）。
