@@ -12,10 +12,15 @@
 - `POST_B_C1_MULTIPLAYER_AUTHORITATIVE_FOUNDATION` = `IMPLEMENTED_NOT_INDEPENDENTLY_AUDITED`
 - `POST_B_C2_MULTIPLAYER_CARD_SEMANTICS_CLOSURE` = `IMPLEMENTED_NOT_INDEPENDENTLY_AUDITED`
 - `POST_B_C3_FORMAL_NO_SKILL_2V2_MODE` = `PRECOMMIT_NOT_INDEPENDENTLY_AUDITED`
+- `F-003` = `CLOSED`
+- `F-004` = `CLOSED`
+- `F-005` = `CLOSED`
+- `F-006` = `CLOSED`
 - `C123-R1-NEW-001` = `CLOSED`（`REMEDIATION_2_REAUDIT_PASSED`；被审计
   implementation commit = `677d81c131df1e02842919b47e7ab6c02c8c703b`。
   本文件随后的 status-closure commit 只记录复审结果，不得冒充该
   implementation SHA。C1/C2/C3 整轨仍不是独立全量审计通过。）
+- `C123-GLOBAL-001` = `IMPLEMENTED_PENDING_INDEPENDENT_REAUDIT`（全局跨检查点敌对审计发现方天多目标火杀第一目标连环濒死被救后提前 finish 根牌缺陷，已修复收敛至 _finish_pending_damage_card / _finish_slash_processing 统一父根所有权模型，待独立复审。）
 
 ### 0.1 C2 摘要（MULTIPLAYER CARD SEMANTICS CLOSURE）
 

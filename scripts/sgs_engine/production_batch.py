@@ -5540,23 +5540,20 @@ class ProductionBasicCardBatch:
         if chain is None:
             raise ProductionBatchError("濒死救援完成但缺少传导挂起状态")
         if dying_id == chain.original_target_id:
-            if (
-                runtime.defer_damage_card_finish
-                or runtime.damage_card_already_finished
-            ):
-                # 闪电等需要延迟根牌结算的伤害（CP-04L）：闪电本体在
-                # PROCESSING 中等待完整传导与伤害结算结束后，由
-                # _complete_root_resolution 统一弃置；此处不得提前 finish，
-                # 否则传导结束后重复弃置会失败关闭。贯石斧强制命中时
-                # 【杀】本体已因【闪】完成结算，同样不再重复 finish。
-                next_state = state
-            else:
-                next_state, finish_event = self._finish_processing(
+            reason = (
+                self._pending_damage_rescue_reason(runtime)
+                if rescued
+                else self._pending_damage_death_reason(runtime)
+            )
+            next_state, runtime, finish_events = (
+                self._finish_pending_damage_card(
                     state,
-                    self._pending_damage_card_id(runtime),
-                    self._pending_damage_rescue_reason(runtime),
+                    runtime,
+                    reason,
                 )
-                self._events.extend((finish_event,))
+            )
+            if finish_events:
+                self._events.extend(finish_events)
             return self._advance_chain(next_state, runtime)
         del rescued
         return self._advance_chain(state, runtime)
@@ -7192,6 +7189,8 @@ class ProductionBasicCardBatch:
         runtime: _BatchRuntime,
         instance_id: str,
         reason: str,
+        *,
+        terminal_cleanup: bool = False,
     ) -> tuple[GameState, _BatchRuntime, tuple[GameEvent, ...]]:
         """统一 Slash root finalizer：实体【杀】或丈八虚拟杀完成结算。
 
@@ -7203,14 +7202,15 @@ class ProductionBasicCardBatch:
         Jink response/card events → CARD_EFFECT_CANCELLED → 根结算收尾
         → 丈八材料 PROCESSING→DISCARD，MB-M-007）。
 
-        幂等性：虚拟材料已清理（materials_finalized=True）时返回空事件，
-        不允许 double-finalize；DYING 救援／死亡／game-over 路径必须最终
-        到达本方法，不允许材料悬空（MB-B-002）。
+        幂等性：虚拟材料已清理（materials_finalized=True）或实体牌已不在
+        PROCESSING 时返回空事件，不允许 double-finalize；DYING 救援／
+        死亡／game-over 路径必须最终到达本方法，不允许材料悬空（MB-B-002）。
         """
 
         pending = runtime.pending_slash
         if (
-            pending is not None
+            not terminal_cleanup
+            and pending is not None
             and pending.target_sequence
             and pending.current_target_index + 1 < len(pending.target_sequence)
         ):
@@ -7244,6 +7244,8 @@ class ProductionBasicCardBatch:
                 pending_slash=replace(pending, materials_finalized=True),
             )
             return next_state, next_runtime, tuple(material_events)
+        if state.location_of(instance_id) != PROCESSING_ZONE:
+            return state, runtime, ()
         next_state, finish_event = self._finish_processing(
             state, instance_id, reason
         )
@@ -12792,6 +12794,8 @@ class ProductionBasicCardBatch:
         state: GameState,
         runtime: _BatchRuntime,
         reason: str,
+        *,
+        terminal_cleanup: bool = False,
     ) -> tuple[GameState, _BatchRuntime, tuple[GameEvent, ...]]:
         """DYING 出口的统一根结算收尾：实体杀或丈八材料恰好 finalize 一次。
 
@@ -12813,6 +12817,7 @@ class ProductionBasicCardBatch:
             runtime,
             self._pending_damage_card_id(runtime),
             reason,
+            terminal_cleanup=terminal_cleanup,
         )
 
     def _rescue_window_id(
@@ -13100,44 +13105,40 @@ class ProductionBasicCardBatch:
         else:
             next_state = state
         chain = runtime.pending_chain
-        if chain is not None and dying_id != chain.original_target_id:
-            # 传导目标死亡时根牌已完成结算，不再重复处理根牌。
+        preview_winner = resolve_victory_after_death(
+            PlayerTopology.from_state(
+                _replace_player(next_state, dying_id, alive=False)
+            ),
+            dying_id,
+            policy=self._outcome_policy,
+            explicit_two_player_fallback=True,
+        )
+        if (
+            chain is not None
+            and dying_id != chain.original_target_id
+            and preview_winner is None
+        ):
+            # 传导目标非终局死亡时根牌已完成结算，不再重复处理根牌。
             finish_events: list[GameEvent] = []
-        elif runtime.defer_damage_card_finish:
-            # 根牌（闪电）完成时点由本路径统一清理
+        elif runtime.defer_damage_card_finish and preview_winner is None:
+            # 根牌（闪电）非终局完成时点由本路径统一清理
             finish_events = []
         elif (
             chain is not None
             and dying_id == chain.original_target_id
-            and resolve_victory_after_death(
-                PlayerTopology.from_state(
-                    _replace_player(next_state, dying_id, alive=False)
-                ),
-                dying_id,
-                policy=self._outcome_policy,
-                explicit_two_player_fallback=True,
-            )
-            is None
+            and preview_winner is None
         ):
             # POST-B C3：2v2 非终局死亡的传导原始受伤者——根牌 finalize
             # 由 _resume_chain_after_rescue(rescued=False) 统一执行
             # （与救援成功路径同一口径），不得在此提前离开处理区。
-            finish_events: list[GameEvent] = []
+            finish_events = []
         elif (
             runtime.pending_group_trick is not None
             and runtime.pending_wugu is None
             and runtime.pending_chain is None
             and runtime.pending_judgment is None
             and runtime.pending_borrowed_sword is None
-            and resolve_victory_after_death(
-                PlayerTopology.from_state(
-                    _replace_player(next_state, dying_id, alive=False)
-                ),
-                dying_id,
-                policy=self._outcome_policy,
-                explicit_two_player_fallback=True,
-            )
-            is None
+            and preview_winner is None
         ):
             # POST-B C1/C2：非终局死亡的群体锦囊目标——根锦囊必须保持
             # 处理区，继续剩余目标队列；根牌 finalize 由最后的
@@ -13148,20 +13149,13 @@ class ProductionBasicCardBatch:
             # 材料 PROCESSING→DISCARD 恰好一次），不允许跳过清理。
             next_state, runtime, damage_finish_events = (
                 self._finish_pending_damage_card(
-                next_state,
+                    next_state,
                     runtime,
                     self._pending_damage_death_reason(runtime),
+                    terminal_cleanup=(preview_winner is not None),
                 )
             )
             finish_events = list(damage_finish_events)
-        preview_winner = resolve_victory_after_death(
-            PlayerTopology.from_state(
-                _replace_player(next_state, dying_id, alive=False)
-            ),
-            dying_id,
-            policy=self._outcome_policy,
-            explicit_two_player_fallback=True,
-        )
         # F-005：非终局传导子目标死亡不是闪电胜利清理条件。原受击/
         # 当前回合角色仍存活时，判定根必须继续拥有闪电父根。
         is_nonterminal_chain_child = (
