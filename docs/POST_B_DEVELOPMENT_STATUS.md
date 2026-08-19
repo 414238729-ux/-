@@ -309,15 +309,14 @@ C3 停止后不自动开始斗地主（§3 模式规则保持 Knowledge-only）�
 unsupported=0、无安全上限触发、严格重执行逐决策验证一致、合法队伍胜者。
 
 **实现身份**：当前工作树 `implementation_identity()` =
-`474ff7fee7304c03c10ed6d2a4c7d207dd6372a75198bd6665083f152cdc475d`
-（C123 正交 remediation 1 后随源码更新；冻结 R8 证据 `06c8b2d3…`
+`ae526e1316265267c6f87f209bcb73bf99d36553f09e60d000ac3c0e9bfbdc41`
+（C123 正交 remediation 2 后随源码更新；冻结 R8 证据 `06c8b2d3…`
 仍是历史证据，未被改写）。状态
 `IMPLEMENTED_PENDING_INDEPENDENT_REAUDIT`，不得称为 independently
 audited。
 
-**C123 正交 remediation 1**（F-003～F-006；状态
-`IMPLEMENTED_PENDING_INDEPENDENT_REAUDIT`，不是 CLOSED，不是
-AUDIT_PASSED）：
+**C123 正交 remediation 1**（F-003～F-006；独立 re-audit 已确认
+CLOSED。本轮不得重新打开）：
 
 - F-003：`_response_order_from_turn_player` 在当前回合角色已死亡时，
   先用 `PlayerTopology.first_alive_after` 取得座次之后第一名存活角色，
@@ -335,6 +334,25 @@ AUDIT_PASSED）：
 - 衍生项 D-003-A / D-004-A / D-003-B 由根修复自然消除，未扩大
   step transaction 重构。
 - 回归：`tests/test_post_b_c123_orthogonal_remediation_1.py`。
+
+**C123 正交 remediation 2**（C123-R1-NEW-001
+TURN_OWNER_DEATH_CHAIN_CONTINUATION_LOST；状态
+`IMPLEMENTED_PENDING_INDEPENDENT_REAUDIT`，不是
+REMEDIATION_REAUDIT_PASSED，不是 CLOSED）：
+
+- 独立区分“当前回合角色已确认死亡”与“立即结束当前回合”。
+- `apply_pass_rescue` 在非终局确认当前回合角色死亡时记下
+  `deferred_turn_end_after_owner_death`。
+- 该责任不因后续 `dying_id` 换成另一名角色而丢失。
+- 只在真正 root 完成后的 `_complete_root_resolution` 出口
+  （以及群体锦囊全部目标完成出口）询问：游戏未终局、turn owner
+  已死、无仍应优先完成的 parent/root 时，才
+  `_end_turn_after_current_death`。
+- 不把 `phase == PLAY and current player is dead` 当作全局兜底，
+  因此不破坏 `test_duel_continues_after_source_death`。
+- 不提前结束未完成的方天 `target_sequence`，不修改 F-005 闪电
+  非终局子目标清理，不修改 OutcomePolicy。
+- 回归：`tests/test_post_b_c123_orthogonal_remediation_2.py`。
 
 **formal duel 防回归**：seed 0 → p2/388/43、seed 7 → p2/162/17
 （与 R5/R8 记录一致；全量套件覆盖）。

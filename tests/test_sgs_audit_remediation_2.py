@@ -305,6 +305,7 @@ def test_finished_invariant_negative_matrix(field: str) -> None:
         "discard_phase_handles": {"x": "y"},
         "discard_phase_snapshot_digest": "x",
         "processed_judgment_instance_ids": ("x",),
+        "deferred_turn_end_after_owner_death": True,
     }
     injected = sample.get(field, "residual")
     bad = dataclasses.replace(runtime, **{field: injected})

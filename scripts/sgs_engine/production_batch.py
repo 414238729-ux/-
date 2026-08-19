@@ -574,6 +574,9 @@ FINISHED_TRANSIENT_RUNTIME_FIELDS: frozenset[str] = frozenset({
     "feiyang_snapshot_digest",
     "feiyang_selected_ids",
     "feiyang_judgment_choice",
+    # C123-R1-NEW-001：当前回合角色已确认死亡、但 parent/root 尚未完成时
+    # 推迟的回合结束责任。FINISHED 时必须清掉，避免终局残留。
+    "deferred_turn_end_after_owner_death",
 })
 
 # R2-NEW-001：execution snapshot/hash 的运行时字段清单（A 类＝会改变未来
@@ -732,6 +735,10 @@ class _BatchRuntime:
     pending_slash_choice: _PendingSlashChoice | None = None
     pending_discard_two: _PendingDiscardTwo | None = None
     pending_hanbing_discard: _PendingHanbingDiscard | None = None
+    # C123-R1-NEW-001：当前回合角色已确认死亡，但当时仍有未完成的
+    # parent/root（传导、方天剩余目标、判定根等），回合结束必须推迟。
+    # 不得用 “PLAY 且当前角色已死亡” 做全局兜底。
+    deferred_turn_end_after_owner_death: bool = False
 
     def audit_value(self) -> dict[str, object]:
         # R2-NEW-001：pending_slash_choice 内部再次保存同一 slash root；
@@ -888,6 +895,9 @@ class _BatchRuntime:
             "pending_discard_two": self._pending_discard_two_value(),
             "pending_hanbing_discard": self._pending_hanbing_discard_value(),
             "pending_weapon_choice": self._pending_weapon_choice_value(),
+            "deferred_turn_end_after_owner_death": (
+                self.deferred_turn_end_after_owner_death
+            ),
         }
 
     def _pending_slash_value(
@@ -11328,7 +11338,9 @@ class ProductionBasicCardBatch:
             )
             self._events.extend((finish_event,))
             next_runtime = self._return_to_play(runtime)
-            return next_state, replace(next_runtime, pending_wugu=None)
+            return self._maybe_end_turn_after_deferred_owner_death(
+                next_state, replace(next_runtime, pending_wugu=None)
+            )
         next_target = group.target_sequence[next_index]
         order = self._response_order_from_turn_player(state, runtime)
         last_events = self._events.snapshot()
@@ -13241,6 +13253,14 @@ class ProductionBasicCardBatch:
                 if runtime.game_over_reason is not None:
                     self._commit_runtime(pre_hook_runtime, runtime)
                     return next_state
+            # C123-R1-NEW-001：确认当前回合角色死亡后，回合结束责任成立。
+            # 若此时仍有未完成 parent/root，不得立即切回合，但该责任不得
+            # 因后续 dying_id 换成另一名角色而丢失。
+            if dying_id == runtime.current_player_id:
+                runtime = replace(
+                    runtime,
+                    deferred_turn_end_after_owner_death=True,
+                )
             pending_slash = runtime.pending_slash
             if (
                 runtime.pending_group_trick is not None
@@ -14446,6 +14466,64 @@ class ProductionBasicCardBatch:
                 )
         return next_state, tuple(events)
 
+    def _owner_root_completion_should_end_turn(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+    ) -> bool:
+        """根结算真正完成后，是否应兑现推迟的死亡回合结束责任。
+
+        只认 apply_pass_rescue 在确认当前回合角色死亡时记下的标记，
+        不把 “当前角色已死亡” 当作全局兜底。因此不会改写已开始决斗经
+        构造死亡后的 continuation，也不会在方天剩余目标或新濒死窗口
+        仍打开时提前切回合。
+        """
+
+        if not runtime.deferred_turn_end_after_owner_death:
+            return False
+        if runtime.winner_id is not None or runtime.game_over_reason is not None:
+            return False
+        if runtime.phase not in (
+            ProductionPhase.PLAY,
+            ProductionPhase.JUDGMENT,
+            ProductionPhase.DRAW,
+            ProductionPhase.DISCARD,
+            ProductionPhase.END,
+        ):
+            return False
+        if self._fangtian_root_still_open(runtime):
+            return False
+        if runtime.pending_chain is not None:
+            return False
+        if runtime.pending_group_trick is not None:
+            return False
+        if runtime.pending_duel is not None:
+            return False
+        pending_judgment = runtime.pending_judgment
+        if (
+            pending_judgment is not None
+            and pending_judgment.stage == "resolving_effect"
+            and not pending_judgment.cleanup_done
+        ):
+            return False
+        owner = state.players_by_id[runtime.current_player_id]
+        return not owner.alive
+
+    def _maybe_end_turn_after_deferred_owner_death(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """最外层 root 完成后：若死亡回合所有者的切回合责任已到期则兑现。"""
+
+        if not self._owner_root_completion_should_end_turn(state, runtime):
+            return state, runtime
+        return self._end_turn_after_current_death(
+            state,
+            runtime,
+            runtime.judgment_entry_indices,
+        )
+
     def _complete_root_resolution(
         self,
         state: GameState,
@@ -14481,7 +14559,9 @@ class ProductionBasicCardBatch:
                 processed_judgment_instance_ids=processed,
                 defer_damage_card_finish=False,
             )
-            return next_state, next_runtime
+            return self._maybe_end_turn_after_deferred_owner_death(
+                next_state, next_runtime
+            )
         pending = runtime.pending_borrowed_sword
         if pending is not None and pending.stage == "slash_resolving":
             if pending.root_discarded:
@@ -14499,7 +14579,9 @@ class ProductionBasicCardBatch:
             self._events.extend((finish_event,))
             base_runtime = self._return_to_play(runtime)
             next_runtime = replace(base_runtime, pending_borrowed_sword=None)
-            return next_state, next_runtime
+            return self._maybe_end_turn_after_deferred_owner_death(
+                next_state, next_runtime
+            )
         pending_slash = runtime.pending_slash
         if (
             pending_slash is not None
@@ -14511,20 +14593,12 @@ class ProductionBasicCardBatch:
             # 根【杀】保持在处理区；逐目标独立防具判定/响应/伤害/濒死。
             return self._advance_slash_target(state, runtime)
         next_runtime = self._return_to_play(runtime)
-        # 只覆盖方天多目标根的 continuation：全部既定目标完成后，若回合
-        # 所有者已确认死亡，才结束其回合。不得改变决斗 / 普通单目标杀 /
-        # 群体锦囊 / 闪电 / 普通 chain 的 _return_to_play 出口。
-        if (
-            pending_slash is not None
-            and pending_slash.target_sequence
-            and not state.players_by_id[next_runtime.current_player_id].alive
-        ):
-            return self._end_turn_after_current_death(
-                state,
-                next_runtime,
-                next_runtime.judgment_entry_indices,
-            )
-        return state, next_runtime
+        # C123-R1-NEW-001：真正回到死亡回合所有者的回合流程时，兑现推迟
+        # 的切回合责任。覆盖闪电 / 普通杀 / 普通 chain / 已完成的方天根。
+        # 不覆盖仍打开的方天剩余目标（上分支）或无推迟标记的决斗构造死亡。
+        return self._maybe_end_turn_after_deferred_owner_death(
+            state, next_runtime
+        )
 
     def _advance_slash_target(
         self,
@@ -14955,6 +15029,7 @@ class ProductionBasicCardBatch:
             feiyang_snapshot_digest=None,
             feiyang_selected_ids=(),
             feiyang_judgment_choice=None,
+            deferred_turn_end_after_owner_death=False,
         )
         self._commit_runtime(runtime, next_runtime)
         return next_state
@@ -15043,6 +15118,7 @@ class ProductionBasicCardBatch:
             feiyang_snapshot_digest=None,
             feiyang_selected_ids=(),
             feiyang_judgment_choice=None,
+            deferred_turn_end_after_owner_death=False,
         )
         return state, next_runtime
 

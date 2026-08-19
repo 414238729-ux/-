@@ -113,6 +113,7 @@ _DIRTY_TRANSIENT_SAMPLES: dict[str, object] = {
     "feiyang_snapshot_digest": "x",
     "feiyang_selected_ids": ("x",),
     "feiyang_judgment_choice": "x",
+    "deferred_turn_end_after_owner_death": True,
 }
 
 
