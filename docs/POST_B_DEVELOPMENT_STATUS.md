@@ -12,6 +12,10 @@
 - `POST_B_C1_MULTIPLAYER_AUTHORITATIVE_FOUNDATION` = `IMPLEMENTED_NOT_INDEPENDENTLY_AUDITED`
 - `POST_B_C2_MULTIPLAYER_CARD_SEMANTICS_CLOSURE` = `IMPLEMENTED_NOT_INDEPENDENTLY_AUDITED`
 - `POST_B_C3_FORMAL_NO_SKILL_2V2_MODE` = `PRECOMMIT_NOT_INDEPENDENTLY_AUDITED`
+- `C123-R1-NEW-001` = `CLOSED`（`REMEDIATION_2_REAUDIT_PASSED`；被审计
+  implementation commit = `677d81c131df1e02842919b47e7ab6c02c8c703b`。
+  本文件随后的 status-closure commit 只记录复审结果，不得冒充该
+  implementation SHA。C1/C2/C3 整轨仍不是独立全量审计通过。）
 
 ### 0.1 C2 摘要（MULTIPLAYER CARD SEMANTICS CLOSURE）
 
@@ -308,12 +312,20 @@ C3 停止后不自动开始斗地主（§3 模式规则保持 Knowledge-only）�
 （seed 20–69）：全部自然结束（队伍全灭胜负，`team_eliminated`）、
 unsupported=0、无安全上限触发、严格重执行逐决策验证一致、合法队伍胜者。
 
-**实现身份**：当前工作树 `implementation_identity()` =
+**实现身份**：当前实现 `implementation_identity()` =
 `ae526e1316265267c6f87f209bcb73bf99d36553f09e60d000ac3c0e9bfbdc41`
 （C123 正交 remediation 2 后随源码更新；冻结 R8 证据 `06c8b2d3…`
-仍是历史证据，未被改写）。状态
-`IMPLEMENTED_PENDING_INDEPENDENT_REAUDIT`，不得称为 independently
-audited。
+仍是历史证据，未被改写）。
+
+C123 正交 remediation 2 的被审计 implementation commit =
+`677d81c131df1e02842919b47e7ab6c02c8c703b`。本文件随后的
+status-closure commit 只记录复审结果，不得冒充该 implementation SHA。
+
+HISTORICAL/AS-OF（实现提交当时）：
+`IMPLEMENTED_PENDING_INDEPENDENT_REAUDIT`。
+
+CURRENT：C123-R1-NEW-001 = `CLOSED`；独立复审结论
+`REMEDIATION_2_REAUDIT_PASSED`。C1/C2/C3 整轨仍不是独立全量审计通过。
 
 **C123 正交 remediation 1**（F-003～F-006；独立 re-audit 已确认
 CLOSED。本轮不得重新打开）：
@@ -336,9 +348,9 @@ CLOSED。本轮不得重新打开）：
 - 回归：`tests/test_post_b_c123_orthogonal_remediation_1.py`。
 
 **C123 正交 remediation 2**（C123-R1-NEW-001
-TURN_OWNER_DEATH_CHAIN_CONTINUATION_LOST；状态
-`IMPLEMENTED_PENDING_INDEPENDENT_REAUDIT`，不是
-REMEDIATION_REAUDIT_PASSED，不是 CLOSED）：
+TURN_OWNER_DEATH_CHAIN_CONTINUATION_LOST；CURRENT 状态 `CLOSED`，
+独立复审结论 `REMEDIATION_2_REAUDIT_PASSED`。HISTORICAL/AS-OF：
+实现提交当时为 `IMPLEMENTED_PENDING_INDEPENDENT_REAUDIT`）：
 
 - 独立区分“当前回合角色已确认死亡”与“立即结束当前回合”。
 - `apply_pass_rescue` 在非终局确认当前回合角色死亡时记下
@@ -353,6 +365,32 @@ REMEDIATION_REAUDIT_PASSED，不是 CLOSED）：
 - 不提前结束未完成的方天 `target_sequence`，不修改 F-005 闪电
   非终局子目标清理，不修改 OutcomePolicy。
 - 回归：`tests/test_post_b_c123_orthogonal_remediation_2.py`。
+
+**C123 rem2 独立复审证据**（provenance 分层，不得混写）：
+
+- 被审计 implementation SHA：
+  `677d81c131df1e02842919b47e7ab6c02c8c703b`
+- Independent adversarial re-audit：PASSED
+  （Gemini 3.1 Pro High；FINAL_VERDICT=`REMEDIATION_2_REAUDIT_PASSED`）
+- Finding 状态：C123-R1-NEW-001=`CLOSED`；F-003=`CLOSED`；
+  F-004=`CLOSED`；F-005=`CLOSED`；F-006=`CLOSED`
+- Independent production probe：PASSED
+  （仓库外路径
+  `D:\MyGPT\pytest-temp-gemini\c123-rem2-reaudit\independent_probe.py`；
+  exit code=0；关键终态：p1.alive=False、p2.alive=False、
+  winner_id=None、phase=PREPARE、current_player_id=p3、
+  pending_chain=None、pending_judgment=None、
+  deferred_turn_end_after_owner_death=False、PROCESSING zone empty）
+- Frozen implementation SHA full pytest：2508 passed in 1466.02s
+  （用户本人在 detached 目标 SHA `677d81c…` 上手工执行
+  `python -m pytest -q -p no:cacheprovider
+  --basetemp=D:\MyGPT\pytest-temp-gemini\c123-rem2-full-manual`；
+  运行后 `git status --short` 仍为空。不存在 full-test evidence gap。）
+- 独立复审方明确更正：`FULL_TEST_RESULT = NOT_RUN`。
+  不得声称 Gemini 自己完成了 full pytest。
+- 未知规则未改：酒×方天仍为失败关闭（`BLOCKED_BY_RULE_SOURCE`）；
+  `NESTED_INDEPENDENT_ATTRIBUTE_DAMAGE_DURING_CHAIN` 仍为
+  `WAITING_FOR_VERIFICATION`。本轮不得借状态收口猜规则。
 
 **formal duel 防回归**：seed 0 → p2/388/43、seed 7 → p2/162/17
 （与 R5/R8 记录一致；全量套件覆盖）。
