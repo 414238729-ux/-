@@ -1,6 +1,6 @@
 # POST-B 开发状态（POST_B_DEVELOPMENT_STATUS）
 
-> 状态标签：`PRECOMMIT`、`NOT_INDEPENDENTLY_AUDITED`
+> 状态标签：`AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`、`GLOBAL_AUDIT_2_PASSED`
 >
 > 本文件是 POST-B 开发轨（deepseek-post-milestone-b-development）的新增状态文档，
 > 未登记进 `docs/CHECKPOINT_MANIFEST.json`，也不修改任何已登记文档
@@ -9,9 +9,9 @@
 
 ## 0. POST-B 轨道状态
 
-- `POST_B_C1_MULTIPLAYER_AUTHORITATIVE_FOUNDATION` = `IMPLEMENTED_NOT_INDEPENDENTLY_AUDITED`
-- `POST_B_C2_MULTIPLAYER_CARD_SEMANTICS_CLOSURE` = `IMPLEMENTED_NOT_INDEPENDENTLY_AUDITED`
-- `POST_B_C3_FORMAL_NO_SKILL_2V2_MODE` = `PRECOMMIT_NOT_INDEPENDENTLY_AUDITED`
+- `POST_B_C1_MULTIPLAYER_AUTHORITATIVE_FOUNDATION` = `AUDITED_PASSED`（`C123_GLOBAL_AUDIT_2_PASSED`）
+- `POST_B_C2_MULTIPLAYER_CARD_SEMANTICS_CLOSURE` = `AUDITED_PASSED`（`C123_GLOBAL_AUDIT_2_PASSED`）
+- `POST_B_C3_FORMAL_NO_SKILL_2V2_MODE` = `AUDITED_PASSED`（`C123_GLOBAL_AUDIT_2_PASSED`）
 - `F-003` = `CLOSED`
 - `F-004` = `CLOSED`
 - `F-005` = `CLOSED`
@@ -19,7 +19,7 @@
 - `C123-R1-NEW-001` = `CLOSED`（`REMEDIATION_2_REAUDIT_PASSED`；被审计
   implementation commit = `677d81c131df1e02842919b47e7ab6c02c8c703b`。
   本文件随后的 status-closure commit 只记录复审结果，不得冒充该
-  implementation SHA。C1/C2/C3 整轨仍不是独立全量审计通过。）
+  implementation SHA。历史正交 rem2 独立复审通过。）
 - `C123-GLOBAL-001` = `CLOSED`（`C123_GLOBAL_REMEDIATION_1_REAUDIT_PASSED`；被审计
   implementation commit = `7979eca3d27e8a74f29062e344b2fa05081aad66`。
   本文件随后的 status-closure commit 只记录复审结果，不得冒充该
@@ -27,8 +27,16 @@
   `54201375cdb8b82b9af0947de49b0002c5bf4188` 结论为 FAILED /
   BLOCKER FOUND（C123-GLOBAL-001
   MULTITARGET_SLASH_ROOT_PREMATURE_FINISH_AFTER_RESCUED_CHAIN_TARGET），
-  不得改写为当时误报或 `C123_GLOBAL_AUDIT_PASSED`。C1/C2/C3 整轨仍不是
-  独立全量审计通过。）
+  不得改写为当时误报或 `C123_GLOBAL_AUDIT_PASSED`。
+  历史全局 rem1 独立复审通过。）
+- `C123_GLOBAL_AUDIT_2` = `PASSED`（`C123_GLOBAL_AUDIT_2_PASSED`；被审计
+  目标 SHA = `18c39c65bb67eb12fcce7e9d2954d2c3a908879c`；
+  `checkpoint-post-b-c123-global-remediation-closed` 指向同一 commit；
+  审计 worktree 处于 detached HEAD at `18c39c65bb67eb12fcce7e9d2954d2c3a908879c`。
+  `PREVIOUS_REPORT_REQUIRED_PROVENANCE_CORRECTION = COMPLETED`，纠错后
+  报告为权威定义与证据映射依据。当前 18c39c65 checkpoint 上已实现的
+  Post-B C1/C2/C3 scope 完成第二轮跨检查点整体独立敌对审计并通过，
+  满足质量门禁，状态为 `AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`。）
 
 ### 0.1 C2 摘要（MULTIPLAYER CARD SEMANTICS CLOSURE）
 
@@ -228,8 +236,7 @@ certification；6) fresh C1 live execution（seed 0 真实执行 + 严格重执�
 
 ## 9. 当前轨：POST_B_C3_FORMAL_NO_SKILL_2V2_MODE
 
-**状态**：`PRECOMMIT_NOT_INDEPENDENTLY_AUDITED`（实现完成，预提交门禁全部
-通过；未独立审计，不做 `git commit/push/tag/merge`，由用户最终提交）。
+**状态**：`AUDITED_PASSED`（实现完成，预提交门禁全部通过；已完成第二轮全局跨检查点整体独立敌对审计并通过 `C123_GLOBAL_AUDIT_2_PASSED`，进入 `AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`；由用户进行后续阶段推进）。
 C3 停止后不自动开始斗地主（§3 模式规则保持 Knowledge-only）。
 
 **范围**：正式、失败关闭、严格可回放的 no-skill 2v2 模式层，复用 C1 多人
@@ -483,6 +490,44 @@ BLOCKER FOUND，与本轮 rem1 re-audit = PASSED 不得混写。
   2) `assert_resolution_invariants` 尚未直接断言 pending physical
      Slash root open → entity card 必须仍在 PROCESSING。
      同属非阻塞架构观察，不是当前 blocker。
+
+**C123 第二轮全局跨检查点独立敌对审计（Global Audit 2）**（C123_GLOBAL_AUDIT_2_PASSED；进入 AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE）：
+
+- 审计目标 SHA：`18c39c65bb67eb12fcce7e9d2954d2c3a908879c`
+- Provenance：HEAD detached at `18c39c65bb67eb12fcce7e9d2954d2c3a908879c`；`checkpoint-post-b-c123-global-remediation-closed` 指向同一 commit。
+- 最终有效结论：`C123_GLOBAL_AUDIT_2_PASSED`
+- Provenance Correction：`PREVIOUS_REPORT_REQUIRED_PROVENANCE_CORRECTION = COMPLETED`。第一版审计报告曾出现 historical finding ID / definition 映射错误，随后在同一独立审计会话内执行 `POST_B_C123_GLOBAL_AUDIT_2_REPORT_CORRECTION_AND_EVIDENCE_REMAP` 完成 provenance correction 与证据重映射。纠错后的报告为 finding definition / evidence mapping 的权威依据（authoritative audit report），不得把第一版错误 mapping 写入状态。
+- 历史 Finding 权威定义与状态锁定（全部 `CLOSED`，无回归）：
+  1) `F-003`：dead current-player anchor 在后续 chain target DYING/rescue ordering 中不得直接传给 alive_ring_from。alive_ring_from 继续 fail-closed，caller 使用 first_alive_after(dead seat) 寻找合法 alive anchor。状态：`CLOSED`。
+  2) `F-004`：Fangtian multi-target Slash 尚有 remaining target_sequence 时，child chain 导致 turn owner 非终局死亡，不得清 pending_slash 跳过剩余直接目标提前切回合。必须完成已锁定 direct target_sequence → root exactly-once finalize → 再结束 dead owner turn。状态：`CLOSED`。（Duel 属于独立交叉覆盖，不是 F-004。）
+  3) `F-005`：Lightning original target survives，chain child 非终局死亡时，不得 shandian_victory_cleanup 或提前清 pending_judgment。之后仍必须 JUDGMENT → DRAW（真实摸2） → PLAY。状态：`CLOSED`。（Zhangba 虚拟杀属于独立交叉覆盖，不是 F-005。）
+  4) `F-006`：`_PendingSlash` 的 `target_sequence` 与 `current_target_index` 属于 Class-A future-behavior state，必须进入 execution hash。状态：`CLOSED`。
+  5) `C123-R1-NEW-001`：turn owner 在 chain 中先死亡，后续 child 再 dying / rescue / death，deferred turn-end responsibility 不得丢失。root 完成后必须下一存活角色 PREPARE，不能 zombie PLAY。状态：`CLOSED`。
+  6) `C123-GLOBAL-001`：Fangtian multi-target elemental Slash 第一直接目标触发 chain + DYING/rescue/death 时，child resolution 不得提前 finish 仍被 parent 持有的实体 Slash root。parent 未结束前：root card = PROCESSING，全部 target_sequence 完成后：exactly-once finish。状态：`CLOSED`。
+- 独立外部 adversarial probes：**8 / 8 PASSED**
+  覆盖：
+  - group-target trick
+  - Duel
+  - Lightning / delayed judgment
+  - weapon / armor combinations
+  - topology / atomicity / hash
+  - C123-GLOBAL-001 regression
+  - 2v2 death reward deck-exhaustion draw
+  - deterministic replay / reexecution
+- 专项 remediation regression：**56 passed in 52.56s**
+- 完整独立 pytest：**2521 passed in 1957.95s (0:32:37)**
+  （独立审计在 detached 目标 SHA `18c39c65…` 上实际执行
+  `python -m pytest -q -p no:cacheprovider --basetemp=D:\MyGPT\pytest-temp-gemini\c123-global-audit-2\basetemp-full`；
+  运行后 audit worktree 保持 clean，无仓库内 probe 污染）。
+- 编译检查：`python -m compileall -q scripts tests`，Exit Code 0。
+- Readiness 范围与边界（`AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`）：
+  含义严格限定为：当前 18c39c65 checkpoint 上已实现的 Post-B C1/C2/C3 production scope 完成第二轮跨检查点整体独立敌对审计并通过，满足继续后续开发的质量门禁。
+  不声明为 `PRODUCTION_RELEASE_READY` / `FULL_GAME_READY` / `ALL_CARD_RULES_COMPLETE` 或整个三国杀规则已完成独立审计。
+- 规则排除项保持保留：
+  - 酒 × 方天画戟 = `BLOCKED_BY_RULE_SOURCE` / `N-001`
+  - `NESTED_INDEPENDENT_ATTRIBUTE_DAMAGE_DURING_CHAIN` = `WAITING_FOR_VERIFICATION`
+- 全局审计历史事实完整保留：
+  第一次跨检查点全局审计在 `54201375cdb8b82b9af0947de49b0002c5bf4188` 上的结论为 FAILED / BLOCKER FOUND（发现 C123-GLOBAL-001），随后经 7979eca3 remediation implementation → independent re-audit (CLOSED) → 18c39c65 status closure → 本轮 Global Audit 2 on 18c39c65 (C123_GLOBAL_AUDIT_2_PASSED)。历史审计事实未被改写。
 
 **formal duel 防回归**：seed 0 → p2/388/43、seed 7 → p2/162/17
 （与 R5/R8 记录一致；全量套件覆盖）。
