@@ -20,7 +20,15 @@
   implementation commit = `677d81c131df1e02842919b47e7ab6c02c8c703b`。
   本文件随后的 status-closure commit 只记录复审结果，不得冒充该
   implementation SHA。C1/C2/C3 整轨仍不是独立全量审计通过。）
-- `C123-GLOBAL-001` = `IMPLEMENTED_PENDING_INDEPENDENT_REAUDIT`（全局跨检查点敌对审计发现方天多目标火杀第一目标连环濒死被救后提前 finish 根牌缺陷，已修复收敛至 _finish_pending_damage_card / _finish_slash_processing 统一父根所有权模型，待独立复审。）
+- `C123-GLOBAL-001` = `CLOSED`（`C123_GLOBAL_REMEDIATION_1_REAUDIT_PASSED`；被审计
+  implementation commit = `7979eca3d27e8a74f29062e344b2fa05081aad66`。
+  本文件随后的 status-closure commit 只记录复审结果，不得冒充该
+  implementation SHA。HISTORICAL 全局跨检查点敌对审计目标
+  `54201375cdb8b82b9af0947de49b0002c5bf4188` 结论为 FAILED /
+  BLOCKER FOUND（C123-GLOBAL-001
+  MULTITARGET_SLASH_ROOT_PREMATURE_FINISH_AFTER_RESCUED_CHAIN_TARGET），
+  不得改写为当时误报或 `C123_GLOBAL_AUDIT_PASSED`。C1/C2/C3 整轨仍不是
+  独立全量审计通过。）
 
 ### 0.1 C2 摘要（MULTIPLAYER CARD SEMANTICS CLOSURE）
 
@@ -318,8 +326,8 @@ C3 停止后不自动开始斗地主（§3 模式规则保持 Knowledge-only）�
 unsupported=0、无安全上限触发、严格重执行逐决策验证一致、合法队伍胜者。
 
 **实现身份**：当前实现 `implementation_identity()` =
-`ae526e1316265267c6f87f209bcb73bf99d36553f09e60d000ac3c0e9bfbdc41`
-（C123 正交 remediation 2 后随源码更新；冻结 R8 证据 `06c8b2d3…`
+`710c766dd2d5f910a87822f410e4c1c44f867773a0ec7a4fe314e99fa42029ec`
+（C123 全局 remediation 1 后随源码更新；冻结 R8 证据 `06c8b2d3…`
 仍是历史证据，未被改写）。
 
 C123 正交 remediation 2 的被审计 implementation commit =
@@ -396,6 +404,85 @@ TURN_OWNER_DEATH_CHAIN_CONTINUATION_LOST；CURRENT 状态 `CLOSED`，
 - 未知规则未改：酒×方天仍为失败关闭（`BLOCKED_BY_RULE_SOURCE`）；
   `NESTED_INDEPENDENT_ATTRIBUTE_DAMAGE_DURING_CHAIN` 仍为
   `WAITING_FOR_VERIFICATION`。本轮不得借状态收口猜规则。
+
+**C123 全局 remediation 1**（C123-GLOBAL-001
+MULTITARGET_SLASH_ROOT_PREMATURE_FINISH_AFTER_RESCUED_CHAIN_TARGET；
+CURRENT 状态 `CLOSED`，独立复审结论
+`C123_GLOBAL_REMEDIATION_1_REAUDIT_PASSED`。HISTORICAL/AS-OF：
+实现提交当时为 `IMPLEMENTED_PENDING_INDEPENDENT_REAUDIT`。
+HISTORICAL 全局跨检查点敌对审计目标
+`54201375cdb8b82b9af0947de49b0002c5bf4188` 结论为 FAILED /
+BLOCKER FOUND，不得改写为当时误报或 `C123_GLOBAL_AUDIT_PASSED`）：
+
+- 原缺陷：方天多目标【火杀】第一目标连环濒死被救后，错误提前 finish 根牌，
+  导致实体牌离开 PROCESSING，外层方天根继续剩余目标时二次 finish
+  失败关闭。
+- 修复收敛至 `_finish_pending_damage_card` /
+  `_finish_slash_processing` 统一父根所有权模型。
+- 回归：`tests/test_post_b_c123_global_remediation_1.py`。
+- 实现者本地全量 pytest 2521 passed 只是 implementation 自证，
+  不是独立 closure 依据。
+
+C123 全局 remediation 1 的被审计 implementation commit =
+`7979eca3d27e8a74f29062e344b2fa05081aad66`。本文件随后的
+status-closure commit 只记录复审结果，不得冒充该 implementation SHA。
+
+HISTORICAL/AS-OF（实现提交当时）：
+`IMPLEMENTED_PENDING_INDEPENDENT_REAUDIT`。
+
+CURRENT：C123-GLOBAL-001 = `CLOSED`；独立复审结论
+`C123_GLOBAL_REMEDIATION_1_REAUDIT_PASSED`。C1/C2/C3 整轨仍不是
+独立全量审计通过。HISTORICAL 全局跨检查点敌对审计 = FAILED /
+BLOCKER FOUND，与本轮 rem1 re-audit = PASSED 不得混写。
+
+**C123 全局 rem1 独立复审证据**（provenance 分层，不得混写）：
+
+- 被审计 implementation SHA：
+  `7979eca3d27e8a74f29062e344b2fa05081aad66`
+- Independent adversarial re-audit：PASSED
+  （Grok 4.6 xhigh；FINAL_VERDICT=`C123_GLOBAL_REMEDIATION_1_REAUDIT_PASSED`）
+- Finding 状态：C123-GLOBAL-001=`CLOSED`
+- 历史 finding 无回归：F-003=`CLOSED`；F-004=`CLOSED`；
+  F-005=`CLOSED`；F-006=`CLOSED`；C123-R1-NEW-001=`CLOSED`
+  （编号与历史定义不变；本次 independent re-audit 再次确认无回归）
+- Independent production probe：PASSED
+  （仓库外路径
+  `D:\MyGPT\pytest-temp-grok\c123-global-rem1-reaudit\probe_c123_global_001.py`；
+  使用真实 `Formal2v2Session.step()` 重构造主 finding。
+  关键中间态：p2 桃救回后 root Fire Slash=`PROCESSING`；
+  chain 继续处理期间 root Fire Slash=`PROCESSING`；
+  回到方天后续直接目标时 root Fire Slash=`PROCESSING`；
+  全部 `target_sequence` 真正完成后 root Fire Slash=`DISCARD_PILE`；
+  根牌实际 finish exactly once；桃救回该 step 根牌 DISCARD 事件次数=0；
+  最终 PROCESSING 无 orphan。
+  因此确认本轮不是依靠 `location != PROCESSING` → idempotent return
+  把旧 crash 静默吞掉；父 root ownership 中间态真实成立。）
+- Independent targeted pytest：实现专项 13 passed；历史正交
+  remediation 20 passed；chain / weapon / Borrowed Sword / 2v2 draw /
+  mode / replay / C2 等 310 passed。
+- Independent full pytest：2521 passed in 1501.78s
+  （独立审计在 detached 目标 SHA `7979eca3…` 上实际执行
+  `python -m pytest -q -p no:cacheprovider
+  --basetemp=D:\MyGPT\pytest-temp-grok\c123-global-rem1-reaudit\basetemp-full`；
+  不是继承 implementation report。审计结束 HEAD 仍为
+  `7979eca3d27e8a74f29062e344b2fa05081aad66`，detached，
+  `git status --short` 为空。）
+- C1/C2/C3 整轨仍不是独立全量审计通过。本轮只关闭
+  C123-GLOBAL-001，不写成 `FULL_GLOBAL_AUDIT_COMPLETE`。
+- 未知规则未改：酒×方天仍为失败关闭（`BLOCKED_BY_RULE_SOURCE`）；
+  `NESTED_INDEPENDENT_ATTRIBUTE_DAMAGE_DURING_CHAIN` 仍为
+  `WAITING_FOR_VERIFICATION`。本轮不得借状态收口猜规则。
+- 非阻塞观察（本次状态收口不改代码）：
+  1) `_finish_slash_processing` 中 physical card 不在 PROCESSING
+     → empty idempotent return，在当前生产路径中存在合法重复到达
+     （例如单目标属性杀已合法 exactly-once finish，后续 chain child
+     产生 terminal victory，terminal cleanup 再次进入 finalizer）。
+     独立审计未找到 parent still open + root card missing +
+     idempotent branch 静默吞错误 的 production reachable defect。
+     记录为 NONBLOCKING OBSERVATION。
+  2) `assert_resolution_invariants` 尚未直接断言 pending physical
+     Slash root open → entity card 必须仍在 PROCESSING。
+     同属非阻塞架构观察，不是当前 blocker。
 
 **formal duel 防回归**：seed 0 → p2/388/43、seed 7 → p2/162/17
 （与 R5/R8 记录一致；全量套件覆盖）。
