@@ -15,6 +15,7 @@
 """
 
 from dataclasses import fields, replace
+from types import MappingProxyType
 from typing import Any
 import pytest
 
@@ -33,6 +34,10 @@ from scripts.sgs_engine.mode_doudizhu import (
     DoudizhuOutcomePolicy,
     FormalDoudizhuConfiguration,
     FormalDoudizhuSession,
+)
+from scripts.sgs_engine.mode_2v2 import (
+    Formal2v2Configuration,
+    Formal2v2Session,
 )
 from scripts.sgs_engine.production_batch import (
     EXECUTION_HASH_RUNTIME_INVENTORY,
@@ -105,6 +110,71 @@ def _pass_all_rescues(game: ProductionBasicCardBatch) -> None:
         _step(game, _require_op(game, "pass_rescue"))
 
 
+def _place_delayed_trick(
+    game: ProductionBasicCardBatch,
+    player_id: str,
+    card_key: str = "sgs_delayed_lebusi",
+) -> str:
+    """测试装配：放入真实延时锦囊实体并登记 authoritative entry index。"""
+
+    instance_id = _give_card(game, player_id, card_key)
+    game._state = game.state.move_card(
+        instance_id, ZoneRef.judgment(player_id)
+    )
+    entry_index = game.runtime.judgment_entry_counter + 1
+    game._runtime = replace(
+        game.runtime,
+        judgment_entry_indices=MappingProxyType(
+            {
+                **game.runtime.judgment_entry_indices,
+                instance_id: entry_index,
+            }
+        ),
+        judgment_entry_counter=entry_index,
+    )
+    return instance_id
+
+
+def _discard_moves(
+    game: ProductionBasicCardBatch, instance_id: str
+) -> list[object]:
+    return [
+        event
+        for event in game.events
+        if event.event_type is EventType.CARD_MOVED
+        and event.card_instance_id == instance_id
+        and event.payload.get("destination", {}).get("kind")
+        == "discard_pile"
+    ]
+
+
+def _end_current_turn(game: ProductionBasicCardBatch) -> None:
+    """从 PLAY 走真实弃牌与结束阶段，推进至下一存活角色。"""
+
+    assert game.phase is ProductionPhase.PLAY
+    _step(game, _require_op(game, "end_play_phase"))
+    while game.phase is ProductionPhase.DISCARD:
+        submit = _op(game, "discard_phase_submit")
+        if submit is not None:
+            _step(game, submit)
+        else:
+            _step(game, _require_op(game, "select_discard_card"))
+    _step(game, _require_op(game, "end_turn"))
+
+
+def _drain_deck_to(game: ProductionBasicCardBatch, count: int) -> None:
+    ids = list(game.state.card_ids_in(DRAW_PILE))
+    assert len(ids) >= count
+    game._state = game.state.move_cards(
+        {instance_id: DISCARD_PILE for instance_id in ids[count:]}
+    )
+
+
+def _pass_judgment_wuxie(game: ProductionBasicCardBatch) -> None:
+    while _op(game, "pass_judgment_wuxie") is not None:
+        _step(game, _require_op(game, "pass_judgment_wuxie"))
+
+
 def test_pending_peasant_reward_inventory_covers_fields() -> None:
     """_PendingPeasantDeathReward dataclass 字段与 inventory 精确一致。"""
     dataclass_fields = {f.name for f in fields(_PendingPeasantDeathReward)}
@@ -122,10 +192,11 @@ def _session(seed: int = 100) -> FormalDoudizhuSession:
 
 
 def test_peasant_death_opens_reward_choice_window() -> None:
-    """农民 p2 死亡后，胜负未成立（p3 存活），打开 PEASANT_REWARD_CHOICE 窗口。"""
+    """C4-AUDIT-001 A：奖励窗口打开时死亡判定区索引已权威清洗。"""
     game = _session(seed=101)
     _enter_play(game)
     _strip_hand(game, "p2")
+    dead_delayed_id = _place_delayed_trick(game, "p2")
     _give_card(game, "p1", "sgs_basic_sha")
     game._state = _replace_player(game.state, "p2", hp=1)
 
@@ -142,6 +213,18 @@ def test_peasant_death_opens_reward_choice_window() -> None:
     assert game.runtime.pending_peasant_reward is not None
     assert game.runtime.pending_peasant_reward.dead_peasant_id == "p2"
     assert game.runtime.pending_peasant_reward.chooser_id == "p3"
+    assert dead_delayed_id not in game.state.card_ids_in(
+        ZoneRef.judgment("p2")
+    )
+    assert game.state.location_of(dead_delayed_id) == DISCARD_PILE
+    assert dead_delayed_id not in game.runtime.judgment_entry_indices
+    runtime_audit = game.runtime.audit_value()
+    assert dead_delayed_id not in runtime_audit["judgment_entry_indices"]
+    snapshot_runtime = game.execution_snapshot["runtime"]
+    assert isinstance(snapshot_runtime, dict)
+    assert dead_delayed_id not in snapshot_runtime[
+        "judgment_entry_indices"
+    ]
 
     # 验证合法动作为三项互斥选择
     legal = game.legal_actions()
@@ -153,18 +236,24 @@ def test_peasant_death_opens_reward_choice_window() -> None:
 
 
 def test_peasant_reward_recover_hp_choice() -> None:
-    """存活农民选择回血：体力回复1点（上限封顶），挂起状态清空，继续游戏。"""
+    """C4-AUDIT-001 B：回血奖励不能恢复死亡判定区 ghost index。"""
     game = _session(seed=102)
     _enter_play(game)
     _strip_hand(game, "p2")
+    dead_delayed_id = _place_delayed_trick(game, "p2")
     _give_card(game, "p1", "sgs_basic_sha")
     game._state = _replace_player(game.state, "p2", hp=1)
     game._state = _replace_player(game.state, "p3", hp=2)
 
-    _step(game, _require_op(game, "use_slash", targets=("p2",)))
+    slash_action = _require_op(game, "use_slash", targets=("p2",))
+    assert slash_action.card_instance_id is not None
+    slash_id = slash_action.card_instance_id
+    _step(game, slash_action)
     _step(game, _require_op(game, "pass_slash_response"))
     _pass_all_rescues(game)
     assert game.phase is ProductionPhase.PEASANT_REWARD_CHOICE
+    assert slash_id not in game.state.card_ids_in(PROCESSING_ZONE)
+    assert len(_discard_moves(game, slash_id)) == 1
 
     # p3 选择回复体力
     _step(game, _require_op(game, "peasant_reward_recover_hp"))
@@ -173,13 +262,16 @@ def test_peasant_reward_recover_hp_choice() -> None:
     assert game.state.players_by_id["p3"].hp == 3
     assert game.runtime.pending_peasant_reward is None
     assert game.phase is ProductionPhase.PLAY
+    assert dead_delayed_id not in game.runtime.judgment_entry_indices
+    assert len(_discard_moves(game, slash_id)) == 1
 
 
 def test_peasant_reward_draw_two_choice() -> None:
-    """存活农民选择摸2张牌：正常摸2张牌，挂起状态清空，继续游戏。"""
+    """C4-AUDIT-001 B：摸二奖励不能恢复死亡判定区 ghost index。"""
     game = _session(seed=103)
     _enter_play(game)
     _strip_hand(game, "p2")
+    dead_delayed_id = _place_delayed_trick(game, "p2")
     _give_card(game, "p1", "sgs_basic_sha")
     game._state = _replace_player(game.state, "p2", hp=1)
 
@@ -198,13 +290,15 @@ def test_peasant_reward_draw_two_choice() -> None:
     assert p3_hand_after == p3_hand_before + 2
     assert game.runtime.pending_peasant_reward is None
     assert game.phase is ProductionPhase.PLAY
+    assert dead_delayed_id not in game.runtime.judgment_entry_indices
 
 
 def test_peasant_reward_draw_two_deck_exhaustion_draw() -> None:
-    """选择摸2张牌但牌堆不足时，原子摸牌事务就地触发牌堆耗尽平局。"""
+    """C4-AUDIT-001 E：摸二耗尽牌堆终局也不得保存 ghost index。"""
     game = _session(seed=104)
     _enter_play(game)
     _strip_hand(game, "p2")
+    dead_delayed_id = _place_delayed_trick(game, "p2")
     _give_card(game, "p1", "sgs_basic_sha")
     game._state = _replace_player(game.state, "p2", hp=1)
 
@@ -212,27 +306,39 @@ def test_peasant_reward_draw_two_deck_exhaustion_draw() -> None:
     _step(game, _require_op(game, "pass_slash_response"))
     _pass_all_rescues(game)
     assert game.phase is ProductionPhase.PEASANT_REWARD_CHOICE
+    assert dead_delayed_id not in game.runtime.judgment_entry_indices
 
-    # 此时排空牌堆至仅剩1张
-    cards_in_deck = list(game.state.card_ids_in(DRAW_PILE))
-    for cid in cards_in_deck[1:]:
-        game._state = game.state.move_card(cid, DISCARD_PILE)
-    assert len(game.state.card_ids_in(DRAW_PILE)) == 1
+    # 保留恰好2张，使摸牌完整执行后耗尽并形成正式平局。
+    _drain_deck_to(game, 2)
+    p3_hand_before = len(game.state.card_ids_in(ZoneRef.hand("p3")))
 
-    # p3 选择摸2张（预检不足）
+    # p3 选择摸2张（完整摸取后牌堆为0）
     _step(game, _require_op(game, "peasant_reward_draw_two"))
 
     # 形成正式平局终局
     assert game.is_finished is True
     assert game.winner_id is None
     assert game.runtime.game_over_reason == "doudizhu_draw_deck_exhausted"
+    assert len(game.state.card_ids_in(ZoneRef.hand("p3"))) == (
+        p3_hand_before + 2
+    )
+    assert dead_delayed_id not in game.runtime.judgment_entry_indices
+    assert dead_delayed_id not in game.runtime.audit_value()[
+        "judgment_entry_indices"
+    ]
+    snapshot_runtime = game.execution_snapshot["runtime"]
+    assert isinstance(snapshot_runtime, dict)
+    assert dead_delayed_id not in snapshot_runtime[
+        "judgment_entry_indices"
+    ]
 
 
 def test_peasant_reward_decline_choice() -> None:
-    """存活农民选择放弃两项奖励（PASS）：状态不变，继续游戏。"""
+    """C4-AUDIT-001 B：放弃奖励不能恢复死亡判定区 ghost index。"""
     game = _session(seed=105)
     _enter_play(game)
     _strip_hand(game, "p2")
+    dead_delayed_id = _place_delayed_trick(game, "p2")
     _give_card(game, "p1", "sgs_basic_sha")
     game._state = _replace_player(game.state, "p2", hp=1)
     game._state = _replace_player(game.state, "p3", hp=2)
@@ -252,18 +358,151 @@ def test_peasant_reward_decline_choice() -> None:
     assert len(game.state.card_ids_in(ZoneRef.hand("p3"))) == p3_hand_before
     assert game.runtime.pending_peasant_reward is None
     assert game.phase is ProductionPhase.PLAY
+    assert dead_delayed_id not in game.runtime.judgment_entry_indices
+
+
+def test_c4_audit_001_next_landlord_judgment_keeps_live_entry() -> None:
+    """C4-AUDIT-001 C：只清死者索引，下一真实判定者的索引正常结算。"""
+
+    game = _session(seed=116)
+    _enter_play(game)
+    _strip_hand(game, "p2")
+    landlord_delayed_id = _place_delayed_trick(game, "p1")
+    dead_delayed_id = _place_delayed_trick(game, "p2")
+    _give_card(game, "p1", "sgs_basic_sha")
+    game._state = _replace_player(game.state, "p2", hp=1)
+
+    _step(game, _require_op(game, "use_slash", targets=("p2",)))
+    _step(game, _require_op(game, "pass_slash_response"))
+    _pass_all_rescues(game)
+
+    assert game.phase is ProductionPhase.PEASANT_REWARD_CHOICE
+    assert dead_delayed_id not in game.runtime.judgment_entry_indices
+    assert landlord_delayed_id in game.runtime.judgment_entry_indices
+    assert game.state.location_of(landlord_delayed_id) == ZoneRef.judgment(
+        "p1"
+    )
+
+    _step(game, _require_op(game, "peasant_reward_decline"))
+    assert game.phase is ProductionPhase.PLAY
+    assert dead_delayed_id not in game.runtime.judgment_entry_indices
+    assert landlord_delayed_id in game.runtime.judgment_entry_indices
+
+    # p1 结束；已死亡 p2 被跳过，p3 完整走一回合后回到 p1。
+    _end_current_turn(game)
+    assert game.current_player_id == "p3"
+    _enter_play(game)
+    _end_current_turn(game)
+    assert game.current_player_id == "p1"
+    assert game.phase is ProductionPhase.PREPARE
+
+    _step(game, _require_op(game, "proceed_prepare"))
+    if game.phase is ProductionPhase.FEIYANG_ACTIVATE:
+        _step(game, _require_op(game, "feiyang_decline"))
+    assert game.phase is ProductionPhase.JUDGMENT
+    assert dead_delayed_id not in game.runtime.judgment_entry_indices
+    assert landlord_delayed_id in game.runtime.judgment_entry_indices
+
+    # _open_next_judgment 会先执行全局 entry invariant；不得因 p2 ghost 失败。
+    _step(game, _require_op(game, "proceed_judgment"))
+    assert game.phase is ProductionPhase.JUDGMENT_WUXIE
+    assert game.runtime.pending_judgment is not None
+    assert (
+        game.runtime.pending_judgment.trick_instance_id
+        == landlord_delayed_id
+    )
+    _pass_judgment_wuxie(game)
+
+    assert any(
+        event.event_type is EventType.JUDGMENT_STARTED
+        and event.card_instance_id == landlord_delayed_id
+        for event in game.events
+    )
+    assert any(
+        event.event_type is EventType.JUDGMENT_RESULT
+        and event.card_instance_id is not None
+        and event.payload.get("delayed_trick_instance_id")
+        == landlord_delayed_id
+        for event in game.events
+    )
+    assert dead_delayed_id not in game.runtime.judgment_entry_indices
+    assert landlord_delayed_id not in game.runtime.judgment_entry_indices
+    assert landlord_delayed_id not in game.state.card_ids_in(
+        ZoneRef.judgment("p1")
+    )
+    game.assert_resolution_invariants()
+
+
+def test_c4_audit_001_2v2_synchronous_reward_and_next_judgment() -> None:
+    """C4-AUDIT-001 2v2 正交：同步摸1、无三选一、下一判定正常。"""
+
+    game = Formal2v2Session(
+        seed=117,
+        configuration=Formal2v2Configuration.formal_profile(),
+        session_id="test-c4-audit-001-2v2",
+    )
+    _enter_play(game)
+    _strip_hand(game, "p2")
+    dead_delayed_id = _place_delayed_trick(game, "p2")
+    teammate_delayed_id = _place_delayed_trick(game, "p3")
+    _give_card(game, "p1", "sgs_basic_sha")
+    game._state = _replace_player(game.state, "p2", hp=1)
+    p3_hand_before = len(game.state.card_ids_in(ZoneRef.hand("p3")))
+
+    _step(game, _require_op(game, "use_slash", targets=("p2",)))
+    _step(game, _require_op(game, "pass_slash_response"))
+    _pass_all_rescues(game)
+
+    assert game.phase is ProductionPhase.PLAY
+    assert game.runtime.pending_peasant_reward is None
+    assert len(game.state.card_ids_in(ZoneRef.hand("p3"))) == (
+        p3_hand_before + 1
+    )
+    assert "death_reward_teammate_draw" in {
+        event.payload.get("reason") for event in game.events
+    }
+    assert dead_delayed_id not in game.runtime.judgment_entry_indices
+    assert teammate_delayed_id in game.runtime.judgment_entry_indices
+    assert all(
+        entry.phase is not ProductionPhase.PEASANT_REWARD_CHOICE
+        for entry in game.phase_history
+    )
+
+    # p2 已死亡，p1 回合结束后直接到 p3，且 p3 自己的判定正常打开。
+    _end_current_turn(game)
+    assert game.current_player_id == "p3"
+    _step(game, _require_op(game, "proceed_prepare"))
+    assert game.phase is ProductionPhase.JUDGMENT
+    _step(game, _require_op(game, "proceed_judgment"))
+    assert game.runtime.pending_judgment is not None
+    assert (
+        game.runtime.pending_judgment.trick_instance_id
+        == teammate_delayed_id
+    )
+    _pass_judgment_wuxie(game)
+    assert any(
+        event.event_type is EventType.JUDGMENT_STARTED
+        and event.card_instance_id == teammate_delayed_id
+        for event in game.events
+    )
+    assert dead_delayed_id not in game.runtime.judgment_entry_indices
+    game.assert_resolution_invariants()
 
 
 def test_peasant_reward_during_group_trick_preserves_root() -> None:
-    """群体锦囊（南蛮）目标 p2 死亡后，在奖励选择期间根牌保持 PROCESSING，选择后继续 p3 响应。"""
+    """C4-AUDIT-001 D：南蛮奖励暂停保留根并清除死亡判定索引。"""
     game = _session(seed=106)
     _enter_play(game)
     _strip_hand(game, "p2")
+    dead_delayed_id = _place_delayed_trick(game, "p2")
     _give_card(game, "p1", "sgs_trick_nanmanruqin")
     game._state = _replace_player(game.state, "p2", hp=1)
 
     # p1 使用南蛮入侵
-    _step(game, _require_op(game, "use_nanman"))
+    nanman_action = _require_op(game, "use_nanman")
+    assert nanman_action.card_instance_id is not None
+    nanman_id = nanman_action.card_instance_id
+    _step(game, nanman_action)
     # 无懈阶段 pass
     while game.phase is ProductionPhase.TRICK_RESPONSE:
         _step(game, _require_op(game, "pass_trick_response"))
@@ -277,8 +516,10 @@ def test_peasant_reward_during_group_trick_preserves_root() -> None:
 
     # 处于奖励选择窗口，根南蛮必须仍在 PROCESSING 区
     assert game.phase is ProductionPhase.PEASANT_REWARD_CHOICE
-    assert len(game.state.card_ids_in(PROCESSING_ZONE)) > 0
+    assert nanman_id in game.state.card_ids_in(PROCESSING_ZONE)
     assert game.runtime.pending_group_trick is not None
+    assert dead_delayed_id not in game.runtime.judgment_entry_indices
+    assert _discard_moves(game, nanman_id) == []
 
     # p3 做出奖励选择
     _step(game, _require_op(game, "peasant_reward_decline"))
@@ -289,11 +530,20 @@ def test_peasant_reward_during_group_trick_preserves_root() -> None:
     assert game.phase is ProductionPhase.NANMAN_RESPONSE
     assert game.current_actor_id == "p3"
     assert game.runtime.pending_group_trick.responder_id == "p3"
-    assert len(game.state.card_ids_in(PROCESSING_ZONE)) > 0
+    assert nanman_id in game.state.card_ids_in(PROCESSING_ZONE)
+    assert dead_delayed_id not in game.runtime.judgment_entry_indices
+
+    # 完成最后目标，根南蛮必须恰好 finalize 一次并回到地主出牌阶段。
+    _step(game, _require_op(game, "pass_nanman_slash"))
+    assert game.phase is ProductionPhase.PLAY
+    assert game.current_player_id == "p1"
+    assert nanman_id not in game.state.card_ids_in(PROCESSING_ZONE)
+    assert len(_discard_moves(game, nanman_id)) == 1
+    assert dead_delayed_id not in game.runtime.judgment_entry_indices
 
 
 def test_turn_owner_peasant_death_deferred_turn_end_after_reward() -> None:
-    """当前回合农民 p2 决斗自伤死亡时，推迟的回合结束在存活农民 p3 奖励选择完成后执行。"""
+    """C4-AUDIT-001 D：决斗自伤死亡清索引并延后兑现回合结束。"""
     game = _session(seed=107)
     # 结束 p1 回合进入 p2 回合
     _enter_play(game)
@@ -309,7 +559,8 @@ def test_turn_owner_peasant_death_deferred_turn_end_after_reward() -> None:
     assert game.current_player_id == "p2"
     _enter_play(game)
     _strip_hand(game, "p2")
-    _give_card(game, "p2", "sgs_trick_juedou")
+    dead_delayed_id = _place_delayed_trick(game, "p2")
+    duel_id = _give_card(game, "p2", "sgs_trick_juedou")
     _give_card(game, "p1", "sgs_basic_sha")
     game._state = _replace_player(game.state, "p2", hp=1)
 
@@ -333,6 +584,9 @@ def test_turn_owner_peasant_death_deferred_turn_end_after_reward() -> None:
     assert game.phase is ProductionPhase.PEASANT_REWARD_CHOICE
     assert game.current_actor_id == "p3"
     assert game.runtime.deferred_turn_end_after_owner_death is True
+    assert dead_delayed_id not in game.runtime.judgment_entry_indices
+    assert duel_id not in game.state.card_ids_in(PROCESSING_ZONE)
+    assert len(_discard_moves(game, duel_id)) == 1
 
     # p3 提交奖励选择
     _step(game, _require_op(game, "peasant_reward_decline"))
@@ -340,20 +594,24 @@ def test_turn_owner_peasant_death_deferred_turn_end_after_reward() -> None:
     # p2 的回合结束并切换到下一存活角色（p3）的准备阶段
     assert game.current_player_id == "p3"
     assert game.phase is ProductionPhase.PREPARE
+    assert game.runtime.pending_duel is None
+    assert dead_delayed_id not in game.runtime.judgment_entry_indices
+    assert len(_discard_moves(game, duel_id)) == 1
 
 
 def test_fangtian_slash_first_peasant_death_decline_and_continue_sequence() -> None:
-    """方天画戟多目标：首个目标农民死亡后进入奖励选择（decline），奖励后根杀保持、锁定目标队列继续推进、恰好一次finalize。"""
+    """C4-AUDIT-001 D：方天多目标奖励暂停清索引且根恰好完成一次。"""
     game = _session(seed=108)
     _enter_play(game)
     _strip_hand(game, "p1")
     _strip_hand(game, "p2")
     _strip_hand(game, "p3")
+    dead_delayed_id = _place_delayed_trick(game, "p2")
 
     # p1 装备方天画戟，手牌仅留一张【杀】（满足最后一张手牌触发方天多目标）
     _give_card(game, "p1", "sgs_weapon_fangtianhuaji")
     _step(game, _require_op(game, "use_weapon"))
-    _give_card(game, "p1", "sgs_basic_sha")
+    slash_id = _give_card(game, "p1", "sgs_basic_sha")
 
     # p2 设为 1 HP，p3 设为 2 HP
     game._state = _replace_player(game.state, "p2", hp=1)
@@ -376,6 +634,9 @@ def test_fangtian_slash_first_peasant_death_decline_and_continue_sequence() -> N
     assert game.runtime.pending_slash is not None
     assert game.runtime.pending_slash.target_sequence == ("p2", "p3")
     assert game.runtime.pending_slash.current_target_index == 0
+    assert dead_delayed_id not in game.runtime.judgment_entry_indices
+    assert slash_id in game.state.card_ids_in(PROCESSING_ZONE)
+    assert _discard_moves(game, slash_id) == []
 
     # p3 选择放弃奖励
     _step(game, _require_op(game, "peasant_reward_decline"))
@@ -386,6 +647,7 @@ def test_fangtian_slash_first_peasant_death_decline_and_continue_sequence() -> N
     assert game.runtime.pending_slash is not None
     assert game.runtime.pending_slash.current_target_index == 1
     assert len(game.state.card_ids_in(PROCESSING_ZONE)) == 1
+    assert dead_delayed_id not in game.runtime.judgment_entry_indices
 
     # p3 放弃响应受到伤害
     _step(game, _require_op(game, "pass_slash_response"))
@@ -395,6 +657,8 @@ def test_fangtian_slash_first_peasant_death_decline_and_continue_sequence() -> N
     # 根【杀】在全部目标完成后恰好一次 finalize 并离开处理区
     assert len(game.state.card_ids_in(PROCESSING_ZONE)) == 0
     assert game.runtime.pending_slash is None
+    assert len(_discard_moves(game, slash_id)) == 1
+    assert dead_delayed_id not in game.runtime.judgment_entry_indices
     # 地主未死亡，回合不得提前切换，正确返回出牌阶段
     assert game.current_player_id == "p1"
     assert game.phase is ProductionPhase.PLAY

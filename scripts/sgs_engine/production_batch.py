@@ -13358,6 +13358,16 @@ class ProductionBasicCardBatch:
                     runtime,
                     deferred_turn_end_after_owner_death=True,
                 )
+            # C4-AUDIT-001：死亡区域清理已经形成新的 authoritative
+            # judgment entry 状态。模式钩子可能打开异步奖励窗口并在此
+            # 暂停 continuation，因此必须先把清洗结果写回 runtime，不能
+            # 只保存在后续 helper 的局部参数中。
+            runtime = replace(
+                runtime,
+                judgment_entry_indices=(
+                    judgment_entry_indices_after_death
+                ),
+            )
             if mode_policy is not None and hasattr(
                 mode_policy, "death_confirmed_hook"
             ):
