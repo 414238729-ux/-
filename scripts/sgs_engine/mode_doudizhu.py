@@ -16,7 +16,7 @@ OutcomePolicy、既有 events/actions/damage/dying/death/phase loop）。
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from types import MappingProxyType
 from typing import Mapping, Sequence
 
@@ -48,6 +48,54 @@ _TRUSTED_DOUDIZHU_CAPABILITY = object()
 
 class FormalDoudizhuConfigurationError(ValueError):
     """正式斗地主配置非法。"""
+
+
+def _strict_canonical_value_equal(
+    submitted: object, canonical: object
+) -> bool:
+    """递归比较 canonical value，同时要求每个节点的 Python 类型相同。"""
+
+    if type(submitted) is not type(canonical):
+        return False
+    if isinstance(canonical, dict):
+        submitted_items = list(submitted.items())  # type: ignore[union-attr]
+        if len(submitted_items) != len(canonical):
+            return False
+        for canonical_key, canonical_item in canonical.items():
+            for index, (submitted_key, submitted_item) in enumerate(
+                submitted_items
+            ):
+                if _strict_canonical_value_equal(
+                    submitted_key, canonical_key
+                ):
+                    if not _strict_canonical_value_equal(
+                        submitted_item, canonical_item
+                    ):
+                        return False
+                    del submitted_items[index]
+                    break
+            else:
+                return False
+        return not submitted_items
+    if isinstance(canonical, (list, tuple)):
+        return len(submitted) == len(canonical) and all(  # type: ignore[arg-type]
+            _strict_canonical_value_equal(submitted_item, canonical_item)
+            for submitted_item, canonical_item in zip(  # type: ignore[arg-type]
+                submitted, canonical
+            )
+        )
+    return submitted == canonical
+
+
+def _configuration_profile_value(
+    configuration: "FormalDoudizhuConfiguration",
+) -> dict[str, object]:
+    """保留 dataclass 原始容器/元素类型的完整 profile value。"""
+
+    return {
+        definition.name: getattr(configuration, definition.name)
+        for definition in fields(FormalDoudizhuConfiguration)
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,17 +154,27 @@ class FormalDoudizhuConfiguration:
             raise FormalDoudizhuConfigurationError(
                 "正式斗地主初始手牌按座次4/4/4合计12张（§3.5）"
             )
-        if self.first_player_id != self.player_ids[0]:
+        if (
+            not isinstance(self.first_player_id, str)
+            or self.first_player_id != self.player_ids[0]
+        ):
             raise FormalDoudizhuConfigurationError(
                 "正式斗地主先手必须是1号位地主（§3.2.1）"
             )
-        if self.deck_supply_mode != "no_reshuffle_draw":
+        if (
+            not isinstance(self.deck_supply_mode, str)
+            or self.deck_supply_mode != "no_reshuffle_draw"
+        ):
             raise FormalDoudizhuConfigurationError(
                 "正式斗地主牌堆供给口径必须是no_reshuffle_draw"
             )
         if not isinstance(self.hand_qi_ka_allowed, bool):
             raise FormalDoudizhuConfigurationError("hand_qi_ka_allowed必须是布尔值")
-        if not isinstance(self.feiyang_seat, int) or self.feiyang_seat != 1:
+        if (
+            isinstance(self.feiyang_seat, bool)
+            or not isinstance(self.feiyang_seat, int)
+            or self.feiyang_seat != 1
+        ):
             raise FormalDoudizhuConfigurationError("feiyang_seat必须是1号位地主")
         if not isinstance(self.feiyang_enabled, bool) or not self.feiyang_enabled:
             raise FormalDoudizhuConfigurationError("地主飞扬必须启用")
@@ -137,7 +195,10 @@ class FormalDoudizhuConfiguration:
             or self.peasant_slash_limit != 1
         ):
             raise FormalDoudizhuConfigurationError("农民出牌阶段杀上限必须为1")
-        if self.death_reward_mode != "choice_heal1_draw2_decline":
+        if (
+            not isinstance(self.death_reward_mode, str)
+            or self.death_reward_mode != "choice_heal1_draw2_decline"
+        ):
             raise FormalDoudizhuConfigurationError(
                 "农民死亡奖励模式必须是choice_heal1_draw2_decline（§3.7）"
             )
@@ -206,22 +267,26 @@ class FormalDoudizhuConfiguration:
         }
         if set(value) != expected_fields:
             raise FormalDoudizhuConfigurationError("正式斗地主配置字段集不合法")
-        if value["schema"] != "formal-no-skill-doudizhu-configuration-v1":
+        if (
+            type(value["schema"]) is not str
+            or value["schema"]
+            != "formal-no-skill-doudizhu-configuration-v1"
+        ):
             raise FormalDoudizhuConfigurationError("正式斗地主配置schema不受支持")
         return cls(
             player_ids=tuple(value["player_ids"]),  # type: ignore[arg-type]
             base_hp=tuple(value["base_hp"]),  # type: ignore[arg-type]
             base_max_hp=tuple(value["base_max_hp"]),  # type: ignore[arg-type]
             initial_hand_counts=tuple(value["initial_hand_counts"]),  # type: ignore[arg-type]
-            first_player_id=str(value["first_player_id"]),
-            hand_qi_ka_allowed=bool(value["hand_qi_ka_allowed"]),
-            feiyang_seat=int(value["feiyang_seat"]),  # type: ignore[arg-type]
-            feiyang_enabled=bool(value["feiyang_enabled"]),
-            bahu_prepare_draw_enabled=bool(value["bahu_prepare_draw_enabled"]),
-            bahu_slash_limit=int(value["bahu_slash_limit"]),  # type: ignore[arg-type]
-            peasant_slash_limit=int(value["peasant_slash_limit"]),  # type: ignore[arg-type]
-            death_reward_mode=str(value["death_reward_mode"]),
-            deck_supply_mode=str(value["deck_supply_mode"]),
+            first_player_id=value["first_player_id"],  # type: ignore[arg-type]
+            hand_qi_ka_allowed=value["hand_qi_ka_allowed"],  # type: ignore[arg-type]
+            feiyang_seat=value["feiyang_seat"],  # type: ignore[arg-type]
+            feiyang_enabled=value["feiyang_enabled"],  # type: ignore[arg-type]
+            bahu_prepare_draw_enabled=value["bahu_prepare_draw_enabled"],  # type: ignore[arg-type]
+            bahu_slash_limit=value["bahu_slash_limit"],  # type: ignore[arg-type]
+            peasant_slash_limit=value["peasant_slash_limit"],  # type: ignore[arg-type]
+            death_reward_mode=value["death_reward_mode"],  # type: ignore[arg-type]
+            deck_supply_mode=value["deck_supply_mode"],  # type: ignore[arg-type]
         )
 
     @staticmethod
@@ -234,37 +299,46 @@ class FormalDoudizhuConfiguration:
         cls, value: Mapping[str, object]
     ) -> "FormalDoudizhuConfiguration":
         """校验 payload 与 canonical formal profile 完全一致后返回可信配置。"""
-        from json import dumps, loads
 
-        from .replay import canonical_json
-
-        canonical_value = loads(
-            dumps(cls.formal_profile().to_dict(), sort_keys=True)
-        )
-        submitted = loads(canonical_json(value))
-        if submitted != canonical_value:
+        canonical = cls.formal_profile()
+        if not _strict_canonical_value_equal(value, canonical.to_dict()):
             raise FormalDoudizhuConfigurationError(
                 "正式斗地主配置必须与项目 canonical formal profile 完全一致；"
                 "payload 不能自行获得可信规则来源"
             )
-        return cls.formal_profile()
+        return canonical
 
 
+@dataclass(frozen=True, slots=True)
 class TrustedFormalDoudizhuConfiguration(FormalDoudizhuConfiguration):
     """仅由模块内 canonical factory 构造的 trusted 配置。"""
 
-    _capability_token: object = field(default=None, init=False, repr=False)
+    _capability_token: object | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
-        super().__post_init__()
-        object.__setattr__(
-            self, "_capability_token", _TRUSTED_DOUDIZHU_CAPABILITY
-        )
+        # 普通 exact Trusted 构造与 dataclasses.replace 都只完成值校验；
+        # capability 只能由下方模块内 canonical factory 在构造后写入。
+        FormalDoudizhuConfiguration.__post_init__(self)
+
+    def __copy__(self) -> "TrustedFormalDoudizhuConfiguration":
+        # dataclass 的 init=False token 不得通过对象复制转移到新实例。
+        return replace(self)
+
+    def __deepcopy__(
+        self, memo: dict[int, object]
+    ) -> "TrustedFormalDoudizhuConfiguration":
+        del memo
+        return replace(self)
 
 
 def _canonical_formal_doudizhu_profile_value(
 ) -> "TrustedFormalDoudizhuConfiguration":
-    return TrustedFormalDoudizhuConfiguration(
+    configuration = TrustedFormalDoudizhuConfiguration(
         player_ids=("p1", "p2", "p3"),
         base_hp=(5, 4, 4),
         base_max_hp=(5, 4, 4),
@@ -279,6 +353,12 @@ def _canonical_formal_doudizhu_profile_value(
         death_reward_mode="choice_heal1_draw2_decline",
         deck_supply_mode="no_reshuffle_draw",
     )
+    object.__setattr__(
+        configuration,
+        "_capability_token",
+        _TRUSTED_DOUDIZHU_CAPABILITY,
+    )
+    return configuration
 
 
 def assert_trusted_formal_doudizhu_configuration(
@@ -301,9 +381,10 @@ def assert_trusted_formal_doudizhu_configuration(
             "正式斗地主结果只接受真实持有模块私有 capability token 的 "
             "TrustedFormalDoudizhuConfiguration（capability identity 校验）"
         )
-    if (
-        configuration.to_dict()
-        != _canonical_formal_doudizhu_profile_value().to_dict()
+    canonical = _canonical_formal_doudizhu_profile_value()
+    if not _strict_canonical_value_equal(
+        _configuration_profile_value(configuration),
+        _configuration_profile_value(canonical),
     ):
         raise FormalDoudizhuConfigurationError(
             "正式斗地主配置的 profile value 必须精确等于项目 canonical "
@@ -594,13 +675,15 @@ class FormalDoudizhuSession(ProductionBasicCardBatch):
 
     @property
     def formal_result_eligible(self) -> bool:
-        return (
-            _FORMAL_DOUDIZHU_EXECUTION_RELEASED
-            and not self._analysis_only
-            and isinstance(
-                self._formal_configuration, TrustedFormalDoudizhuConfiguration
+        if not _FORMAL_DOUDIZHU_EXECUTION_RELEASED or self._analysis_only:
+            return False
+        try:
+            assert_trusted_formal_doudizhu_configuration(
+                self._formal_configuration
             )
-        )
+        except (TypeError, FormalDoudizhuConfigurationError):
+            return False
+        return True
 
 
 _CANONICAL_DOUDIZHU_SESSION_TYPE = FormalDoudizhuSession

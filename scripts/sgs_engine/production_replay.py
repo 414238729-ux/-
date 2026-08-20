@@ -1946,9 +1946,11 @@ def reexecute_production_replay(
 
         if header.get("fixture_applied") is not False:
             raise ProductionReplayFormatError("正式斗地主回放不得包含初始化夹具")
-        formal_value = _require_mapping(
-            config.get("formal_doudizhu_configuration"),
-            "initial_configuration.formal_doudizhu_configuration",
+        formal_value = _plain(
+            _require_mapping(
+                config.get("formal_doudizhu_configuration"),
+                "initial_configuration.formal_doudizhu_configuration",
+            )
         )
         analysis_only = config.get("analysis_only")
         if not isinstance(analysis_only, bool):
