@@ -216,6 +216,19 @@ from .mode_2v2 import (
     assert_trusted_formal_2v2_configuration,
     inspect_formal_2v2_readiness,
 )
+from .mode_doudizhu import (
+    FORMAL_NO_SKILL_DOUDIZHU_MODE,
+    FormalDoudizhuBlocker,
+    FormalDoudizhuConfiguration,
+    FormalDoudizhuConfigurationError,
+    FormalDoudizhuReadiness,
+    FormalDoudizhuSession,
+    DoudizhuModePolicy,
+    DoudizhuOutcomePolicy,
+    TrustedFormalDoudizhuConfiguration,
+    assert_trusted_formal_doudizhu_configuration,
+    inspect_formal_doudizhu_readiness,
+)
 
 
 __all__ = [
@@ -380,4 +393,15 @@ __all__ = [
     "TwoVsTwoOutcomePolicy",
     "assert_trusted_formal_2v2_configuration",
     "inspect_formal_2v2_readiness",
+    "FORMAL_NO_SKILL_DOUDIZHU_MODE",
+    "FormalDoudizhuBlocker",
+    "FormalDoudizhuConfiguration",
+    "FormalDoudizhuConfigurationError",
+    "FormalDoudizhuReadiness",
+    "FormalDoudizhuSession",
+    "DoudizhuModePolicy",
+    "DoudizhuOutcomePolicy",
+    "TrustedFormalDoudizhuConfiguration",
+    "assert_trusted_formal_doudizhu_configuration",
+    "inspect_formal_doudizhu_readiness",
 ]

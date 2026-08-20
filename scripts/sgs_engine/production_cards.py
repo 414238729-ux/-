@@ -827,7 +827,8 @@ class SlashAdapter(BasicCardAdapter):
         session = self._require_session()
         if session.phase.value != "play":
             return ()
-        if session.runtime.slash_used_counts.get(context.actor_id, 0) > 0:
+        slash_limit = session.normal_play_slash_limit(context.actor_id)
+        if session.runtime.slash_used_counts.get(context.actor_id, 0) >= slash_limit:
             # 达到通常上限：先经过武器技能门禁；诸葛连弩（CP-04P 已实现
             # “你使用【杀】无次数限制”）继续枚举，其余武器不改变次数。
             other_targets = PlayerTopology.from_state(

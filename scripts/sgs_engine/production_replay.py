@@ -18,6 +18,7 @@ from typing import Any, Mapping, Sequence
 from .actions import ActionContext, LegalAction
 from .engine import ENGINE_VERSION, canonical_state_snapshot
 from .mode_2v2 import FORMAL_NO_SKILL_2V2_MODE
+from .mode_doudizhu import FORMAL_NO_SKILL_DOUDIZHU_MODE
 from .production_batch import (
     FORMAL_NO_SKILL_DUEL_MODE,
     PRODUCTION_BASIC_CARDS_MODE,
@@ -34,12 +35,13 @@ _EVENT_CHAIN_ANCHOR = sha256_value(
     {"schema": REEXECUTION_SCHEMA, "stream": "event_hash_chain"}
 )
 
-# POST-B C3：严格回放可信模式白名单（2v2 平局终局/队伍映射已支持）。
+# POST-B C3/C4：严格回放可信模式白名单（2v2 / 斗地主已支持）。
 SUPPORTED_REPLAY_MODES: frozenset[str] = frozenset(
     {
         PRODUCTION_BASIC_CARDS_MODE,
         FORMAL_NO_SKILL_DUEL_MODE,
         FORMAL_NO_SKILL_2V2_MODE,
+        FORMAL_NO_SKILL_DOUDIZHU_MODE,
     }
 )
 
@@ -298,6 +300,13 @@ _FORMAL_2V2_INITIAL_CONFIGURATION_FIELDS = {
     "analysis_only",
     "max_steps",
 }
+# POST-B C4：正式斗地主回放一等输入：canonical 配置 + 显式序列化阵营映射。
+_FORMAL_DOUDIZHU_INITIAL_CONFIGURATION_FIELDS = {
+    "formal_doudizhu_configuration",
+    "camps",
+    "analysis_only",
+    "max_steps",
+}
 
 _PRIVATE_FIELDS = {
     "schema",
@@ -307,10 +316,16 @@ _PRIVATE_FIELDS = {
 
 AUTHORITATIVE_PRIVATE_SCHEMA = "sgs-authoritative-private-v1"
 
-# 初始发牌、摸牌阶段、普通摸牌与2v2死亡奖励摸牌（§2.7）的非公开获得
-# reason；对手/旁观者视图必须脱敏（队友视图由 visible_ids 扩展）。
+# 初始发牌、摸牌阶段、普通摸牌、2v2死亡奖励摸牌（§2.7）、斗地主农民死亡奖励摸牌（§3.7）
+# 与跋扈准备阶段摸牌（§3.3）的非公开获得 reason；对手/旁观者视图必须脱敏。
 _PRIVATE_GAIN_REASONS: frozenset[str] = frozenset(
-    {"initial_hand", "draw_phase", "death_reward_teammate_draw"}
+    {
+        "initial_hand",
+        "draw_phase",
+        "death_reward_teammate_draw",
+        "death_reward_peasant_draw",
+        "bahu_prepare_draw",
+    }
 )
 
 # 绑定隐藏权威状态的摘要键：公开投影必须递归移除（B1-a）。
@@ -514,6 +529,31 @@ def _teams_from_record(value: Mapping[str, object]) -> Mapping[str, str] | None:
         if isinstance(key, str) and isinstance(item, str):
             result[key] = item
     if len(result) != 4 or set(result.values()) != {"team_a", "team_b"}:
+        return None
+    return result
+
+
+def _camps_from_record(value: Mapping[str, object]) -> Mapping[str, str] | None:
+    """从权威回放一等输入读取正式斗地主阵营映射（POST-B C4）。
+
+    阵营映射是初始化输入；非斗地主记录或结构非法返回 None。
+    """
+    header = value.get("header")
+    if not isinstance(header, Mapping):
+        return None
+    if header.get("mode_id") != FORMAL_NO_SKILL_DOUDIZHU_MODE:
+        return None
+    config = header.get("initial_configuration")
+    if not isinstance(config, Mapping):
+        return None
+    camps = config.get("camps")
+    if not isinstance(camps, Mapping):
+        return None
+    result: dict[str, str] = {}
+    for key, item in camps.items():
+        if isinstance(key, str) and isinstance(item, str):
+            result[key] = item
+    if len(result) != 3 or set(result.values()) != {"landlord", "peasants"}:
         return None
     return result
 
@@ -831,16 +871,17 @@ class ProductionReexecutionReplay:
                 "生产基本牌批次回放必须标记test_only=false"
             )
         if header["formal_result"] is not False:
-            # 正式 release 后，正式单挑与正式2v2回放允许 formal_result=true；
-            # 防伪要求：仅这两种正式模式，且 initial_configuration 必须绑定
+            # 正式 release 后，正式单挑、正式2v2与正式斗地主回放允许 formal_result=true；
+            # 防伪要求：仅这三种正式模式，且 initial_configuration 必须绑定
             # 项目 canonical formal profile 且 analysis_only=false（在下方
             # 正式配置解析中继续校验）。
             if header["mode_id"] not in {
                 FORMAL_NO_SKILL_DUEL_MODE,
                 FORMAL_NO_SKILL_2V2_MODE,
+                FORMAL_NO_SKILL_DOUDIZHU_MODE,
             }:
                 raise ProductionReplayFormatError(
-                    "正式结果只能出现在正式单挑或正式2v2模式回放中"
+                    "正式结果只能出现在正式单挑、正式2v2或正式斗地主模式回放中"
                 )
         if header["production_basic_cards_batch"] is not True:
             raise ProductionReplayFormatError(
@@ -930,6 +971,56 @@ class ProductionReexecutionReplay:
                 ):
                     raise ProductionReplayFormatError(
                         "正式2v2回放的队伍映射与canonical profile不一致"
+                    )
+        elif header["mode_id"] == FORMAL_NO_SKILL_DOUDIZHU_MODE:
+            _require_exact_fields(
+                initial_configuration,
+                _FORMAL_DOUDIZHU_INITIAL_CONFIGURATION_FIELDS,
+                "正式斗地主 initial_configuration",
+            )
+            if not isinstance(initial_configuration["analysis_only"], bool):
+                raise ProductionReplayFormatError(
+                    "正式斗地主 initial_configuration.analysis_only必须是布尔值"
+                )
+            raw_camps = initial_configuration["camps"]
+            if (
+                not isinstance(raw_camps, Mapping)
+                or len(raw_camps) != 3
+                or any(
+                    not isinstance(key, str) or not isinstance(value, str)
+                    for key, value in raw_camps.items()
+                )
+            ):
+                raise ProductionReplayFormatError(
+                    "正式斗地主 initial_configuration.camps必须是3项角色→阵营映射"
+                )
+            if header["formal_result"] is not False:
+                if initial_configuration["analysis_only"] is not False:
+                    raise ProductionReplayFormatError(
+                        "正式结果回放禁止analysis_only"
+                    )
+                from .mode_doudizhu import FormalDoudizhuConfiguration
+
+                raw_config = initial_configuration.get(
+                    "formal_doudizhu_configuration"
+                )
+                try:
+                    canonical_replay_config = (
+                        FormalDoudizhuConfiguration.from_canonical_profile_value(
+                            raw_config
+                        )
+                    )
+                except Exception:
+                    canonical_replay_config = None
+                if canonical_replay_config is None:
+                    raise ProductionReplayFormatError(
+                        "正式结果回放必须绑定项目canonical formal profile"
+                    )
+                if dict(raw_camps) != dict(
+                    canonical_replay_config.camps_by_player()
+                ):
+                    raise ProductionReplayFormatError(
+                        "正式斗地主回放的阵营映射与canonical profile不一致"
                     )
         else:
             _require_exact_fields(
@@ -1312,6 +1403,7 @@ def record_reference_production_batch(
         game = _game
     formal_game = game.mode_id == FORMAL_NO_SKILL_DUEL_MODE
     two_vs_two_game = game.mode_id == FORMAL_NO_SKILL_2V2_MODE
+    doudizhu_game = game.mode_id == FORMAL_NO_SKILL_DOUDIZHU_MODE
     if formal_game:
         from .formal_duel import FormalNoSkillDuelSession
 
@@ -1326,6 +1418,13 @@ def record_reference_production_batch(
             raise ProductionReplayFormatError(
                 "正式2v2回放必须来自canonical Formal2v2Session"
             )
+    if doudizhu_game:
+        from .mode_doudizhu import FormalDoudizhuSession
+
+        if type(game) is not FormalDoudizhuSession:
+            raise ProductionReplayFormatError(
+                "正式斗地主回放必须来自canonical FormalDoudizhuSession"
+            )
     if formal_game and fixture is not None:
         raise ProductionReplayFormatError(
             "正式单挑回放禁止夹具；必须从canonical配置自然初始化"
@@ -1333,6 +1432,10 @@ def record_reference_production_batch(
     if two_vs_two_game and fixture is not None:
         raise ProductionReplayFormatError(
             "正式2v2回放禁止夹具；必须从canonical配置自然初始化"
+        )
+    if doudizhu_game and fixture is not None:
+        raise ProductionReplayFormatError(
+            "正式斗地主回放禁止夹具；必须从canonical配置自然初始化"
         )
     if fixture is not None:
         # 测试与编排专用：在初始装配后、任何决策前应用确定性夹具；
@@ -1377,6 +1480,20 @@ def record_reference_production_batch(
             "analysis_only": bool(getattr(game, "analysis_only", True)),
             "max_steps": max_steps,
         }
+    elif doudizhu_game:
+        formal_configuration = getattr(game, "formal_configuration", None)
+        if formal_configuration is None or not hasattr(
+            formal_configuration, "to_dict"
+        ):
+            raise ProductionReplayFormatError(
+                "正式斗地主会话缺少可重建的FormalDoudizhuConfiguration"
+            )
+        initial_configuration = {
+            "formal_doudizhu_configuration": formal_configuration.to_dict(),
+            "camps": dict(formal_configuration.camps_by_player()),
+            "analysis_only": bool(getattr(game, "analysis_only", True)),
+            "max_steps": max_steps,
+        }
     else:
         initial_configuration = {
             "deck_path": str(deck_path),
@@ -1402,7 +1519,7 @@ def record_reference_production_batch(
         "test_only": False,
         "formal_result": (
             game.formal_result_eligible
-            if (formal_game or two_vs_two_game)
+            if (formal_game or two_vs_two_game or doudizhu_game)
             else False
         ),
         "production_basic_cards_batch": True,
@@ -1565,6 +1682,44 @@ def record_reference_formal_2v2(
     if not isinstance(analysis_only, bool):
         raise TypeError("analysis_only必须是布尔值")
     game = Formal2v2Session(
+        seed=seed,
+        configuration=configuration,
+        analysis_only=analysis_only,
+    )
+    return record_reference_production_batch(
+        seed,
+        controller=controller or BatchReferenceController(),
+        max_steps=max_steps,
+        _game=game,
+    )
+
+
+def record_reference_formal_doudizhu(
+    seed: int,
+    *,
+    configuration: object,
+    analysis_only: bool = True,
+    controller: Any | None = None,
+    max_steps: int = 2000,
+) -> ProductionReexecutionReplay:
+    """从可信 formal 斗地主 factory 录制同一生产核心的严格规则重执行回放。
+
+    不接受牌堆路径、洗牌开关或夹具；canonical profile 与正式执行哨兵由
+    FormalDoudizhuSession 边界校验。analysis_only=false 时只接受 trusted
+    canonical profile，终局允许阵营胜（landlord/peasants）或牌堆耗尽平局
+    （winner=None + doudizhu_draw_deck_exhausted）。
+    """
+
+    from .mode_doudizhu import (
+        FormalDoudizhuConfiguration,
+        FormalDoudizhuSession,
+    )
+
+    if not isinstance(configuration, FormalDoudizhuConfiguration):
+        raise TypeError("正式斗地主回放必须接收FormalDoudizhuConfiguration")
+    if not isinstance(analysis_only, bool):
+        raise TypeError("analysis_only必须是布尔值")
+    game = FormalDoudizhuSession(
         seed=seed,
         configuration=configuration,
         analysis_only=analysis_only,
@@ -1783,11 +1938,64 @@ def reexecute_production_replay(
             session_id=session_id,
             session_secret=session_secret,
         )
+    elif mode_id == FORMAL_NO_SKILL_DOUDIZHU_MODE:
+        from .mode_doudizhu import (
+            FormalDoudizhuConfiguration,
+            FormalDoudizhuSession,
+        )
+
+        if header.get("fixture_applied") is not False:
+            raise ProductionReplayFormatError("正式斗地主回放不得包含初始化夹具")
+        formal_value = _require_mapping(
+            config.get("formal_doudizhu_configuration"),
+            "initial_configuration.formal_doudizhu_configuration",
+        )
+        analysis_only = config.get("analysis_only")
+        if not isinstance(analysis_only, bool):
+            raise ProductionReplayFormatError(
+                "正式斗地主 initial_configuration.analysis_only必须是布尔值"
+            )
+        recorded_camps = _require_mapping(
+            config.get("camps"), "initial_configuration.camps"
+        )
+        if analysis_only:
+            # analysis-only 记录只重建分析约定配置，不授予可信来源；
+            # 会话以 analysis_only=True 运行，不产生正式结果。
+            formal_configuration = FormalDoudizhuConfiguration.from_dict(
+                formal_value
+            )
+        else:
+            # 正式记录必须与 canonical formal profile 逐字段一致；验证的
+            # 是 canonical 内容，而不是让 payload 自行获得 trusted
+            # provenance。
+            formal_configuration = (
+                FormalDoudizhuConfiguration.from_canonical_profile_value(
+                    formal_value
+                )
+            )
+        if dict(recorded_camps) != dict(
+            formal_configuration.camps_by_player()
+        ):
+            raise ProductionReplayFormatError(
+                "正式斗地主回放的阵营映射与配置重建值不一致；失败关闭"
+            )
+        game = FormalDoudizhuSession(
+            seed=int(header["seed"]),
+            configuration=formal_configuration,
+            analysis_only=analysis_only,
+            session_id=session_id,
+            session_secret=session_secret,
+        )
     else:  # ProductionReexecutionReplay 格式校验本应先拒绝该路径
         raise ProductionReplayFormatError("规则重执行模式不属于可信工厂白名单")
     _expect_equal("mode", None, mode_id, game.mode_id, "重建会话模式不一致")
     if (
-        mode_id in {FORMAL_NO_SKILL_DUEL_MODE, FORMAL_NO_SKILL_2V2_MODE}
+        mode_id
+        in {
+            FORMAL_NO_SKILL_DUEL_MODE,
+            FORMAL_NO_SKILL_2V2_MODE,
+            FORMAL_NO_SKILL_DOUDIZHU_MODE,
+        }
         and fixture is not None
     ):
         raise ProductionReplayFormatError("正式模式规则重执行不得注入夹具")
@@ -2005,6 +2213,7 @@ __all__ = [
     "REEXECUTION_SCHEMA",
     "SUPPORTED_REPLAY_MODES",
     "record_reference_formal_2v2",
+    "record_reference_formal_doudizhu",
     "record_reference_formal_duel",
     "record_reference_production_batch",
     "reexecute_production_replay",

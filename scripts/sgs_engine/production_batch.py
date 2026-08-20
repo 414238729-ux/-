@@ -137,12 +137,16 @@ class ProductionPhase(str, Enum):
     FINISHED = "finished"
     # POST-B C3：正式2v2 4号位首轮“飞扬”判定阶段开始窗口（模式层阶段）。
     FEIYANG_ACTIVATE = "feiyang_activate"
+    # POST-B C4：正式斗地主存活农民死亡奖励选择窗口（模式层阶段）。
+    PEASANT_REWARD_CHOICE = "peasant_reward_choice"
 
 
 BATCH_PHASES: tuple[ProductionPhase, ...] = (
     ProductionPhase.PREPARE,
     # POST-B C3：正式2v2 4号位首轮“飞扬”判定阶段开始窗口（模式层阶段）。
     ProductionPhase.FEIYANG_ACTIVATE,
+    # POST-B C4：正式斗地主存活农民死亡奖励选择窗口（模式层阶段）。
+    ProductionPhase.PEASANT_REWARD_CHOICE,
     ProductionPhase.JUDGMENT,
     ProductionPhase.JUDGMENT_WUXIE,
     ProductionPhase.DRAW,
@@ -509,6 +513,21 @@ class _PendingHanbingDiscard:
     snapshot_digest: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _PendingPeasantDeathReward:
+    """POST-B C4 农民死亡奖励挂起状态（Knowledge《三国杀模式规则》§3.7）。"""
+
+    dead_peasant_id: str
+    chooser_id: str
+    window_id: str
+    is_nonterminal_chain_child: bool = False
+
+
+PENDING_PEASANT_DEATH_REWARD_EXECUTION_FIELD_INVENTORY: frozenset[str] = frozenset(
+    {"dead_peasant_id", "chooser_id", "window_id", "is_nonterminal_chain_child"}
+)
+
+
 # MB-M-008 FINISHED transient inventory：这些 _BatchRuntime 字段在
 # FINISHED 时必须是空/默认值（B 类 transient/pending）。A 类永久/历史
 # 字段（current_player_id、turn_number、phase、slash_used_counts、
@@ -577,6 +596,8 @@ FINISHED_TRANSIENT_RUNTIME_FIELDS: frozenset[str] = frozenset({
     # C123-R1-NEW-001：当前回合角色已确认死亡、但 parent/root 尚未完成时
     # 推迟的回合结束责任。FINISHED 时必须清掉，避免终局残留。
     "deferred_turn_end_after_owner_death",
+    # POST-B C4 农民死亡奖励选择挂起状态。
+    "pending_peasant_reward",
 })
 
 # R2-NEW-001：execution snapshot/hash 的运行时字段清单（A 类＝会改变未来
@@ -735,6 +756,8 @@ class _BatchRuntime:
     pending_slash_choice: _PendingSlashChoice | None = None
     pending_discard_two: _PendingDiscardTwo | None = None
     pending_hanbing_discard: _PendingHanbingDiscard | None = None
+    # POST-B C4 农民死亡奖励选择挂起状态（斗地主非终局农民死亡）。
+    pending_peasant_reward: _PendingPeasantDeathReward | None = None
     # C123-R1-NEW-001：当前回合角色已确认死亡，但当时仍有未完成的
     # parent/root（传导、方天剩余目标、判定根等），回合结束必须推迟。
     # 不得用 “PLAY 且当前角色已死亡” 做全局兜底。
@@ -895,6 +918,7 @@ class _BatchRuntime:
             "pending_discard_two": self._pending_discard_two_value(),
             "pending_hanbing_discard": self._pending_hanbing_discard_value(),
             "pending_weapon_choice": self._pending_weapon_choice_value(),
+            "pending_peasant_reward": self._pending_peasant_reward_value(),
             "deferred_turn_end_after_owner_death": (
                 self.deferred_turn_end_after_owner_death
             ),
@@ -1018,6 +1042,17 @@ class _BatchRuntime:
             "stage": pending.stage,
             "handles": dict(pending.handles),
             "snapshot_digest": pending.snapshot_digest,
+        }
+
+    def _pending_peasant_reward_value(self) -> dict[str, object] | None:
+        pending = self.pending_peasant_reward
+        if pending is None:
+            return None
+        return {
+            "dead_peasant_id": pending.dead_peasant_id,
+            "chooser_id": pending.chooser_id,
+            "window_id": pending.window_id,
+            "is_nonterminal_chain_child": pending.is_nonterminal_chain_child,
         }
 
     def _pending_borrowed_sword_value(
@@ -2313,6 +2348,13 @@ class BatchReferenceController:
                 ProductionPhase.DRAW.value,
             ):
                 rank = 0
+            elif context.phase == ProductionPhase.PEASANT_REWARD_CHOICE.value:
+                if operation == "peasant_reward_recover_hp":
+                    rank = 0
+                elif operation == "peasant_reward_draw_two":
+                    rank = 1
+                else:
+                    rank = 2
             elif context.phase == ProductionPhase.JUDGMENT_WUXIE.value:
                 # 自然对局默认不主动无懈判定窗口：先判牌，无懈路径由脚本控制器显式驱动
                 rank = 0 if action.action_type is ActionType.PASS else 1
@@ -2814,6 +2856,26 @@ class ProductionBasicCardBatch:
     def step_count(self) -> int:
         return self._step_count
 
+    def normal_play_slash_limit(self, actor_id: str) -> int:
+        """出牌阶段普通【杀】次数上限单一权威来源（Single Source of Truth）。
+
+        默认 1 次；模式层（如斗地主地主跋扈 §3.3）可修饰为 2 次；诸葛连弩在
+        调用方通过武器判断豁免上限。
+        """
+        limit = 1
+        if self._mode_policy is not None and hasattr(self._mode_policy, "slash_limit"):
+            raw_limit = self._mode_policy.slash_limit(actor_id)
+            if (
+                isinstance(raw_limit, bool)
+                or not isinstance(raw_limit, int)
+                or raw_limit < 1
+            ):
+                raise ProductionBatchError(
+                    f"mode_policy.slash_limit 返回非法值: {raw_limit!r}"
+                )
+            limit = raw_limit
+        return limit
+
     @property
     def current_actor_id(self) -> str:
         runtime = self._runtime
@@ -2904,6 +2966,10 @@ class ProductionBasicCardBatch:
             if runtime.rescue_index >= len(runtime.rescue_order):
                 raise ProductionBatchError("濒死救援顺序已经耗尽")
             return runtime.rescue_order[runtime.rescue_index]
+        if runtime.phase is ProductionPhase.PEASANT_REWARD_CHOICE:
+            if runtime.pending_peasant_reward is None:
+                raise ProductionBatchError("农民死亡奖励阶段缺少挂起状态")
+            return runtime.pending_peasant_reward.chooser_id
         if runtime.phase in (
             ProductionPhase.PREPARE,
             ProductionPhase.JUDGMENT,
@@ -3440,6 +3506,43 @@ class ProductionBasicCardBatch:
                                 },
                             )
                         )
+        elif self.phase is ProductionPhase.PEASANT_REWARD_CHOICE:
+            reward = self._runtime.pending_peasant_reward
+            if reward is None:
+                raise ProductionBatchError("农民死亡奖励阶段缺少挂起状态")
+            if actor == reward.chooser_id:
+                # POST-B C4（Knowledge《三国杀模式规则》§3.7）：存活农民
+                # 决策窗口——回复1体力 / 摸2张 / 两项都不要。
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.CHOOSE_OPTION,
+                        actor_id=actor,
+                        payload={
+                            "operation": "peasant_reward_recover_hp",
+                            "window_id": reward.window_id,
+                        },
+                    )
+                )
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.CHOOSE_OPTION,
+                        actor_id=actor,
+                        payload={
+                            "operation": "peasant_reward_draw_two",
+                            "window_id": reward.window_id,
+                        },
+                    )
+                )
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.PASS,
+                        actor_id=actor,
+                        payload={
+                            "operation": "peasant_reward_decline",
+                            "window_id": reward.window_id,
+                        },
+                    )
+                )
         elif self.phase is ProductionPhase.JUDGMENT:
             actions.append(
                 LegalAction(
@@ -3477,7 +3580,8 @@ class ProductionBasicCardBatch:
             # 出牌阶段使用虚拟杀消耗正常【杀】额度。
             if (
                 equipped_weapon_key(state, actor) == "sgs_weapon_zhangbashemao"
-                and self._runtime.slash_used_counts.get(actor, 0) == 0
+                and self._runtime.slash_used_counts.get(actor, 0)
+                < self.normal_play_slash_limit(actor)
             ):
                 # G-003 统一 fail-closed：丈八蛇矛保持 PARTIAL（VIRTUAL_CARD_
                 # SUBCARD_LIFECYCLE_RULE_GAP），在正式枚举 virtual proposal
@@ -4188,6 +4292,17 @@ class ProductionBasicCardBatch:
                 return self.apply_feiyang_activate(state, context, action)
             raise InvalidActionError(
                 "飞扬窗口只能执行feiyang_decline或feiyang_activate"
+            )
+
+        if self.phase is ProductionPhase.PEASANT_REWARD_CHOICE:
+            if operation in (
+                "peasant_reward_recover_hp",
+                "peasant_reward_draw_two",
+                "peasant_reward_decline",
+            ):
+                return self.apply_peasant_reward_choice(state, context, action)
+            raise InvalidActionError(
+                "农民死亡奖励阶段只能选择回血、摸2张或放弃"
             )
 
         if self.phase is ProductionPhase.JUDGMENT:
@@ -5574,7 +5689,8 @@ class ProductionBasicCardBatch:
             raise InvalidActionError("【杀】只能在出牌阶段使用")
         equipped_weapon = equipped_weapon_key(state, context.actor_id)
         if (
-            runtime.slash_used_counts.get(context.actor_id, 0) > 0
+            runtime.slash_used_counts.get(context.actor_id, 0)
+            >= self.normal_play_slash_limit(context.actor_id)
             and equipped_weapon != "sgs_weapon_zhugeliannu"
         ):
             # CP-04P：诸葛连弩“你使用【杀】无次数限制”（Knowledge 7.1
@@ -13229,17 +13345,25 @@ class ProductionBasicCardBatch:
         if winner is None:
             # POST-B C1/C2：多人对局中的非终局死亡——不产生 VICTORY，
             # 对局继续。事件顺序：根牌收尾 → 死亡区域清理 → 死亡 →
-            # 模式死亡奖励（2v2 §2.7）→ 继续结算/平局终局。
+            # 模式死亡奖励（2v2 §2.7 / 斗地主 §3.7）→ 继续结算/平局终局。
             mode_policy = self._mode_policy
             self._events.extend(
                 [*finish_events, *cleanup_events, death_event]
             )
+            # C123-R1-NEW-001：确认当前回合角色死亡后，回合结束责任成立。
+            # 若此时仍有未完成 parent/root 或模式死亡奖励挂起窗口，不得立即切回合，
+            # 但该责任必须先持久记录到 runtime。
+            if dying_id == runtime.current_player_id:
+                runtime = replace(
+                    runtime,
+                    deferred_turn_end_after_owner_death=True,
+                )
             if mode_policy is not None and hasattr(
                 mode_policy, "death_confirmed_hook"
             ):
-                # POST-B C3：模式层死亡确认钩子（2v2 死亡奖励：存活队友
-                # 摸1张，§2.7；只在胜负未成立时触发）。钩子可能触发
-                # 牌堆耗尽平局——此时终局优先于继续结算。
+                # POST-B C3/C4：模式层死亡确认钩子（2v2 死亡奖励：存活队友
+                # 摸1张，§2.7；斗地主死亡奖励：存活农民三选一窗口，§3.7；
+                # 只在胜负未成立时触发）。
                 pre_hook_runtime = runtime
                 next_state, runtime = mode_policy.death_confirmed_hook(
                     self, next_state, runtime, dying_id
@@ -13247,135 +13371,17 @@ class ProductionBasicCardBatch:
                 if runtime.game_over_reason is not None:
                     self._commit_runtime(pre_hook_runtime, runtime)
                     return next_state
-            # C123-R1-NEW-001：确认当前回合角色死亡后，回合结束责任成立。
-            # 若此时仍有未完成 parent/root，不得立即切回合，但该责任不得
-            # 因后续 dying_id 换成另一名角色而丢失。
-            if dying_id == runtime.current_player_id:
-                runtime = replace(
-                    runtime,
-                    deferred_turn_end_after_owner_death=True,
-                )
-            pending_slash = runtime.pending_slash
-            if (
-                runtime.pending_group_trick is not None
-                and runtime.pending_wugu is None
-                and runtime.pending_chain is None
-                and pending_judgment is None
-                and borrowed is None
-            ):
-                # 群体锦囊目标死亡后继续目标队列（C1 已证明；模式层存在时
-                # 同一路径）。根锦囊保持处理区直到全部目标完成。
-                next_state, next_runtime = self._resume_group_after_damage(
-                    next_state, runtime, dying_id, rescued=False
-                )
-                next_runtime = replace(
-                    next_runtime,
-                    judgment_entry_indices=judgment_entry_indices_after_death,
-                )
-                self._commit_runtime(runtime, next_runtime)
-                return next_state
-            if (
-                pending_slash is not None
-                and pending_slash.target_sequence
-                and pending_slash.current_target_index + 1
-                < len(pending_slash.target_sequence)
-                and runtime.pending_wugu is None
-                and runtime.pending_chain is None
-                and pending_judgment is None
-                and borrowed is None
-            ):
-                # 方天画戟多目标：死亡目标结算完成，推进到快照中的下一
-                # 目标；根【杀】保持在处理区（与群体锦囊同一口径）。
-                next_state, next_runtime = self._advance_slash_target(
-                    next_state,
-                    replace(
-                        runtime,
-                        pending_dying_id=None,
-                        rescue_order=(),
-                        rescue_index=0,
-                        rescue_decision_count=0,
-                        judgment_entry_indices=(
-                            judgment_entry_indices_after_death
-                        ),
-                    ),
-                )
-                self._commit_runtime(runtime, next_runtime)
-                return next_state
-            if mode_policy is not None:
-                # POST-B C3：正式2v2非终局死亡继续（§2.9 当前确认：一名
-                # 队友死亡游戏继续）。根牌 finalize 已在死亡处理前段统一
-                # 完成；借刀根已由前段清理、闪电 pending_judgment 已由
-                # 前段清理。传导根由既有 _advance_chain 恢复（候选按
-                # 已证明语义逐名重读存活/横置、死亡跳过；C3 只接线，
-                # 不修改传导生产语义）。当前回合角色死亡（闪电/决斗自伤）
-                # 时其回合立即结束并推进到下一存活角色（标准三国杀）。
-                if runtime.pending_chain is not None:
-                    if is_nonterminal_chain_child:
-                        base_runtime = replace(
-                            runtime,
-                            judgment_entry_indices=(
-                                judgment_entry_indices_after_death
-                            ),
-                        )
-                    else:
-                        base_runtime = replace(
-                            runtime,
-                            pending_judgment=None,
-                            judgment_entry_indices=(
-                                judgment_entry_indices_after_death
-                            ),
-                        )
-                    next_state, next_runtime = (
-                        self._resume_chain_after_rescue(
-                            next_state,
-                            base_runtime,
-                            dying_id,
-                            rescued=False,
-                        )
-                    )
-                    # F-003/F-004：传导恢复后若已打开新濒死窗口，或方天
-                    # 根仍拥有剩余目标，不得结束回合。
-                    if (
-                        next_runtime.current_player_id == dying_id
-                        and next_runtime.phase
-                        is not ProductionPhase.DYING_RESCUE
-                        and not self._fangtian_root_still_open(next_runtime)
-                    ):
-                        next_state, next_runtime = (
-                            self._end_turn_after_current_death(
-                                next_state,
-                                next_runtime,
-                                judgment_entry_indices_after_death,
-                            )
-                        )
-                elif runtime.current_player_id == dying_id:
-                    next_state, next_runtime = (
-                        self._end_turn_after_current_death(
-                            next_state,
-                            runtime,
-                            judgment_entry_indices_after_death,
-                        )
-                    )
-                else:
-                    base_runtime = replace(
-                        runtime,
-                        pending_judgment=None,
-                        pending_borrowed_sword=None,
-                        judgment_entry_indices=(
-                            judgment_entry_indices_after_death
-                        ),
-                    )
-                    next_state, next_runtime = (
-                        self._complete_root_resolution(
-                            next_state, base_runtime
-                        )
-                    )
-                self._commit_runtime(runtime, next_runtime)
-                return next_state
-            raise UnsupportedRuleError(
-                "多人对局中非终局死亡的继续结算尚未证明（当前仅支持群体"
-                "锦囊与方天画戟多目标的目标死亡后继续队列）；失败关闭，"
-                "不猜测模式规则"
+                if runtime.phase is ProductionPhase.PEASANT_REWARD_CHOICE:
+                    # 真正暂停！进入存活农民三选一决策窗口，等待行动者提交动作后再 continuation。
+                    self._commit_runtime(pre_hook_runtime, runtime)
+                    return next_state
+
+            return self._continue_after_nonterminal_death(
+                next_state,
+                runtime,
+                dying_id,
+                judgment_entry_indices_after_death,
+                is_nonterminal_chain_child,
             )
         final_events: list[GameEvent] = (
             finish_events + list(cleanup_events)
@@ -13410,6 +13416,250 @@ class ProductionBasicCardBatch:
         )
         self._commit_runtime(runtime, next_runtime)
         return next_state
+
+    def _continue_after_nonterminal_death(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        dying_id: str,
+        judgment_entry_indices_after_death: Mapping[str, int],
+        is_nonterminal_chain_child: bool = False,
+    ) -> GameState:
+        """非终局死亡确认（及模式死亡奖励结算）后的唯一统一继续结算路径。
+
+        本 helper 负责已有且已证明的 continuation 恢复：
+        - C123-R1-NEW-001：若 dying_id 为当前回合角色，设置 deferred_turn_end_after_owner_death=True；
+        - 群体锦囊目标队列继续（_resume_group_after_damage）；
+        - 方天画戟多目标队列推进（_advance_slash_target）；
+        - 模式层非终局继续（传导根 _resume_chain_after_rescue、回合结束 _end_turn_after_current_death、根完成 _complete_root_resolution）。
+        """
+        if dying_id == runtime.current_player_id:
+            runtime = replace(
+                runtime,
+                deferred_turn_end_after_owner_death=True,
+            )
+        pending_slash = runtime.pending_slash
+        pending_judgment = runtime.pending_judgment
+        borrowed = runtime.pending_borrowed_sword
+
+        if (
+            runtime.pending_group_trick is not None
+            and runtime.pending_wugu is None
+            and runtime.pending_chain is None
+            and pending_judgment is None
+            and borrowed is None
+        ):
+            # 群体锦囊目标死亡后继续目标队列（C1 已证明；模式层存在时
+            # 同一路径）。根锦囊保持处理区直到全部目标完成。
+            next_state, next_runtime = self._resume_group_after_damage(
+                state, runtime, dying_id, rescued=False
+            )
+            next_runtime = replace(
+                next_runtime,
+                judgment_entry_indices=judgment_entry_indices_after_death,
+            )
+            self._commit_runtime(runtime, next_runtime)
+            return next_state
+        if (
+            pending_slash is not None
+            and pending_slash.target_sequence
+            and pending_slash.current_target_index + 1
+            < len(pending_slash.target_sequence)
+            and runtime.pending_wugu is None
+            and runtime.pending_chain is None
+            and pending_judgment is None
+            and borrowed is None
+        ):
+            # 方天画戟多目标：死亡目标结算完成，推进到快照中的下一
+            # 目标；根【杀】保持在处理区（与群体锦囊同一口径）。
+            next_state, next_runtime = self._advance_slash_target(
+                state,
+                replace(
+                    runtime,
+                    pending_dying_id=None,
+                    rescue_order=(),
+                    rescue_index=0,
+                    rescue_decision_count=0,
+                    judgment_entry_indices=(
+                        judgment_entry_indices_after_death
+                    ),
+                ),
+            )
+            self._commit_runtime(runtime, next_runtime)
+            return next_state
+        if self._mode_policy is not None:
+            # POST-B C3/C4：正式2v2/斗地主非终局死亡继续（§2.9/§3.7 当前确认）。
+            # 根牌 finalize 已在死亡处理前段统一完成；借刀根已由前段清理、
+            # 闪电 pending_judgment 已由前段清理。传导根由既有 _advance_chain
+            # 恢复。当前回合角色死亡时其回合立即结束并推进到下一存活角色。
+            if runtime.pending_chain is not None:
+                if is_nonterminal_chain_child:
+                    base_runtime = replace(
+                        runtime,
+                        judgment_entry_indices=(
+                            judgment_entry_indices_after_death
+                        ),
+                    )
+                else:
+                    base_runtime = replace(
+                        runtime,
+                        pending_judgment=None,
+                        judgment_entry_indices=(
+                            judgment_entry_indices_after_death
+                        ),
+                    )
+                next_state, next_runtime = (
+                    self._resume_chain_after_rescue(
+                        state,
+                        base_runtime,
+                        dying_id,
+                        rescued=False,
+                    )
+                )
+                # F-003/F-004：传导恢复后若已打开新濒死窗口，或方天
+                # 根仍拥有剩余目标，不得结束回合。
+                if (
+                    next_runtime.current_player_id == dying_id
+                    and next_runtime.phase
+                    is not ProductionPhase.DYING_RESCUE
+                    and not self._fangtian_root_still_open(next_runtime)
+                ):
+                    next_state, next_runtime = (
+                        self._end_turn_after_current_death(
+                            next_state,
+                            next_runtime,
+                            judgment_entry_indices_after_death,
+                        )
+                    )
+            elif runtime.current_player_id == dying_id:
+                next_state, next_runtime = (
+                    self._end_turn_after_current_death(
+                        state,
+                        runtime,
+                        judgment_entry_indices_after_death,
+                    )
+                )
+            else:
+                base_runtime = replace(
+                    runtime,
+                    pending_judgment=None,
+                    pending_borrowed_sword=None,
+                    judgment_entry_indices=(
+                        judgment_entry_indices_after_death
+                    ),
+                )
+                next_state, next_runtime = (
+                    self._complete_root_resolution(
+                        state, base_runtime
+                    )
+                )
+            self._commit_runtime(runtime, next_runtime)
+            return next_state
+        raise UnsupportedRuleError(
+            "多人对局中非终局死亡的继续结算尚未证明（当前仅支持群体"
+            "锦囊与方天画戟多目标的目标死亡后继续队列）；失败关闭，"
+            "不猜测模式规则"
+        )
+
+    def apply_peasant_reward_choice(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        """POST-B C4：存活农民执行死亡奖励选择（Knowledge《三国杀模式规则》§3.7）。
+
+        三项互斥选项：
+        - peasant_reward_recover_hp：回复1点体力（上限封顶）；
+        - peasant_reward_draw_two：摸2张牌（牌堆耗尽平局事务）；
+        - peasant_reward_decline：两项都不要（PASS放弃）。
+        选择完成后清空 pending_peasant_reward，调用 _continue_after_nonterminal_death
+        恢复非终局继续结算。
+        """
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.PEASANT_REWARD_CHOICE:
+            raise InvalidActionError("只有农民死亡奖励阶段可以执行奖励选择")
+        reward = runtime.pending_peasant_reward
+        if reward is None:
+            raise ProductionBatchError("农民死亡奖励阶段缺少挂起状态")
+        if context.actor_id != reward.chooser_id:
+            raise InvalidActionError("只有指定的存活农民可以执行死亡奖励选择")
+        if action.payload.get("window_id") != reward.window_id:
+            raise InvalidActionError("奖励选择 window_id 与当前挂起窗口不匹配")
+
+        operation = str(action.payload.get("operation", ""))
+        chooser_id = reward.chooser_id
+        dead_peasant_id = reward.dead_peasant_id
+        is_nonterminal_chain_child = reward.is_nonterminal_chain_child
+
+        if operation == "peasant_reward_recover_hp":
+            if action.action_type is not ActionType.CHOOSE_OPTION:
+                raise InvalidActionError("回血选项必须是 CHOOSE_OPTION 动作")
+            player = state.players_by_id[chooser_id]
+            new_hp = min(player.max_hp, player.hp + 1)
+            next_state = _replace_player(state, chooser_id, hp=new_hp)
+            if new_hp > player.hp:
+                self._events.extend(
+                    [
+                        GameEvent(
+                            event_type=EventType.HP_RECOVER,
+                            target_ids=(chooser_id,),
+                            payload={
+                                "amount": new_hp - player.hp,
+                                "reason": "peasant_death_reward",
+                            },
+                        )
+                    ]
+                )
+            next_runtime = replace(
+                runtime,
+                pending_peasant_reward=None,
+            )
+            return self._continue_after_nonterminal_death(
+                next_state,
+                next_runtime,
+                dead_peasant_id,
+                next_runtime.judgment_entry_indices,
+                is_nonterminal_chain_child,
+            )
+        elif operation == "peasant_reward_draw_two":
+            if action.action_type is not ActionType.CHOOSE_OPTION:
+                raise InvalidActionError("摸牌选项必须是 CHOOSE_OPTION 动作")
+            # 模式死亡奖励摸牌事务：预检不足/耗尽即刻平局（no_reshuffle_draw 耗尽平局）
+            next_state, draw_runtime = self._mode_death_reward_draw(
+                state,
+                runtime,
+                chooser_id,
+                2,
+                reason="death_reward_peasant_draw",
+            )
+            if draw_runtime.game_over_reason is not None:
+                self._commit_runtime(runtime, draw_runtime)
+                return next_state
+            next_runtime = replace(
+                draw_runtime,
+                pending_peasant_reward=None,
+            )
+            return self._continue_after_nonterminal_death(
+                next_state,
+                next_runtime,
+                dead_peasant_id,
+                next_runtime.judgment_entry_indices,
+                is_nonterminal_chain_child,
+            )
+        elif operation == "peasant_reward_decline":
+            if action.action_type is not ActionType.PASS:
+                raise InvalidActionError("放弃选项必须是 PASS 动作")
+            next_runtime = replace(
+                runtime,
+                pending_peasant_reward=None,
+            )
+            return self._continue_after_nonterminal_death(
+                state,
+                next_runtime,
+                dead_peasant_id,
+                next_runtime.judgment_entry_indices,
+                is_nonterminal_chain_child,
+            )
+        else:
+            raise InvalidActionError(f"未知的农民死亡奖励操作: {operation!r}")
 
     def apply_delayed_trick_use(
         self,
@@ -13512,8 +13762,41 @@ class ProductionBasicCardBatch:
             raise InvalidActionError("只有准备阶段可以进入判定阶段")
         if context.actor_id != runtime.current_player_id:
             raise InvalidActionError("只有当前回合角色可以推进准备阶段")
-        # POST-B C3：模式层判定阶段入口钩子——4号位首轮“飞扬”窗口
-        # （§2.6）。窗口可用且存在合法代价/收益时进入飞扬阶段，否则
+
+        # POST-B C4：地主永久“跋扈”（Knowledge《三国杀模式规则》§3.3 当前确认：
+        # 准备阶段摸1张牌）。模式层声明 bahu_prepare_draw 资格，生产核心
+        # 按统一事务执行（预检不足→立即平局；摸1张；完成后牌堆为0→立即平局）。
+        mode_policy = self._mode_policy
+        if (
+            mode_policy is not None
+            and hasattr(mode_policy, "bahu_prepare_draw")
+            and mode_policy.bahu_prepare_draw(runtime.current_player_id)
+        ):
+            try:
+                state, draw_events = self._draw_cards(
+                    state,
+                    runtime.current_player_id,
+                    1,
+                    reason="bahu_prepare_draw",
+                )
+            except _DeckExhaustedDraw:
+                next_state, draw_runtime = self._finish_game_as_draw(
+                    state, runtime
+                )
+                self._commit_runtime(runtime, draw_runtime)
+                return next_state
+            self._events.extend(draw_events)
+            state, draw_check = self._check_2v2_draw_after_consumption(
+                state, runtime
+            )
+            if draw_check.game_over_reason is not None:
+                self._commit_runtime(runtime, draw_check)
+                return state
+            runtime = draw_check
+
+        # POST-B C3/C4：模式层判定阶段入口钩子——飞扬窗口
+        # （2v2 4号位首轮 §2.6；斗地主地主永久 §3.3）。
+        # 窗口可用且存在合法代价/收益时进入飞扬阶段，否则
         # 直接进入判定阶段（不可用时窗口不打开，不产生额外动作）。
         feiyang_runtime = self._open_feiyang_window(state, runtime)
         next_runtime = (
