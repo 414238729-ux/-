@@ -2593,6 +2593,36 @@ class ProductionBasicCardBatch:
         pending = runtime.pending_slash
         return pending is not None and bool(pending.target_sequence)
 
+    @staticmethod
+    def _terminal_parent_root_cleanup_allowed(
+        preview_winner: str | None,
+    ) -> bool:
+        """只有真正终局胜负才允许对仍有 parent ownership 的根做 victory cleanup。
+
+        ``preview_winner is None`` 表示非终局死亡：斗地主农民奖励窗口只是
+        模式层挂起继续，不是 root terminal boundary，也不是 game over。
+        """
+
+        return preview_winner is not None
+
+    @staticmethod
+    def _parent_root_still_open(runtime: _BatchRuntime) -> bool:
+        """pending parent 仍声称拥有尚未完成的实体根。"""
+
+        pending_judgment = runtime.pending_judgment
+        if (
+            pending_judgment is not None
+            and pending_judgment.stage == "resolving_effect"
+            and not pending_judgment.cleanup_done
+        ):
+            return True
+        borrowed = runtime.pending_borrowed_sword
+        return (
+            borrowed is not None
+            and borrowed.stage == "slash_resolving"
+            and not borrowed.root_discarded
+        )
+
     def __init__(
         self,
         *,
@@ -13237,7 +13267,8 @@ class ProductionBasicCardBatch:
             # 传导目标非终局死亡时根牌已完成结算，不再重复处理根牌。
             finish_events: list[GameEvent] = []
         elif runtime.defer_damage_card_finish and preview_winner is None:
-            # 根牌（闪电）非终局完成时点由本路径统一清理
+            # 闪电非终局：伤害卡不在此弃置。父根仍由 death/reward
+            # continuation 之后的 _complete_root_resolution 完成。
             finish_events = []
         elif (
             chain is not None
@@ -13272,8 +13303,9 @@ class ProductionBasicCardBatch:
                 )
             )
             finish_events = list(damage_finish_events)
-        # F-005：非终局传导子目标死亡不是闪电胜利清理条件。原受击/
-        # 当前回合角色仍存活时，判定根必须继续拥有闪电父根。
+        # F-005 / C4-COMPLETION-001 / C4-COMPLETION-002：
+        # 非终局死亡不是 parent root 的 terminal cleanup 边界。
+        # 仅在真正终局胜负成立时，才允许 shandian/jiedaosharen victory cleanup。
         is_nonterminal_chain_child = (
             runtime.pending_chain is not None
             and dying_id != runtime.current_player_id
@@ -13284,7 +13316,7 @@ class ProductionBasicCardBatch:
             pending_judgment is not None
             and pending_judgment.stage == "resolving_effect"
             and not pending_judgment.cleanup_done
-            and not is_nonterminal_chain_child
+            and self._terminal_parent_root_cleanup_allowed(preview_winner)
         ):
             next_state, judgment_finish = self._finish_processing(
                 next_state,
@@ -13316,8 +13348,10 @@ class ProductionBasicCardBatch:
             borrowed is not None
             and borrowed.stage == "slash_resolving"
             and not borrowed.root_discarded
+            and self._terminal_parent_root_cleanup_allowed(preview_winner)
         ):
-            # 终局清理：根借刀从处理区确定性进入弃牌堆，不遗留处理区。
+            # 真正终局：胜负已成立才允许借刀根走 victory cleanup。
+            # 非终局死亡（含农民奖励窗口）必须保持 PROCESSING 所有权。
             next_state, borrowed_finish = self._finish_processing(
                 next_state,
                 borrowed.trick_instance_id,
@@ -13448,6 +13482,9 @@ class ProductionBasicCardBatch:
                 runtime,
                 deferred_turn_end_after_owner_death=True,
             )
+        # 模式钩子仍回传 is_nonterminal_chain_child；非终局 parent
+        # ownership 一律保持到 _complete_root_resolution，不再按该标志清根。
+        del is_nonterminal_chain_child
         pending_slash = runtime.pending_slash
         pending_judgment = runtime.pending_judgment
         borrowed = runtime.pending_borrowed_sword
@@ -13499,25 +13536,17 @@ class ProductionBasicCardBatch:
             return next_state
         if self._mode_policy is not None:
             # POST-B C3/C4：正式2v2/斗地主非终局死亡继续（§2.9/§3.7 当前确认）。
-            # 根牌 finalize 已在死亡处理前段统一完成；借刀根已由前段清理、
-            # 闪电 pending_judgment 已由前段清理。传导根由既有 _advance_chain
-            # 恢复。当前回合角色死亡时其回合立即结束并推进到下一存活角色。
+            # 非终局时 pending parent 必须与实体根 zone 保持一致，不得在此
+            # 清除 ownership。传导恢复后由 _finish_chain →
+            # _complete_root_resolution 完成父根；当前回合角色死亡时先完成
+            # 仍打开的父根，再兑现推迟切回合。
             if runtime.pending_chain is not None:
-                if is_nonterminal_chain_child:
-                    base_runtime = replace(
-                        runtime,
-                        judgment_entry_indices=(
-                            judgment_entry_indices_after_death
-                        ),
-                    )
-                else:
-                    base_runtime = replace(
-                        runtime,
-                        pending_judgment=None,
-                        judgment_entry_indices=(
-                            judgment_entry_indices_after_death
-                        ),
-                    )
+                base_runtime = replace(
+                    runtime,
+                    judgment_entry_indices=(
+                        judgment_entry_indices_after_death
+                    ),
+                )
                 next_state, next_runtime = (
                     self._resume_chain_after_rescue(
                         state,
@@ -13526,13 +13555,14 @@ class ProductionBasicCardBatch:
                         rescued=False,
                     )
                 )
-                # F-003/F-004：传导恢复后若已打开新濒死窗口，或方天
-                # 根仍拥有剩余目标，不得结束回合。
+                # F-003/F-004：传导恢复后若已打开新濒死窗口、方天仍有
+                # 剩余目标、或 parent root 仍打开，不得结束回合。
                 if (
                     next_runtime.current_player_id == dying_id
                     and next_runtime.phase
                     is not ProductionPhase.DYING_RESCUE
                     and not self._fangtian_root_still_open(next_runtime)
+                    and not self._parent_root_still_open(next_runtime)
                 ):
                     next_state, next_runtime = (
                         self._end_turn_after_current_death(
@@ -13543,17 +13573,19 @@ class ProductionBasicCardBatch:
                     )
             elif runtime.current_player_id == dying_id:
                 next_state, next_runtime = (
-                    self._end_turn_after_current_death(
+                    self._complete_root_resolution(
                         state,
-                        runtime,
-                        judgment_entry_indices_after_death,
+                        replace(
+                            runtime,
+                            judgment_entry_indices=(
+                                judgment_entry_indices_after_death
+                            ),
+                        ),
                     )
                 )
             else:
                 base_runtime = replace(
                     runtime,
-                    pending_judgment=None,
-                    pending_borrowed_sword=None,
                     judgment_entry_indices=(
                         judgment_entry_indices_after_death
                     ),
@@ -14786,12 +14818,7 @@ class ProductionBasicCardBatch:
             return False
         if runtime.pending_duel is not None:
             return False
-        pending_judgment = runtime.pending_judgment
-        if (
-            pending_judgment is not None
-            and pending_judgment.stage == "resolving_effect"
-            and not pending_judgment.cleanup_done
-        ):
+        if self._parent_root_still_open(runtime):
             return False
         owner = state.players_by_id[runtime.current_player_id]
         return not owner.alive
