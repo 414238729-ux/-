@@ -1,6 +1,6 @@
 # POST-B 开发状态（POST_B_DEVELOPMENT_STATUS）
 
-> 状态标签：`AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`、`GLOBAL_AUDIT_2_PASSED`
+> 状态标签：`AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`、`C4_FINAL_CLOSURE_RECHECK_PASSED`
 >
 > 本文件是 POST-B 开发轨（deepseek-post-milestone-b-development）的新增状态文档，
 > 未登记进 `docs/CHECKPOINT_MANIFEST.json`，也不修改任何已登记文档
@@ -12,6 +12,12 @@
 - `POST_B_C1_MULTIPLAYER_AUTHORITATIVE_FOUNDATION` = `AUDITED_PASSED`（`C123_GLOBAL_AUDIT_2_PASSED`）
 - `POST_B_C2_MULTIPLAYER_CARD_SEMANTICS_CLOSURE` = `AUDITED_PASSED`（`C123_GLOBAL_AUDIT_2_PASSED`）
 - `POST_B_C3_FORMAL_NO_SKILL_2V2_MODE` = `AUDITED_PASSED`（`C123_GLOBAL_AUDIT_2_PASSED`）
+- `POST_B_C4_FORMAL_NO_SKILL_DOUDIZHU_MODE` = `AUDITED_PASSED`（`C4_FINAL_CLOSURE_RECHECK_PASSED`；被审计
+  implementation commit = `4c2969fcc0d36da862b6a7f29d827e427c60f501`，实现身份 =
+  `a06f0fb2ea614325c9f27bcc44d035cfbe8cc4dfbe5dc961ca343bd872fe3434`。
+  本文件随后的 status-closure commit 只记录复审与文档收口结果，不得冒充该
+  implementation SHA。当前 C4 scope 完成独立终局复核与全量测试闭环，进入
+  `AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`。）
 - `F-003` = `CLOSED`
 - `F-004` = `CLOSED`
 - `F-005` = `CLOSED`
@@ -37,6 +43,26 @@
   报告为权威定义与证据映射依据。当前 18c39c65 checkpoint 上已实现的
   Post-B C1/C2/C3 scope 完成第二轮跨检查点整体独立敌对审计并通过，
   满足质量门禁，状态为 `AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`。）
+- `C4-AUDIT-001` = `CLOSED`（`C4_REMEDIATION_1_REAUDIT_PASSED`；被审计
+  implementation commit = `d7db68a2b989bc9b34bdca6ef04fa90ff23b1eb0`。
+  非终局农民死亡判定索引清理写回已在异步奖励窗口前恢复；历史首次独立审计结论为
+  `C4_INDEPENDENT_AUDIT_1_FAILED`，不得改写为 PASSED。）
+- `C4-GLOBAL2-001` = `CLOSED`（`C4_GLOBAL_REMEDIATION_2_REAUDIT_PASSED`；被审计
+  implementation commit = `e28fa96917c94ab49e38fb52d7ab10cff8ff4c7a`。
+  配置权威 recursive exact-type 与受信任能力工厂已建立；历史跨检查点审计结论为
+  `C4_GLOBAL_AUDIT_2_FAILED`，不得改写为 PASSED。）
+- `C4-COMPLETION-001` = `CLOSED`（`C4_REMEDIATION_3_REAUDIT_PASSED`；被审计
+  implementation commit = `4c2969fcc0d36da862b6a7f29d827e427c60f501`。
+  借刀子链非终局农民死亡不再提前触发父根 victory cleanup，借刀 exactly-once finalize；
+  历史 completion 审计结论为 `C4_COMPLETION_AUDIT_FAILED`，不得改写为 PASSED。）
+- `C4-COMPLETION-002` = `CLOSED`（`C4_REMEDIATION_3_REAUDIT_PASSED`；被审计
+  implementation commit = `4c2969fcc0d36da862b6a7f29d827e427c60f501`。
+  闪电击中所有者非终局农民死亡不再提前清理判定根与区域所有权，判定牌 exactly-once 完成；
+  历史 completion 审计结论为 `C4_COMPLETION_AUDIT_FAILED`，不得改写为 PASSED。）
+- `C4_FINAL_CLOSURE_RECHECK` = `PASSED`（`C4_FINAL_CLOSURE_RECHECK_PASSED`；被审计
+  implementation commit = `4c2969fcc0d36da862b6a7f29d827e427c60f501`；
+  detached HEAD clean；`TECHNICAL_C4_AUDIT_SCOPE = READY_FOR_DOCUMENTATION_CLOSURE`；
+  2594 passed in 1611.74s，0 failed，0 errors，0 skipped。）
 
 ### 0.1 C2 摘要（MULTIPLAYER CARD SEMANTICS CLOSURE）
 
@@ -77,7 +103,7 @@ N≥2 多人权威基础；**不是**完成 2v2。C1 只落地项目 1–4，并
 | 2 | 多人回合循环（沿存活环座次递增继任、跳过死亡角色） | 已落地（`_apply_end_turn` 等） |
 | 3 | 群体锦囊目标顺序（服务器使用时快照，跳过死亡角色） | 已落地（`_group_target_sequence` 接入存活环） |
 | 4 | 死亡/座位遍历（死亡不重编号、非终局死亡继续结算边界） | 已落地（统一胜负出口 + 群体锦囊继续分支） |
-| 5 | 模式胜负规则（2v2/身份场/最后一人） | C3 已落地正式2v2（`TwoVsTwoOutcomePolicy`）；身份场/最后一人仍失败关闭 |
+| 5 | 模式胜负规则（2v2/身份场/最后一人/斗地主） | C3 已落地正式2v2（`TwoVsTwoOutcomePolicy`）；C4 已落地正式斗地主（`DoudizhuOutcomePolicy`，见 §10）；身份场/最后一人仍失败关闭 |
 | 6 | 方天画戟多目标 | C2 已实现（7.9 用户整理解释；见 0.1 节） |
 | 7 | 2v2 模式规则 | C3 已实现（formal no-skill 2v2，见 §9） |
 
@@ -237,12 +263,12 @@ certification；6) fresh C1 live execution（seed 0 真实执行 + 严格重执�
 ## 9. 当前轨：POST_B_C3_FORMAL_NO_SKILL_2V2_MODE
 
 **状态**：`AUDITED_PASSED`（实现完成，预提交门禁全部通过；已完成第二轮全局跨检查点整体独立敌对审计并通过 `C123_GLOBAL_AUDIT_2_PASSED`，进入 `AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`；由用户进行后续阶段推进）。
-C3 停止后不自动开始斗地主（§3 模式规则保持 Knowledge-only）。
+（历史 C3 closure 边界：当时 C3 停止后不自动开始斗地主；后续 C4 已由用户显式启动并完成，见 §10。）
 
 **范围**：正式、失败关闭、严格可回放的 no-skill 2v2 模式层，复用 C1 多人
 基础与 C2 全局卡牌语义（38/38、160 张正式牌堆）；不新建第二套引擎
 （无 `TwoVsTwoEngine`），只有 mode profile / team 模型 / OutcomePolicy /
-模式层钩子 / 可见性配置。不含：Milestone B 修复、身份模式、斗地主、
+模式层钩子 / 可见性配置。不含：Milestone B 修复、身份模式、斗地主（历史 C3 范围；C4 已完成独立实现与审计，见 §10）、
 武将技能、AI 策略、Web、正式胜率阶段。
 
 **规则源**（Knowledge《三国杀模式规则》§2，全部 `当前确认`）：
@@ -532,5 +558,133 @@ BLOCKER FOUND，与本轮 rem1 re-audit = PASSED 不得混写。
 **formal duel 防回归**：seed 0 → p2/388/43、seed 7 → p2/162/17
 （与 R5/R8 记录一致；全量套件覆盖）。
 
-**遗留**：斗地主/身份场/最后一人胜负策略、武将技能、改判、AI、Web、
+**遗留**：斗地主（历史 C3 遗留；C4 阶段已完成，见 §10）/身份场/最后一人胜负策略、武将技能、改判、AI、Web、
 正式胜率阶段仍不在本轨；`multi_player_production_proven` 保持 false。
+
+## 10. 当前轨：POST_B_C4_FORMAL_NO_SKILL_DOUDIZHU_MODE
+
+**状态**：`AUDITED_PASSED`（实现与修复完成，独立终局复核与全量测试闭环全部通过 `C4_FINAL_CLOSURE_RECHECK_PASSED`；状态登记为 `AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`；由用户进行后续阶段推进）。
+
+**范围**：正式、失败关闭、严格可回放的 formal no-skill 斗地主（Doudizhu）combat 模式层。复用 C1 多人基础（`PlayerTopology`）与 C2 全局卡牌语义（38/38 卡牌类型、160 张正式牌堆）。不新建独立引擎（无 `DoudizhuEngine`），基于 `ProductionBasicCardBatch` + `DoudizhuOutcomePolicy` + `DoudizhuModePolicy` + `FormalDoudizhuSession` + 模式层钩子与三方私密可见性实现。
+
+**规则源**（Knowledge《三国杀模式规则》§3，全部 `当前确认`）：
+
+- **Canonical 模式配置与拓扑**：
+  - 3 人局拓扑：`p1` = 地主（landlord）、`p2` = 农民（peasant）、`p3` = 农民（peasant）。
+  - 出牌顺序：`p1 → p2 → p3`（1 号位地主先手，确定性先手不消耗 RNG）。
+  - 初始体力与上限：地主 5/5 HP，两名农民各 4/4 HP（模式权威初始化）。
+  - 初始手牌：地主 4 张，农民各 4 张（无手气卡，`allow_reshuffle=False`）。
+- **地主常驻模式技能**：
+  - 【飞扬】：判定阶段可弃置 2 张手牌移动 1 张判定区牌（复用 2v2 飞扬通用实现与候选清理机制）。
+  - 【跋扈】：准备阶段摸牌 +1 张（`PREPARE` 阶段摸 1 张牌）；出牌阶段普通【杀】使用次数上限 +1（`normal PLAY Slash limit +1`）。
+- **农民非终局首死奖励（Peasant Death Reward）**：
+  - 第一名农民非终局确认死亡时，存活的另一名农民获得奖励选择窗口（`PEASANT_REWARD_CHOICE`）：
+    - 恢复 1 点体力（`recover 1`）；
+    - 摸 2 张牌（`draw 2`，复用 `_mode_death_reward_draw` 事务）；
+    - 放弃（`decline`）。
+  - 仅首名农民死亡触发奖励；第二名农民死亡直接终局（地主获胜），不触发奖励窗口。
+- **胜负判定与终局（`DoudizhuOutcomePolicy`）**：
+  - 地主确认死亡 → 农民阵营获胜（`winner_id = "peasants"`，`finish_reason = "landlord_eliminated"`）。
+  - 两名农民全部确认死亡 → 地主获胜（`winner_id = "p1"`，`finish_reason = "peasants_eliminated"`）。
+  - 牌堆耗尽平局：摸牌、判定、展示、奖励等原子取牌步骤牌堆不足或完整取牌后牌堆为 0 → 立即正式平局（`winner_id = None`，`finish_reason = "doudizhu_draw_deck_exhausted"`，`no_reshuffle_draw` 模式）。
+- **手牌隐私与可见性（Three-player Hand Privacy）**：
+  - `p1`、`p2`、`p3` 互不查看其他角色的私有手牌。
+  - 农民阵营两名角色即使属于同一队伍，也不共享队友手牌（visible 集合仅包含自身私有手牌与公开区域）。
+- **严格回放与重执行（Strict Replay）**：
+  - `SUPPORTED_REPLAY_MODES` 支持斗地主；`formal_doudizhu_configuration` + `analysis_only` + `max_steps` 为一等初始配置；胜负与平局均支持完整确定性重执行；配置篡改、非法观察者与伪造动作均严格失败关闭。
+
+**明确不包含（EXPLICIT EXCLUSIONS）**：
+
+- 叫地主 / 抢地主状态机（bidding / claim landlord flow）
+- 手气卡 / 换牌系统（redraw / hand shuffling card）
+- 选将 / 身份暗置与分配流程（identity selection / hidden identity flow）
+- 武将技能系统（除模式固定技能飞扬、跋扈外，不含任何武将特有技能）
+- 15分钟限时与积分裁定（15-minute score adjudication）
+- AI 策略（AI strategy）
+- Web / UI 界面
+- 正式胜率阶段（win rate benchmark execution）
+- 完整商业客户端流程与其它外围系统
+
+**就绪与门禁边界（READINESS BOUNDARY）**：
+
+- `multi_player_production_proven = false`
+- `authoritative_full_game_core = false`
+- 正式门禁 `inspect_formal_doudizhu_readiness()` 返回：`doudizhu_ready = formal_doudizhu_no_skill_ready`（canonical factory 可达 + 38/38 卡牌语义复用 + 严格回放支持）。
+- `doudizhu_ready` 严格限定为当前 formal no-skill combat scope 静态执行资格，不得扩张为 `FULL_GAME_READY`、`PRODUCTION_RELEASE_READY`、`RELEASE_READY`、`ALL_CARD_RULES_COMPLETE` 或 `AUTHORITATIVE_FULL_GAME_READY`。
+
+**规则源缺口原样保留（RULE GAPS UNCHANGED）**：
+
+- 酒 × 方天画戟 = `BLOCKED_BY_RULE_SOURCE` / `N-001`
+- `NESTED_INDEPENDENT_ATTRIBUTE_DAMAGE_DURING_CHAIN` = `WAITING_FOR_VERIFICATION`
+
+**实现身份与 Commit Provenance 分层**：
+
+- 被审计 implementation SHA：`4c2969fcc0d36da862b6a7f29d827e427c60f501`
+- 当前实现身份（`implementation_identity()`）：`a06f0fb2ea614325c9f27bcc44d035cfbe8cc4dfbe5dc961ca343bd872fe3434`
+- 提交分层：本轮 documentation closure commit 仅修改状态文档以登记审计结果，不得冒充被审计 implementation SHA。
+
+**C4 完整审计与修复历史（AUDIT & REMEDIATION PROVENANCE）**：
+
+1. **Initial C4 Implementation**：
+   - Implementation Commit：`d90325938b8e7860b6824597e8f59c63b0fd9f9c`（`feat: implement formal no-skill doudizhu mode`）
+   - 历史审计结论：`C4_INDEPENDENT_AUDIT_1_FAILED`
+   - 缺陷：`C4-AUDIT-001`（HIGH）。非终局农民死亡清理计算了清洗后的 `judgment_entry_indices`，但在异步 `PEASANT_REWARD_CHOICE` 暂停前未写回 authoritative runtime，导致 stale/ghost judgment entry index。
+   - 历史 FAILED 事实永久保留，不得反写为 PASSED。
+
+2. **Remediation 1**：
+   - Implementation Commit：`d7db68a2b989bc9b34bdca6ef04fa90ff23b1eb0`（`fix: preserve judgment indices across doudizhu death reward`）
+   - 修复：在挂起农民奖励选择前将清洗后的 `judgment_entry_indices` 权威写回 runtime。
+   - 独立 Re-audit：`C4-AUDIT-001 = CLOSED`，`C4_REMEDIATION_1_REAUDIT_PASSED`。
+   - 随后的 C4 Global Audit 2 在同一 `d7db68a` 候选上发现新 HIGH 缺陷，因此 C4 Global Audit 2 历史结论不能记为 PASSED。
+
+3. **C4 Global Audit 2**：
+   - 审计目标 SHA：`d7db68a2b989bc9b34bdca6ef04fa90ff23b1eb0`
+   - 历史审计结论：`C4_GLOBAL_AUDIT_2_FAILED`
+   - 缺陷：`C4-GLOBAL2-001`（HIGH）。`FormalDoudizhuConfiguration` / `TrustedFormalDoudizhuConfiguration` 使用 Python 宽松 equality、`from_dict` coercion 以及 public Trusted capability minting，使得 `True == 1`、`False == 0`、`2 == 2.0` 等非 exact canonical representation 可能获得 formal authority 并进入 strict replay。
+   - 历史 FAILED 事实永久保留。
+
+4. **Remediation 2**：
+   - Implementation Commit：`e28fa96917c94ab49e38fb52d7ab10cff8ff4c7a`（`fix: enforce strict doudizhu configuration authority`）
+   - 修复：引入 recursive exact-type canonical comparison，去除危险 input coercion，capability minting 移至内部 canonical factory。
+   - 独立 Re-audit：`C4-GLOBAL2-001 = CLOSED`，`C4_GLOBAL_REMEDIATION_2_REAUDIT_PASSED`，全量 pytest 2583 passed。
+
+5. **Completion Audit**：
+   - 审计目标 SHA：`e28fa96917c94ab49e38fb52d7ab10cff8ff4c7a`
+   - 历史审计结论：`C4_COMPLETION_AUDIT_FAILED`
+   - 发现两个 HIGH 缺陷：`C4-COMPLETION-001` 与 `C4-COMPLETION-002`。历史 FAILED 事实永久保留。
+   - `C4-COMPLETION-001`（HIGH）：借刀强迫杀 → 连锁属性伤害 → 子目标农民非终局死亡 → 农民奖励窗口 → 恢复父级结算。死亡确认阶段提前执行 `jiedaosharen_victory_cleanup`，导致实体借刀牌移出 PROCESSING 区域，但 `pending_borrowed_sword` 仍标记未完成；奖励结算后父级根再次 finalize，触发 double-finalize / `ProductionBatchError`。
+   - `C4-COMPLETION-002`（HIGH）：当前回合所有者农民被闪电击中 → DYING → 非终局死亡 → 农民奖励窗口。闪电在 DEATH/reward 前提前调用 `shandian_victory_cleanup`，但 `pending_judgment.cleanup_done=False` 仍指向已被 DISCARD 的实体判定牌，导致 parent ownership 与 physical zone 不一致。
+
+6. **Remediation 3**：
+   - Implementation Commit：`4c2969fcc0d36da862b6a7f29d827e427c60f501`（`fix: preserve parent roots across nonterminal death`）
+   - 根因分析：`ROOT_CAUSE_RELATION = SHARED`（非终局角色死亡被错误当成 parent root terminal/victory boundary）。
+   - 修复：仅在真正产生 terminal winner 时允许 parent victory cleanup；非终局死亡及奖励窗口期间严格保持 parent/root ownership；Borrowed Sword 与 Lightning 均实现 exactly-once completion。
+   - 独立 Re-audit：`C4-COMPLETION-001 = CLOSED`，`C4-COMPLETION-002 = CLOSED`，`C4_REMEDIATION_3_REAUDIT_PASSED`，全量 pytest 2594 passed。
+
+**最终收口复核证据（FINAL CLOSURE RECHECK EVIDENCE）**：
+
+- **被审计目标**：`4c2969fcc0d36da862b6a7f29d827e427c60f501`（detached HEAD，clean）
+- **最终技术结论**：`C4_FINAL_CLOSURE_RECHECK_PASSED`
+- **审计范围状态**：`TECHNICAL_C4_AUDIT_SCOPE = READY_FOR_DOCUMENTATION_CLOSURE`
+- **复核项详细结果**：
+  - C4-COMPLETION-001 final smoke = `PASS`
+  - C4-COMPLETION-002 final smoke = `PASS`
+  - true terminal winner cleanup = `PASS`
+  - deck-exhaustion terminal draw cleanup = `PASS`
+  - parent/root zone consistency = `PASS`
+  - event exactly-once = `PASS`
+  - stale action fail-closed，event/hash unchanged = `PASS`
+  - historical adjacent findings remain `CLOSED`
+  - targeted tests = **396 passed in 178.46s**
+  - pytest collection = **2594**
+  - full pytest = **2594 passed in 1611.74s (0:26:51)**
+  - failed = 0, errors = 0, skipped = 0
+  - compileall = `Exit Code 0`
+  - implementation identity = `a06f0fb2ea614325c9f27bcc44d035cfbe8cc4dfbe5dc961ca343bd872fe3434`（MATCH）
+  - worktree clean，无新 HIGH/BLOCKER
+
+**非阻塞技术观察（NON-BLOCKING OBSERVATIONS）**：
+
+1. `assert_resolution_invariants` 当前并不普遍直接断言 “pending physical root open → root 必须在 PROCESSING”；当前修复路径由专项 tests / probes 证明。（NON_BLOCKING）
+2. `pending_borrowed_sword.root_discarded` / `pending_judgment.cleanup_done` 当前生产完成通常通过清空 pending 结构，而非把布尔字段写 True。（NON_BLOCKING）
+3. 2v2 `TrustedFormal2v2Configuration` 仍使用较早的 authority construction semantics；这是 C4 audit 观察到的既有 2v2 contract，不是 C4 引入 finding，本 closure 不扩大 scope 修复。（NON_BLOCKING）
