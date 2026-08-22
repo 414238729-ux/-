@@ -1,6 +1,6 @@
 # POST-B 开发状态（POST_B_DEVELOPMENT_STATUS）
 
-> 状态标签：`AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`、`C4_FINAL_CLOSURE_RECHECK_PASSED`
+> 状态标签：`AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`、`C5_INDEPENDENT_AUDIT_PASSED`
 >
 > 本文件是 POST-B 开发轨（deepseek-post-milestone-b-development）的新增状态文档，
 > 未登记进 `docs/CHECKPOINT_MANIFEST.json`，也不修改任何已登记文档
@@ -17,6 +17,13 @@
   `a06f0fb2ea614325c9f27bcc44d035cfbe8cc4dfbe5dc961ca343bd872fe3434`。
   本文件随后的 status-closure commit 只记录复审与文档收口结果，不得冒充该
   implementation SHA。当前 C4 scope 完成独立终局复核与全量测试闭环，进入
+  `AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`。）
+- `POST_B_C5_FORMAL_NO_SKILL_FIVE_PLAYER_STANDARD_IDENTITY_MODE` = `AUDITED_PASSED`
+  （最终被独立审计的 implementation SHA =
+  `60dc98d0ebc3273087fc55dd44b45ac3f9a5b4b2`，implementation identity =
+  `bcb33198b8e3c5551ce53353d0707c579c7febc6e30cd95c20b00b681235bbad`；独立复审结论为
+  `C5_INDEPENDENT_AUDIT_PASSED`。本文件后续的 documentation closure commit
+  只登记审计与状态，不得冒充被审计 implementation SHA。当前 C5 scope 进入
   `AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`。）
 - `F-003` = `CLOSED`
 - `F-004` = `CLOSED`
@@ -63,6 +70,19 @@
   implementation commit = `4c2969fcc0d36da862b6a7f29d827e427c60f501`；
   detached HEAD clean；`TECHNICAL_C4_AUDIT_SCOPE = READY_FOR_DOCUMENTATION_CLOSURE`；
   2594 passed in 1611.74s，0 failed，0 errors，0 skipped。）
+- `C5-AUD-001` = `CLOSED`（首次 C5 independent audit 结论为
+  `C5_INDEPENDENT_AUDIT_FAILED_REMEDIATION_REQUIRED`；该 MEDIUM finding 指出
+  readiness probe 未检测 `analysis_only=False` trusted formal runtime，造成
+  readiness inflation。remediation 后 independent re-audit 已确认 CLOSED。）
+- `C5-AUD-002` = `CLOSED`（首次 C5 independent audit 结论同为
+  `C5_INDEPENDENT_AUDIT_FAILED_REMEDIATION_REQUIRED`；该 MEDIUM finding 覆盖
+  Borrowed Sword、Fangtian、terminal continuation、Lightning 与弱断言等最高风险
+  parent/root tests 的假覆盖。remediation 后 independent re-audit 已确认 CLOSED。）
+- **C5 final independent re-audit** = `C5_INDEPENDENT_AUDIT_PASSED`（目标 implementation SHA =
+  `60dc98d0ebc3273087fc55dd44b45ac3f9a5b4b2`；`C5-AUD-001 = CLOSED`，
+  `C5-AUD-002 = CLOSED`，new confirmed CRITICAL/HIGH/MEDIUM correctness finding =
+  `NONE`。首次 C5 independent audit 的历史 FAILED 结论永久保留，不得反写成
+  PASSED。）
 
 ### 0.1 C2 摘要（MULTIPLAYER CARD SEMANTICS CLOSURE）
 
@@ -103,7 +123,7 @@ N≥2 多人权威基础；**不是**完成 2v2。C1 只落地项目 1–4，并
 | 2 | 多人回合循环（沿存活环座次递增继任、跳过死亡角色） | 已落地（`_apply_end_turn` 等） |
 | 3 | 群体锦囊目标顺序（服务器使用时快照，跳过死亡角色） | 已落地（`_group_target_sequence` 接入存活环） |
 | 4 | 死亡/座位遍历（死亡不重编号、非终局死亡继续结算边界） | 已落地（统一胜负出口 + 群体锦囊继续分支） |
-| 5 | 模式胜负规则（2v2/身份场/最后一人/斗地主） | C3 已落地正式2v2（`TwoVsTwoOutcomePolicy`）；C4 已落地正式斗地主（`DoudizhuOutcomePolicy`，见 §10）；身份场/最后一人仍失败关闭 |
+| 5 | 模式胜负规则（2v2/斗地主/五人身份/其它身份变体） | C3 已落地正式2v2；C4 已落地正式斗地主；C5 五人标准身份已 `AUDITED_PASSED`（见 §11）；普通八人、限时八人、特殊身份变体及通用最后一人模式仍不在已审计范围 |
 | 6 | 方天画戟多目标 | C2 已实现（7.9 用户整理解释；见 0.1 节） |
 | 7 | 2v2 模式规则 | C3 已实现（formal no-skill 2v2，见 §9） |
 
@@ -558,7 +578,7 @@ BLOCKER FOUND，与本轮 rem1 re-audit = PASSED 不得混写。
 **formal duel 防回归**：seed 0 → p2/388/43、seed 7 → p2/162/17
 （与 R5/R8 记录一致；全量套件覆盖）。
 
-**遗留**：斗地主（历史 C3 遗留；C4 阶段已完成，见 §10）/身份场/最后一人胜负策略、武将技能、改判、AI、Web、
+**遗留**：斗地主（历史 C3 遗留；C4 阶段已完成，见 §10）/身份场（历史 C3 遗留；后续 C5 五人标准身份已完成，见 §11；普通八人、限时八人及特殊身份变体仍未审计）/最后一人胜负策略（历史 C3 遗留；通用最后一人模式当前仍未审计）、武将技能、改判、AI、Web、
 正式胜率阶段仍不在本轨；`multi_player_production_proven` 保持 false。
 
 ## 10. 当前轨：POST_B_C4_FORMAL_NO_SKILL_DOUDIZHU_MODE
@@ -688,3 +708,246 @@ BLOCKER FOUND，与本轮 rem1 re-audit = PASSED 不得混写。
 1. `assert_resolution_invariants` 当前并不普遍直接断言 “pending physical root open → root 必须在 PROCESSING”；当前修复路径由专项 tests / probes 证明。（NON_BLOCKING）
 2. `pending_borrowed_sword.root_discarded` / `pending_judgment.cleanup_done` 当前生产完成通常通过清空 pending 结构，而非把布尔字段写 True。（NON_BLOCKING）
 3. 2v2 `TrustedFormal2v2Configuration` 仍使用较早的 authority construction semantics；这是 C4 audit 观察到的既有 2v2 contract，不是 C4 引入 finding，本 closure 不扩大 scope 修复。（NON_BLOCKING）
+
+## 11. 当前轨：POST_B_C5_FORMAL_NO_SKILL_FIVE_PLAYER_STANDARD_IDENTITY_MODE
+
+**状态**：`AUDITED_PASSED`（implementation + remediation 已完成，独立 re-audit 通过
+`C5_INDEPENDENT_AUDIT_PASSED`；当前 scope 达到
+`AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`）。这是当前 C5 scope 的质量门禁，
+不是整个游戏 ready；是否进入下一开发阶段由用户决定。
+
+**范围**：正式五人标准军争身份模式、formal no-skill soldier profile，以及
+canonical post-redraw combat initialization。复用 `ProductionBasicCardBatch`、
+`PlayerTopology`、`OutcomePolicy`、C2 38/38 card semantics、160-card formal deck，
+并复用既有 action / event / damage / DYING / rescue / death / phase、parent/root
+continuation 与 strict replay；不建立第二套 identity engine。
+
+**明确不包含（EXPLICIT EXCLUSIONS）**：
+
+- 选将、武将技能、主公技能
+- 手气卡 / reroll
+- 身份选择动画及其它外围流程
+- 普通八人身份、限时八人身份
+- 双内奸、野心家、继位等特殊身份变体
+- AI、Web / UI、积分 / 限时
+- 正式胜率阶段
+- 商业客户端外围流程
+
+**Canonical 初始化（CANONICAL INITIALIZATION）**：
+
+- physical player IDs = `("p1", "p2", "p3", "p4", "p5")`。
+- identity composition = lord ×1、loyalist ×1、rebel ×2、spy ×1。
+- 只 shuffle identities，不执行第二次 physical-seat randomization。
+- 整个 session 使用单一 `DeterministicRNG`，消费顺序为 identity role shuffle
+  → deck shuffle → later reshuffles。
+- lord 的原物理位置不移动，该位置成为 seat1；`numbered_player_order` 从 lord
+  的物理位置旋转，lord first。角色死亡后 seat 不重新编号。
+- lord 初始 HP = 5/5，其他玩家 = 4/4；这是直接 pregame construction，
+  不是 HP bonus event。
+- 所有玩家 initial hand = 4；lord 没有 bonus card；无 redraw。
+
+**身份与手牌隐私（IDENTITY & HAND PRIVACY）**：
+
+- 每名玩家知道自己的身份、主公身份与 confirmed-dead 已公开身份；public
+  仅公开主公及 confirmed-dead 已公开身份。
+- living nonlord identity 保持 hidden；DYING、rescue window 与 rescue success
+  均不得 reveal identity。
+- 每名玩家的手牌仅自己可见；同阵营不共享手牌。
+- player-visible 输出必须脱敏 seed / RNG / authoritative private state、hidden
+  hashes、hidden identities 与其他玩家手牌。
+- C5 独立 audit 未发现 legal actions、context、公开 hash 或 player-visible
+  projection 可稳定泄露隐藏身份或他人手牌。
+
+**胜负判定（`IdentityOutcomePolicy`）**：
+
+- lord alive 且不存在 living rebel / spy → `lord_and_loyalists`。
+- lord + spy only → ongoing。
+- lord dead 且 sole other survivor 为 spy → `spy`。
+- lord dead 的 every other case（包括 nobody alive）→ `rebels`。
+- earlier-dead spy 不得在之后获胜。
+- 每个 confirmed death 后立即执行 outcome check；正常终局
+  `finish_reason = "identity_victory"`。
+
+**死亡、身份后果与 observable event sequence**：
+
+- confirmed death pipeline 的语义职责包括 nonlord identity reveal、death-zone
+  cleanup、`DEATH`、outcome check，以及 identity consequences / continuation；
+  此职责清单本身不定义 observable ordering。
+- 历史合同文字曾同时描述逻辑处理顺序与 observable event sequence；当前已审计
+  implementation 的 observable sequence 为：death-zone `CARD_MOVED` cleanup
+  → `IDENTITY_REVEALED` → `DEATH` → identity consequence / continuation。
+  不再把它写成 `IDENTITY_REVEALED` 必须先于 cleanup `CARD_MOVED`。
+- outcome check 在 `DEATH` 后、任何 identity consequences / continuation 前
+  立即完成。
+- terminal identity victory 立即停止：跳过 identity reward / penalty，不 resume
+  parent，remaining group / chain targets 不继续。
+- ongoing 时，由 final production `kill_credit` / damage source 驱动身份奖惩：
+  - 任何 killer 杀 rebel → draw 3。
+  - lord 杀 loyalist → discard all HAND + EQUIPMENT，retain JUDGMENT。
+  - nonlord 杀 loyalist → no identity penalty。
+  - 无有效 source → no invented killer。
+  - 不添加 killer-must-be-alive 限制。
+
+**Parent / Root continuation**：
+
+- C5 已独立复核 Borrowed Sword、Fangtian multi-target Slash、group-target Nanman、
+  Lightning pending judgment、current-turn-owner death、elemental chain、rescue 与
+  terminal group stop。
+- nonterminal death 不是 terminal parent cleanup boundary。
+- parent-owned root 保持 `PROCESSING`，直到真正 parent completion，并且 exactly
+  once finalize。
+- identity reward / penalty 必须发生在 parent continuation 前。
+- terminal winner 出现后，future parent target 不再开始。
+- 首次 audit 中的测试假覆盖问题由 `C5-AUD-002` 修复，并经独立 re-audit
+  确认 `CLOSED`。
+
+**Reshuffle draw**：
+
+- C5 `deck_supply_mode = "reshuffle_draw"`，不同于 C3 / C4 的
+  `no_reshuffle_draw`。
+- draw empty 时只 reshuffle eligible DISCARD；HAND、EQUIPMENT、JUDGMENT、
+  PROCESSING、REVEALED、special / out-of-game 等非 eligible 区域均不参与。
+- 若某 operation 恰好取得最后所需牌后供给变为 0，不是 draw，也不产生
+  draw-deck-exhausted；只有仍需要下一张、且 draw + eligible discard 均为空时，才产生
+  `identity_draw_deck_exhausted`。
+- 已发生的 partial movement / events / RNG 消费全部保留，不 rollback。
+- production step path 覆盖 normal draw、Wuzhong、Tiesuo recast、ordinary
+  judgment、Bagua、Wugu 与 rebel kill draw3。
+- Cixiong 对应入口为 N/A：formal no-skill soldier `gender = NONE`。
+
+**修正后的 draw replay contract**：
+
+- `C5_CANONICAL_DRAW_REACHABILITY_UNRESOLVED`。
+- `identity_draw_deck_exhausted` production semantics 是 C5 runtime contract，
+  已通过真实 production step paths 测试。
+- 对 canonical post-redraw initial state → natural
+  `identity_draw_deck_exhausted`，当前既没有发现自然 legal-action trajectory，
+  也没有形成覆盖全部 legal trajectories 的数学不可达证明。
+- 因此不得记录为 N/A、`PROVEN_UNREACHABLE`、mathematically impossible 或
+  `C5_DRAW_PROVEN_UNREACHABLE`。
+- 本 C5 closure 不要求伪造 canonical authoritative draw replay；不得使用
+  fixture、premutated state、`analysis_only=True`、伪造 outcome 或测试后门冒充
+  formal authoritative draw。
+- 未来若找到自然 canonical draw trajectory，再升级 mandatory authoritative
+  strict replay coverage。
+
+**Strict replay**：
+
+- 三种 canonical victory 已 independently verified：
+  - seed 0 → `lord_and_loyalists`
+  - seed 1 → `rebels`
+  - seed 4 → `spy`
+- 三者均使用 canonical trusted profile，`analysis_only=False`、
+  `fixture_applied=False`，经 `record_reference_formal_identity` 与
+  `reexecute_production_replay` 验证，`verified=True`。
+- strict replay 一等输入包括 formal identity config、physical players、identity
+  assignment、numbered order、lord id、`analysis_only` 与 `max_steps`。
+- 身份 / 配置 / 事件 / 动作 / hash / RNG / outcome tamper 全部 fail closed。
+- `C5_CANONICAL_DRAW_REACHABILITY_UNRESOLVED` 不表示 strict replay 整体不完整；
+  三种自然胜利 strict replay 已闭合。
+
+**Readiness**：
+
+`inspect_formal_identity_readiness()` 当前正常状态：
+
+- `deck_count = 160`
+- `registered_card_key_count = 38`
+- `registered_instance_count = 160`
+- `global_card_semantics_complete = true`
+- `mode_runtime_reachable = true`
+- `mode_implemented = true`
+- `reexecution_replay_supported = true`
+- `unsupported_rules = 0`
+- `approximation_count = 0`
+- `formal_identity_no_skill_ready = true`
+- `identity_ready = true`
+- `multi_player_production_proven = false`
+- `authoritative_full_game_core = false`
+
+首次 independent audit 的 `C5-AUD-001` 指出 readiness 原先只 probe
+`analysis_only=True`。remediation 增加 `analysis_only=False` trusted canonical
+session live probe 与 `formal_result_eligible` 检查；正式路径损坏时 readiness
+fail closed。独立 re-audit Probe A–D 已确认 `C5-AUD-001 = CLOSED`。
+
+`deterministic_controller_implemented=True`、`approximation_count=0` 中仍有
+declarative 部分，但它们无法掩盖 formal trusted runtime blocker；此项作为
+nonblocking observation 保留。
+
+**C5 审计与修复历史（AUDIT & REMEDIATION PROVENANCE）**：
+
+1. **Initial C5 Implementation**：
+   - Implementation Commit：`ae298c312917b1b3d4965958c3f9322ea3583c84`
+     （`Implement Post-B C5 formal five-player identity mode`）。
+   - 第一次独立敌对审计：
+     `C5_INDEPENDENT_AUDIT_FAILED_REMEDIATION_REQUIRED`。
+   - `C5-AUD-001`（MEDIUM）：readiness probe 没有检测
+     `analysis_only=False` trusted formal runtime，导致 readiness inflation。
+   - `C5-AUD-002`（MEDIUM）：若干最高风险 parent/root tests 存在错误
+     Borrowed Sword operation、silent return、Fangtian single-target fallback、
+     terminal continuation 假覆盖、Lightning 条件退出与 `<=1` 弱断言。
+   - 历史 FAILED 事实永久保留，不得把 initial audit 反写成 PASSED。
+
+2. **Audit Remediation**：
+   - Implementation Commit：`60dc98d0ebc3273087fc55dd44b45ac3f9a5b4b2`
+     （`Remediate Post-B C5 independent audit findings`）。
+   - `C5-AUD-001`：补齐 readiness trusted formal live path。
+   - `C5-AUD-002`：改用真实 Borrowed Sword / Fangtian / terminal group stop /
+     Lightning / lord-kills-loyalist group tests，去除 silent return、fallback 与
+     `<=1` 假覆盖。
+
+3. **Independent Re-Audit**：
+   - target：`60dc98d0ebc3273087fc55dd44b45ac3f9a5b4b2`。
+   - `C5-AUD-001 = CLOSED`。
+   - `C5-AUD-002 = CLOSED`。
+   - new confirmed CRITICAL/HIGH/MEDIUM correctness finding = `NONE`。
+   - FINAL：`C5_INDEPENDENT_AUDIT_PASSED`。
+
+**测试证据分层（TEST EVIDENCE — SOURCES NOT MIXED）**：
+
+- Implementation / remediation-side evidence：
+  - C5 collection = 72。
+  - all C5 = **72 passed**。
+  - adjacent regression = **57 passed**。
+  - full pytest = **2667 passed**，failed = 0，errors = 0。
+  - compileall = `PASS`。
+- Independent re-audit evidence：
+  - C5 + C1 closure = **78 passed**。
+  - historical C123 / C4 high-risk = **44 passed**。
+  - C3 2v2 + C4 Doudizhu smoke = **40 passed**。
+  - independent probes：readiness A–D、Borrowed Sword、Fangtian、terminal Nanman、
+    Lightning、lord kills loyalist，以及 three outcome strict replay。
+- 独立 re-audit 没有重新运行完整 2667 full suite；不得把 implementation-side
+  full pytest 写成 “independent audit full pytest = 2667 passed”。
+
+**Implementation identity / provenance 分层**：
+
+- 最终被审计 implementation SHA：
+  `60dc98d0ebc3273087fc55dd44b45ac3f9a5b4b2`。
+- 当前 implementation identity：
+  `bcb33198b8e3c5551ce53353d0707c579c7febc6e30cd95c20b00b681235bbad`。
+- identity chunks：`bcb33198` / `b8e3c555` / `1ce53353` / `d0707c57` /
+  `9c7febc6` / `e30cd95c` / `20b00b68` / `1235bbad`。
+- `FROZEN_R8_IMPLEMENTATION_IDENTITY` 继续保持
+  `06c8b2d3ead9adb52a18252e398eae137eb8fb51f657909051500893672b0e33`，
+  不改写。
+- documentation closure commit 本轮尚未创建；后续 docs-only closure SHA
+  不是被审计 implementation SHA，不得混写。
+
+**规则源缺口原样保留（RULE GAPS UNCHANGED）**：
+
+- 酒 × 方天画戟 = `BLOCKED_BY_RULE_SOURCE` / `N-001`
+- `NESTED_INDEPENDENT_ATTRIBUTE_DAMAGE_DURING_CHAIN` =
+  `WAITING_FOR_VERIFICATION`
+
+**就绪边界与下一阶段（READINESS BOUNDARY & NEXT STAGE）**：
+
+- C5 `AUDITED_PASSED` 只表示
+  `POST_B_C5_FORMAL_NO_SKILL_FIVE_PLAYER_STANDARD_IDENTITY_MODE` 当前定义 scope
+  已完成 implementation + independent audit，可以进入下一开发阶段。
+- 它不得扩张为 `FULL_GAME_READY`、`PRODUCTION_RELEASE_READY`、`RELEASE_READY`、
+  `AUTHORITATIVE_FULL_GAME_READY` 或 `ALL_CARD_RULES_COMPLETE`；
+  `multi_player_production_proven=false`、`authoritative_full_game_core=false`
+  继续保持。
+- 既有 Post-B roadmap 为 generic cards → duel → 2v2 → Doudizhu →
+  5-player identity → normal 8-player → timed 8-player。closure 后下一模式候选
+  可为普通八人 formal identity，但是否实际开始由用户决定；当前尚未启动。
