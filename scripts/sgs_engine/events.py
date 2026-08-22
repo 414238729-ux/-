@@ -37,6 +37,8 @@ class EventType(str, Enum):
     VICTORY = "victory"
     # POST-B C3：正式平局终局（2v2 牌堆耗尽平局，winner=None）。
     DRAW = "draw"
+    # POST-B C5：身份公开（开局主公 / 非主公确认死亡）。
+    IDENTITY_REVEALED = "identity_revealed"
     GROUP_TARGET_RESOLVED = "group_target_resolved"
     CHAINED_STATE = "chained_state"
     CARD_RECAST = "card_recast"
@@ -255,6 +257,12 @@ _CHAIN_FINISHED_FIELDS: frozenset[str] = frozenset(
 )
 _EQUIPMENT_EQUIPPED_REASONS: frozenset[str] = frozenset({"equip"})
 _EQUIPMENT_REMOVED_REASONS: frozenset[str] = frozenset({"replaced"})
+_IDENTITY_REVEAL_REASONS: frozenset[str] = frozenset(
+    {"initial_lord_reveal", "confirmed_death"}
+)
+_IDENTITY_REVEAL_ROLES: frozenset[str] = frozenset(
+    {"lord", "loyalist", "rebel", "spy"}
+)
 
 
 def _validate_nonempty_text(value: object, label: str) -> str:
@@ -818,6 +826,25 @@ def validate_event_contract(event: GameEvent) -> GameEvent:
         raise ValueError("濒死或死亡事件必须且只能指定一名目标角色")
     if event.event_type is EventType.VICTORY and not event.target_ids:
         raise ValueError("胜利事件必须至少指定一名获胜角色")
+    if event.event_type is EventType.IDENTITY_REVEALED:
+        if len(event.target_ids) != 1:
+            raise ValueError("身份公开事件必须且只能指定一名角色")
+        payload = event.payload
+        if set(payload) != {"reason", "identity"}:
+            raise ValueError(
+                "身份公开事件payload字段必须恰好为reason与identity；"
+                "不得携带完整身份映射或其他旁路字段"
+            )
+        reason = payload["reason"]
+        identity = payload["identity"]
+        if not isinstance(reason, str) or reason not in _IDENTITY_REVEAL_REASONS:
+            raise ValueError(
+                "身份公开事件reason只能是initial_lord_reveal或confirmed_death"
+            )
+        if not isinstance(identity, str) or identity not in _IDENTITY_REVEAL_ROLES:
+            raise ValueError("身份公开事件identity必须是canonical身份")
+        if reason == "initial_lord_reveal" and identity != "lord":
+            raise ValueError("initial_lord_reveal必须公开lord")
     return event
 
 

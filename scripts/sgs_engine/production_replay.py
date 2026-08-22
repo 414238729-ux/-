@@ -19,6 +19,7 @@ from .actions import ActionContext, LegalAction
 from .engine import ENGINE_VERSION, canonical_state_snapshot
 from .mode_2v2 import FORMAL_NO_SKILL_2V2_MODE
 from .mode_doudizhu import FORMAL_NO_SKILL_DOUDIZHU_MODE
+from .mode_identity import FORMAL_NO_SKILL_IDENTITY_5P_MODE
 from .production_batch import (
     FORMAL_NO_SKILL_DUEL_MODE,
     PRODUCTION_BASIC_CARDS_MODE,
@@ -42,6 +43,7 @@ SUPPORTED_REPLAY_MODES: frozenset[str] = frozenset(
         FORMAL_NO_SKILL_DUEL_MODE,
         FORMAL_NO_SKILL_2V2_MODE,
         FORMAL_NO_SKILL_DOUDIZHU_MODE,
+        FORMAL_NO_SKILL_IDENTITY_5P_MODE,
     }
 )
 
@@ -307,6 +309,16 @@ _FORMAL_DOUDIZHU_INITIAL_CONFIGURATION_FIELDS = {
     "analysis_only",
     "max_steps",
 }
+# POST-B C5：正式身份回放一等输入。完整 identities 只属于权威材料。
+_FORMAL_IDENTITY_INITIAL_CONFIGURATION_FIELDS = {
+    "formal_identity_configuration",
+    "physical_player_ids",
+    "identities",
+    "numbered_player_order",
+    "lord_player_id",
+    "analysis_only",
+    "max_steps",
+}
 
 _PRIVATE_FIELDS = {
     "schema",
@@ -325,6 +337,7 @@ _PRIVATE_GAIN_REASONS: frozenset[str] = frozenset(
         "death_reward_teammate_draw",
         "death_reward_peasant_draw",
         "bahu_prepare_draw",
+        "identity_kill_rebel_draw",
     }
 )
 
@@ -507,6 +520,35 @@ def _project_public_context(
     return result
 
 
+def _redact_identity_header(
+    header: dict[str, object],
+    viewer_id: str | None,
+) -> dict[str, object]:
+    """player-visible：只暴露 lord + viewer 自己的身份，其余标记 hidden。
+
+    完整 identities 仍留在权威记录中。不得让公开投影通过缺键或哈希
+    旁路恢复隐藏身份。
+    """
+
+    config = header.get("initial_configuration")
+    if not isinstance(config, Mapping):
+        return header
+    identities = config.get("identities")
+    if not isinstance(identities, Mapping):
+        return header
+    public_identities: dict[str, object] = {}
+    for player_id, role in identities.items():
+        if role == "lord" or player_id == viewer_id:
+            public_identities[str(player_id)] = role
+        else:
+            public_identities[str(player_id)] = "hidden"
+    new_config = dict(config)
+    new_config["identities"] = public_identities
+    new_header = dict(header)
+    new_header["initial_configuration"] = new_config
+    return new_header
+
+
 def _teams_from_record(value: Mapping[str, object]) -> Mapping[str, str] | None:
     """从权威回放一等输入读取正式2v2队伍映射（POST-B C3）。
 
@@ -531,6 +573,105 @@ def _teams_from_record(value: Mapping[str, object]) -> Mapping[str, str] | None:
     if len(result) != 4 or set(result.values()) != {"team_a", "team_b"}:
         return None
     return result
+
+
+_CANONICAL_IDENTITY_TOKENS: frozenset[str] = frozenset(
+    {"lord", "loyalist", "rebel", "spy"}
+)
+_CANONICAL_IDENTITY_COUNTS: dict[str, int] = {
+    "lord": 1,
+    "loyalist": 1,
+    "rebel": 2,
+    "spy": 1,
+}
+
+
+def _validate_identity_replay_assignment(
+    config: Mapping[str, object],
+) -> tuple[tuple[str, ...], dict[str, str], tuple[str, ...], str]:
+    """校验身份回放一等输入：类型、数量、主公派生一致性。"""
+
+    raw_physical = config.get("physical_player_ids")
+    if type(raw_physical) not in (list, tuple) or len(raw_physical) != 5:
+        raise ProductionReplayFormatError(
+            "正式身份 physical_player_ids必须是5项序列"
+        )
+    physical: list[str] = []
+    for item in raw_physical:
+        if type(item) is not str or not item.strip():
+            raise ProductionReplayFormatError(
+                "正式身份 physical_player_ids必须是非空字符串"
+            )
+        physical.append(item)
+    if tuple(physical) != ("p1", "p2", "p3", "p4", "p5"):
+        raise ProductionReplayFormatError(
+            "正式身份 physical_player_ids必须是 ('p1','p2','p3','p4','p5')"
+        )
+    if len(set(physical)) != 5:
+        raise ProductionReplayFormatError(
+            "正式身份 physical_player_ids不能重复"
+        )
+
+    raw_identities = config.get("identities")
+    if not isinstance(raw_identities, Mapping) or len(raw_identities) != 5:
+        raise ProductionReplayFormatError(
+            "正式身份 identities必须是5项角色→身份映射"
+        )
+    identities: dict[str, str] = {}
+    for key, item in raw_identities.items():
+        if type(key) is not str or type(item) is not str:
+            raise ProductionReplayFormatError(
+                "正式身份 identities的键与值必须是字符串；"
+                "不得用bool/int/float或enum对象伪装"
+            )
+        if key not in physical:
+            raise ProductionReplayFormatError(
+                "正式身份 identities必须恰好覆盖 physical_player_ids"
+            )
+        if item not in _CANONICAL_IDENTITY_TOKENS:
+            raise ProductionReplayFormatError(
+                f"正式身份 identities含有非法身份token：{item!r}"
+            )
+        identities[key] = item
+    if set(identities) != set(physical):
+        raise ProductionReplayFormatError(
+            "正式身份 identities必须恰好覆盖全部 physical_player_ids"
+        )
+    counts = {token: 0 for token in _CANONICAL_IDENTITY_TOKENS}
+    for token in identities.values():
+        counts[token] += 1
+    if counts != _CANONICAL_IDENTITY_COUNTS:
+        raise ProductionReplayFormatError(
+            "正式身份 identities必须恰好1主公、1忠臣、2反贼、1内奸"
+        )
+
+    lords = [pid for pid, role in identities.items() if role == "lord"]
+    derived_lord = lords[0]
+    raw_lord = config.get("lord_player_id")
+    if type(raw_lord) is not str or raw_lord != derived_lord:
+        raise ProductionReplayFormatError(
+            "正式身份 lord_player_id必须与 identities 中唯一主公严格一致"
+        )
+
+    raw_numbered = config.get("numbered_player_order")
+    if type(raw_numbered) not in (list, tuple) or len(raw_numbered) != 5:
+        raise ProductionReplayFormatError(
+            "正式身份 numbered_player_order必须是5项序列"
+        )
+    numbered: list[str] = []
+    for item in raw_numbered:
+        if type(item) is not str:
+            raise ProductionReplayFormatError(
+                "正式身份 numbered_player_order必须是字符串序列"
+            )
+        numbered.append(item)
+    lord_index = physical.index(derived_lord)
+    expected = tuple(physical[lord_index:] + physical[:lord_index])
+    if tuple(numbered) != expected:
+        raise ProductionReplayFormatError(
+            "正式身份 numbered_player_order必须从主公 physical position 旋转"
+        )
+    return tuple(physical), identities, tuple(numbered), derived_lord
 
 
 def _camps_from_record(value: Mapping[str, object]) -> Mapping[str, str] | None:
@@ -879,9 +1020,10 @@ class ProductionReexecutionReplay:
                 FORMAL_NO_SKILL_DUEL_MODE,
                 FORMAL_NO_SKILL_2V2_MODE,
                 FORMAL_NO_SKILL_DOUDIZHU_MODE,
+                FORMAL_NO_SKILL_IDENTITY_5P_MODE,
             }:
                 raise ProductionReplayFormatError(
-                    "正式结果只能出现在正式单挑、正式2v2或正式斗地主模式回放中"
+                    "正式结果只能出现在正式单挑、正式2v2、正式斗地主或正式身份模式回放中"
                 )
         if header["production_basic_cards_batch"] is not True:
             raise ProductionReplayFormatError(
@@ -1021,6 +1163,39 @@ class ProductionReexecutionReplay:
                 ):
                     raise ProductionReplayFormatError(
                         "正式斗地主回放的阵营映射与canonical profile不一致"
+                    )
+        elif header["mode_id"] == FORMAL_NO_SKILL_IDENTITY_5P_MODE:
+            _require_exact_fields(
+                initial_configuration,
+                _FORMAL_IDENTITY_INITIAL_CONFIGURATION_FIELDS,
+                "正式身份 initial_configuration",
+            )
+            if not isinstance(initial_configuration["analysis_only"], bool):
+                raise ProductionReplayFormatError(
+                    "正式身份 initial_configuration.analysis_only必须是布尔值"
+                )
+            _validate_identity_replay_assignment(initial_configuration)
+            if header["formal_result"] is not False:
+                if initial_configuration["analysis_only"] is not False:
+                    raise ProductionReplayFormatError(
+                        "正式结果回放禁止analysis_only"
+                    )
+                from .mode_identity import FormalIdentityConfiguration
+
+                raw_config = initial_configuration.get(
+                    "formal_identity_configuration"
+                )
+                try:
+                    canonical_replay_config = (
+                        FormalIdentityConfiguration.from_canonical_profile_value(
+                            raw_config
+                        )
+                    )
+                except Exception:
+                    canonical_replay_config = None
+                if canonical_replay_config is None:
+                    raise ProductionReplayFormatError(
+                        "正式结果回放必须绑定项目canonical formal profile"
                     )
         else:
             _require_exact_fields(
@@ -1184,6 +1359,7 @@ class ProductionReexecutionReplay:
                 )
 
         value = self._material_dict()
+        # POST-B C5：身份场不得沿用 2v2 队友手牌可见。可见集合只含观察者本人。
         # POST-B C3：2v2 队友可见（§2.4 当前确认）——可见集合=观察者∪同队
         # 队友；队伍映射来自回放一等输入 initial_configuration.teams。
         visible_hand_ids: frozenset[str] = frozenset()
@@ -1208,6 +1384,8 @@ class ProductionReexecutionReplay:
         for key in ("initial_execution_hash", "initial_game_state_hash"):
             header.pop(key, None)
         header["rng_material_redacted"] = True
+        if header.get("mode_id") == FORMAL_NO_SKILL_IDENTITY_5P_MODE:
+            header = _redact_identity_header(header, viewer_id)
         value["header"] = header
         value["random_consumptions"] = []
         value["random_consumption_count"] = len(self.random_consumptions)
@@ -1404,6 +1582,7 @@ def record_reference_production_batch(
     formal_game = game.mode_id == FORMAL_NO_SKILL_DUEL_MODE
     two_vs_two_game = game.mode_id == FORMAL_NO_SKILL_2V2_MODE
     doudizhu_game = game.mode_id == FORMAL_NO_SKILL_DOUDIZHU_MODE
+    identity_game = game.mode_id == FORMAL_NO_SKILL_IDENTITY_5P_MODE
     if formal_game:
         from .formal_duel import FormalNoSkillDuelSession
 
@@ -1425,6 +1604,13 @@ def record_reference_production_batch(
             raise ProductionReplayFormatError(
                 "正式斗地主回放必须来自canonical FormalDoudizhuSession"
             )
+    if identity_game:
+        from .mode_identity import FormalIdentitySession
+
+        if type(game) is not FormalIdentitySession:
+            raise ProductionReplayFormatError(
+                "正式身份回放必须来自canonical FormalIdentitySession"
+            )
     if formal_game and fixture is not None:
         raise ProductionReplayFormatError(
             "正式单挑回放禁止夹具；必须从canonical配置自然初始化"
@@ -1436,6 +1622,10 @@ def record_reference_production_batch(
     if doudizhu_game and fixture is not None:
         raise ProductionReplayFormatError(
             "正式斗地主回放禁止夹具；必须从canonical配置自然初始化"
+        )
+    if identity_game and fixture is not None:
+        raise ProductionReplayFormatError(
+            "正式身份回放禁止夹具；必须从canonical配置自然初始化"
         )
     if fixture is not None:
         # 测试与编排专用：在初始装配后、任何决策前应用确定性夹具；
@@ -1494,6 +1684,27 @@ def record_reference_production_batch(
             "analysis_only": bool(getattr(game, "analysis_only", True)),
             "max_steps": max_steps,
         }
+    elif identity_game:
+        formal_configuration = getattr(game, "formal_configuration", None)
+        if formal_configuration is None or not hasattr(
+            formal_configuration, "to_dict"
+        ):
+            raise ProductionReplayFormatError(
+                "正式身份会话缺少可重建的FormalIdentityConfiguration"
+            )
+        identities = {
+            player_id: role.value
+            for player_id, role in dict(game.identities_by_player).items()
+        }
+        initial_configuration = {
+            "formal_identity_configuration": formal_configuration.to_dict(),
+            "physical_player_ids": list(game.physical_player_ids),
+            "identities": identities,
+            "numbered_player_order": list(game.numbered_player_order),
+            "lord_player_id": game.lord_player_id,
+            "analysis_only": bool(getattr(game, "analysis_only", True)),
+            "max_steps": max_steps,
+        }
     else:
         initial_configuration = {
             "deck_path": str(deck_path),
@@ -1519,7 +1730,12 @@ def record_reference_production_batch(
         "test_only": False,
         "formal_result": (
             game.formal_result_eligible
-            if (formal_game or two_vs_two_game or doudizhu_game)
+            if (
+                formal_game
+                or two_vs_two_game
+                or doudizhu_game
+                or identity_game
+            )
             else False
         ),
         "production_basic_cards_batch": True,
@@ -1720,6 +1936,45 @@ def record_reference_formal_doudizhu(
     if not isinstance(analysis_only, bool):
         raise TypeError("analysis_only必须是布尔值")
     game = FormalDoudizhuSession(
+        seed=seed,
+        configuration=configuration,
+        analysis_only=analysis_only,
+    )
+    return record_reference_production_batch(
+        seed,
+        controller=controller or BatchReferenceController(),
+        max_steps=max_steps,
+        _game=game,
+    )
+
+
+def record_reference_formal_identity(
+    seed: int,
+    *,
+    configuration: object,
+    analysis_only: bool = True,
+    controller: Any | None = None,
+    max_steps: int = 2000,
+) -> ProductionReexecutionReplay:
+    """从可信 formal 身份 factory 录制同一生产核心的严格规则重执行回放。
+
+    不接受牌堆路径、洗牌开关、夹具或 RNG 注入；canonical profile 与正式
+    执行哨兵由 FormalIdentitySession 边界校验。analysis_only=false 时只
+    接受 trusted canonical profile。终局允许阵营胜
+    （lord_and_loyalists / rebels / spy）或牌堆彻底不足平局
+    （winner=None + identity_draw_deck_exhausted）。
+    """
+
+    from .mode_identity import (
+        FormalIdentityConfiguration,
+        FormalIdentitySession,
+    )
+
+    if not isinstance(configuration, FormalIdentityConfiguration):
+        raise TypeError("正式身份回放必须接收FormalIdentityConfiguration")
+    if not isinstance(analysis_only, bool):
+        raise TypeError("analysis_only必须是布尔值")
+    game = FormalIdentitySession(
         seed=seed,
         configuration=configuration,
         analysis_only=analysis_only,
@@ -1988,6 +2243,75 @@ def reexecute_production_replay(
             session_id=session_id,
             session_secret=session_secret,
         )
+    elif mode_id == FORMAL_NO_SKILL_IDENTITY_5P_MODE:
+        from .mode_identity import (
+            FormalIdentityConfiguration,
+            FormalIdentitySession,
+        )
+
+        if header.get("fixture_applied") is not False:
+            raise ProductionReplayFormatError("正式身份回放不得包含初始化夹具")
+        formal_value = _plain(
+            _require_mapping(
+                config.get("formal_identity_configuration"),
+                "initial_configuration.formal_identity_configuration",
+            )
+        )
+        analysis_only = config.get("analysis_only")
+        if not isinstance(analysis_only, bool):
+            raise ProductionReplayFormatError(
+                "正式身份 initial_configuration.analysis_only必须是布尔值"
+            )
+        recorded = _validate_identity_replay_assignment(config)
+        if analysis_only:
+            formal_configuration = FormalIdentityConfiguration.from_dict(
+                formal_value
+            )
+        else:
+            formal_configuration = (
+                FormalIdentityConfiguration.from_canonical_profile_value(
+                    formal_value
+                )
+            )
+        game = FormalIdentitySession(
+            seed=int(header["seed"]),
+            configuration=formal_configuration,
+            analysis_only=analysis_only,
+            session_id=session_id,
+            session_secret=session_secret,
+        )
+        live_identities = {
+            player_id: role.value
+            for player_id, role in dict(game.identities_by_player).items()
+        }
+        _expect_equal(
+            "identities",
+            None,
+            recorded[1],
+            live_identities,
+            "身份映射与同seed重新洗混结果不一致",
+        )
+        _expect_equal(
+            "physical_player_ids",
+            None,
+            list(recorded[0]),
+            list(game.physical_player_ids),
+            "physical_player_ids不一致",
+        )
+        _expect_equal(
+            "numbered_player_order",
+            None,
+            list(recorded[2]),
+            list(game.numbered_player_order),
+            "numbered_player_order不一致",
+        )
+        _expect_equal(
+            "lord_player_id",
+            None,
+            recorded[3],
+            game.lord_player_id,
+            "lord_player_id不一致",
+        )
     else:  # ProductionReexecutionReplay 格式校验本应先拒绝该路径
         raise ProductionReplayFormatError("规则重执行模式不属于可信工厂白名单")
     _expect_equal("mode", None, mode_id, game.mode_id, "重建会话模式不一致")
@@ -1997,6 +2321,7 @@ def reexecute_production_replay(
             FORMAL_NO_SKILL_DUEL_MODE,
             FORMAL_NO_SKILL_2V2_MODE,
             FORMAL_NO_SKILL_DOUDIZHU_MODE,
+            FORMAL_NO_SKILL_IDENTITY_5P_MODE,
         }
         and fixture is not None
     ):
@@ -2216,6 +2541,7 @@ __all__ = [
     "SUPPORTED_REPLAY_MODES",
     "record_reference_formal_2v2",
     "record_reference_formal_doudizhu",
+    "record_reference_formal_identity",
     "record_reference_formal_duel",
     "record_reference_production_batch",
     "reexecute_production_replay",

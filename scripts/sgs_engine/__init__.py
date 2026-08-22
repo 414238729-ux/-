@@ -26,8 +26,13 @@ POST-B C3 起：正式无武将技能 2v2 模式层（``mode_2v2``）接入同�
 核心——canonical profile（1+4 对 2+3、初始手牌 3/4/4/5、先手 1 号位、
 体力 4/4）、队伍胜负与牌堆耗尽平局 OutcomePolicy、死亡奖励摸牌、
 4 号位首轮“飞扬”窗口、no_reshuffle_draw 牌堆供给与严格回放
-（队伍映射一等输入、平局终局 winner=None）。它不是第二套引擎；斗地主、
-身份模式与武将技能仍在 C3 范围之外。
+（队伍映射一等输入、平局终局 winner=None）。它不是第二套引擎。
+POST-B C4 起：正式无武将技能斗地主模式层（``mode_doudizhu``）同样只作为
+mode policy 接入同一核心。POST-B C5 起：正式无武将技能五人标准军争身份
+模式层（``mode_identity``）接入同一核心——固定 1/1/2/1 身份牌由会话级
+同一 RNG 在牌堆 shuffle 之前洗混、主公相对座次、reshuffle_draw 供给、
+身份击杀奖惩与严格回放。C5 不是完整商业客户端，也不是
+FULL_GAME_READY / AUTHORITATIVE_FULL_GAME_READY。
 """
 
 from .actions import (
@@ -180,7 +185,9 @@ from .production_replay import (
     ProductionReplayVerificationResult,
     SUPPORTED_REPLAY_MODES,
     record_reference_formal_2v2,
+    record_reference_formal_doudizhu,
     record_reference_formal_duel,
+    record_reference_formal_identity,
     record_reference_production_batch,
     reexecute_production_replay,
 )
@@ -228,6 +235,20 @@ from .mode_doudizhu import (
     TrustedFormalDoudizhuConfiguration,
     assert_trusted_formal_doudizhu_configuration,
     inspect_formal_doudizhu_readiness,
+)
+from .mode_identity import (
+    FORMAL_NO_SKILL_IDENTITY_5P_MODE,
+    FormalIdentityBlocker,
+    FormalIdentityConfiguration,
+    FormalIdentityConfigurationError,
+    FormalIdentityReadiness,
+    FormalIdentitySession,
+    IdentityModePolicy,
+    IdentityOutcomePolicy,
+    StandardIdentityRole,
+    TrustedFormalIdentityConfiguration,
+    assert_trusted_formal_identity_configuration,
+    inspect_formal_identity_readiness,
 )
 
 
@@ -341,6 +362,8 @@ __all__ = [
     "record_reference_production_batch",
     "record_reference_formal_duel",
     "record_reference_formal_2v2",
+    "record_reference_formal_doudizhu",
+    "record_reference_formal_identity",
     "reexecute_production_replay",
     "SUPPORTED_REPLAY_MODES",
     "PlayerTopology",
@@ -404,4 +427,16 @@ __all__ = [
     "TrustedFormalDoudizhuConfiguration",
     "assert_trusted_formal_doudizhu_configuration",
     "inspect_formal_doudizhu_readiness",
+    "FORMAL_NO_SKILL_IDENTITY_5P_MODE",
+    "FormalIdentityBlocker",
+    "FormalIdentityConfiguration",
+    "FormalIdentityConfigurationError",
+    "FormalIdentityReadiness",
+    "FormalIdentitySession",
+    "IdentityModePolicy",
+    "IdentityOutcomePolicy",
+    "StandardIdentityRole",
+    "TrustedFormalIdentityConfiguration",
+    "assert_trusted_formal_identity_configuration",
+    "inspect_formal_identity_readiness",
 ]

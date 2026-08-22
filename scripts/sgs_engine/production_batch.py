@@ -2034,14 +2034,44 @@ def _assert_deck_available(
 
 
 class _DeckExhaustedDraw(Exception):
-    """POST-B C3 内部信号：no_reshuffle_draw 模式下牌堆不足以完成原子取牌。
+    """牌堆供给不足时的内部平局信号。
 
-    在任何状态/事件/RNG 变化之前抛出；step() 捕获并形成正式平局终局。
+    no_reshuffle_draw（C3/C4）：在任何状态/事件/RNG 变化之前抛出；
+    ``state`` / ``events`` 保持为空，step() 使用预检前权威状态形成平局。
+
+    reshuffle_draw（C5）：逐张取牌。若一次 N 张操作已取得前若干张，
+    之后仍需下一张但牌堆与可重洗弃牌堆均为空，则携带已经发生的局部
+    ``state`` 与尚未登记的 ``events``；调用方必须保留这些变化后再
+    形成正式平局，不得回滚到操作开始前。
     """
 
-    def __init__(self, label: str) -> None:
+    def __init__(
+        self,
+        label: str,
+        *,
+        state: GameState | None = None,
+        events: tuple[GameEvent, ...] = (),
+    ) -> None:
         super().__init__(label)
         self.label = label
+        self.state = state
+        self.events = events
+
+
+@dataclass(frozen=True, slots=True)
+class DeathConfirmationContext:
+    """POST-B C5：向模式层提供的最小、显式死亡确认上下文。
+
+    核心在确认死亡、退出存活环并完成 outcome check 之后构造。模式层
+    必须读取这里的最终 ``final_damage_source`` / ``kill_credit``，不得
+    回过头猜 card_user、回合角色、根牌使用者或 runtime 私有字段。
+    C3/C4 钩子可忽略本对象；缺省 None 保持向后兼容。
+    """
+
+    dying_id: str
+    final_damage_source: str | None
+    kill_credit: str | None
+    winner: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -2558,11 +2588,16 @@ class ProductionBasicCardBatch:
 
     @property
     def deck_supply_mode(self) -> str:
-        """牌堆供给口径：reshuffle（默认）| no_reshuffle_draw（2v2 §2.11）。"""
+        """牌堆供给口径：reshuffle（默认非正式）| no_reshuffle_draw（C3/C4）|
+        reshuffle_draw（C5 身份场）。"""
         policy = self._mode_policy
         if policy is not None and hasattr(policy, "deck_supply_mode"):
             value = policy.deck_supply_mode
-            if value not in ("reshuffle", "no_reshuffle_draw"):
+            if value not in (
+                "reshuffle",
+                "no_reshuffle_draw",
+                "reshuffle_draw",
+            ):
                 raise ProductionBatchError(
                     f"模式层牌堆供给口径{value!r}不受支持"
                 )
@@ -2642,6 +2677,10 @@ class ProductionBasicCardBatch:
         shuffle: bool = True,
         session_id: str | None = None,
         session_secret: bytes | None = None,
+        # POST-B C5：仅供正式身份会话在完成身份牌 shuffle 后注入同一
+        # DeterministicRNG。不是公开 RNG 注入口；传入对象不能授予
+        # formal authority。C1-C4 不传此参数，RNG 消费顺序保持不变。
+        _internal_rng: DeterministicRNG | None = None,
     ) -> None:
         if isinstance(seed, bool) or not isinstance(seed, int):
             raise TypeError("随机种子必须是整数")
@@ -2724,7 +2763,12 @@ class ProductionBasicCardBatch:
         self._deck_path = deck_path
         self._session_id = session_id
         self._session_secret = session_secret
-        self._rng = DeterministicRNG(seed)
+        if _internal_rng is None:
+            self._rng = DeterministicRNG(seed)
+        else:
+            if type(_internal_rng) is not DeterministicRNG:
+                raise TypeError("内部共享RNG必须是DeterministicRNG")
+            self._rng = _internal_rng
         self._formal_registry = FormalCardRegistry(records, session=self)
         self._formal_registry.ensure_all_basic_cards_implemented()
 
@@ -3234,12 +3278,16 @@ class ProductionBasicCardBatch:
             self._state = apply_action(
                 self.state, context, validated, self.registry
             )
-        except _DeckExhaustedDraw:
-            # POST-B C3（§2.11）：必须从牌堆取牌的原子步骤开始时剩余不足
-            # → 不执行半截取牌，直接形成平局（预检发生在任何状态/RNG
-            # 变化之前，平局终局使用预检时的权威状态）。
+        except _DeckExhaustedDraw as exc:
+            # no_reshuffle_draw：预检失败，state/events 为空，使用动作前状态。
+            # reshuffle_draw：可能已取得前若干张，必须保留 exception 中的
+            # 局部状态与事件后再形成正式平局。
+            next_state = self.state
+            if exc.state is not None:
+                self._events.extend(exc.events)
+                next_state = exc.state
             self._state, self._runtime = self._finish_game_as_draw(
-                self.state, self._runtime
+                next_state, self._runtime
             )
         self._step_count += 1
         self._state.assert_card_conservation()
@@ -3456,6 +3504,39 @@ class ProductionBasicCardBatch:
                 dict(self._mode_policy.teams)
                 if self._mode_policy is not None
                 and hasattr(self._mode_policy, "teams")
+                else None
+            ),
+            # POST-B C5：身份映射进入权威执行快照；player-visible 不得
+            # 通过本快照或其哈希恢复隐藏身份。
+            "identities": (
+                {
+                    player_id: (
+                        role.value if hasattr(role, "value") else role
+                    )
+                    for player_id, role in dict(
+                        self._mode_policy.identities
+                    ).items()
+                }
+                if self._mode_policy is not None
+                and hasattr(self._mode_policy, "identities")
+                else None
+            ),
+            "physical_player_ids": (
+                list(self._mode_policy.physical_player_ids)
+                if self._mode_policy is not None
+                and hasattr(self._mode_policy, "physical_player_ids")
+                else None
+            ),
+            "numbered_player_order": (
+                list(self._mode_policy.numbered_player_order)
+                if self._mode_policy is not None
+                and hasattr(self._mode_policy, "numbered_player_order")
+                else None
+            ),
+            "lord_player_id": (
+                self._mode_policy.lord_player_id
+                if self._mode_policy is not None
+                and hasattr(self._mode_policy, "lord_player_id")
                 else None
             ),
             "runtime": self._runtime.audit_value(),
@@ -10165,11 +10246,9 @@ class ProductionBasicCardBatch:
         self._deck_supply_precheck(state, 1, "八卦阵判定需要1张牌")
         next_state = state
         events: list[GameEvent] = []
-        if not next_state.card_ids_in(DRAW_PILE):
-            next_state, reshuffle_events = self._reshuffle_discard_into_draw(
-                next_state
-            )
-            events.extend(reshuffle_events)
+        next_state, events = self._require_next_draw_card(
+            next_state, events, "八卦阵判定需要1张牌"
+        )
         judge_id = next_state.card_ids_in(DRAW_PILE)[0]
         if judge_id == armor_id:
             raise ProductionBatchError(
@@ -11692,11 +11771,9 @@ class ProductionBasicCardBatch:
         next_state = state
         events: list[GameEvent] = []
         for pool_index in range(count):
-            if not next_state.card_ids_in(DRAW_PILE):
-                next_state, reshuffle_events = self._reshuffle_discard_into_draw(
-                    next_state
-                )
-                events.extend(reshuffle_events)
+            next_state, events = self._require_next_draw_card(
+                next_state, events, f"展示{count}张牌"
+            )
             instance_id = next_state.card_ids_in(DRAW_PILE)[0]
             source = next_state.location_of(instance_id)
             next_state = next_state.move_card(instance_id, REVEALED_ZONE)
@@ -13370,19 +13447,42 @@ class ProductionBasicCardBatch:
             explicit_two_player_fallback=True,
         )
         damage_source = self._pending_damage_source(runtime)
+        kill_credit = (
+            runtime.pending_damage_kill_credit
+            if runtime.pending_damage_kill_credit is not None
+            else damage_source
+        )
         death_event = GameEvent(
             event_type=EventType.DEATH,
             damage_source=damage_source,
             kill_credit=damage_source,
             target_ids=(dying_id,),
         )
+        reveal_events: tuple[GameEvent, ...] = ()
+        mode_policy = self._mode_policy
+        if mode_policy is not None and hasattr(
+            mode_policy, "identity_reveal_on_confirmed_death"
+        ):
+            reveal = mode_policy.identity_reveal_on_confirmed_death(dying_id)
+            if reveal is not None:
+                if not isinstance(reveal, GameEvent):
+                    raise ProductionBatchError(
+                        "身份公开钩子必须返回GameEvent或None"
+                    )
+                reveal_events = (reveal,)
+        death_context = DeathConfirmationContext(
+            dying_id=dying_id,
+            final_damage_source=damage_source,
+            kill_credit=kill_credit,
+            winner=winner,
+        )
         if winner is None:
             # POST-B C1/C2：多人对局中的非终局死亡——不产生 VICTORY，
-            # 对局继续。事件顺序：根牌收尾 → 死亡区域清理 → 死亡 →
-            # 模式死亡奖励（2v2 §2.7 / 斗地主 §3.7）→ 继续结算/平局终局。
-            mode_policy = self._mode_policy
+            # 对局继续。事件顺序：根牌收尾 → 死亡区域清理 → 身份公开
+            # （C5 非主公）→ 死亡 → 模式死亡奖励（2v2 §2.7 / 斗地主 §3.7
+            # / C5 身份击杀奖惩）→ 继续结算/平局终局。
             self._events.extend(
-                [*finish_events, *cleanup_events, death_event]
+                [*finish_events, *cleanup_events, *reveal_events, death_event]
             )
             # C123-R1-NEW-001：确认当前回合角色死亡后，回合结束责任成立。
             # 若此时仍有未完成 parent/root 或模式死亡奖励挂起窗口，不得立即切回合，
@@ -13405,12 +13505,17 @@ class ProductionBasicCardBatch:
             if mode_policy is not None and hasattr(
                 mode_policy, "death_confirmed_hook"
             ):
-                # POST-B C3/C4：模式层死亡确认钩子（2v2 死亡奖励：存活队友
+                # POST-B C3/C4/C5：模式层死亡确认钩子（2v2 死亡奖励：存活队友
                 # 摸1张，§2.7；斗地主死亡奖励：存活农民三选一窗口，§3.7；
-                # 只在胜负未成立时触发）。
+                # C5 身份击杀奖惩；只在胜负未成立时触发）。
+                # death_context 为向后兼容的显式可选参数；C3/C4 忽略。
                 pre_hook_runtime = runtime
                 next_state, runtime = mode_policy.death_confirmed_hook(
-                    self, next_state, runtime, dying_id
+                    self,
+                    next_state,
+                    runtime,
+                    dying_id,
+                    death_context=death_context,
                 )
                 if runtime.game_over_reason is not None:
                     self._commit_runtime(pre_hook_runtime, runtime)
@@ -13428,7 +13533,9 @@ class ProductionBasicCardBatch:
                 is_nonterminal_chain_child,
             )
         final_events: list[GameEvent] = (
-            finish_events + list(cleanup_events)
+            finish_events
+            + list(cleanup_events)
+            + list(reveal_events)
             + [
                 death_event,
                 GameEvent(
@@ -13821,9 +13928,14 @@ class ProductionBasicCardBatch:
                     1,
                     reason="bahu_prepare_draw",
                 )
-            except _DeckExhaustedDraw:
+            except _DeckExhaustedDraw as exc:
+                exhausted_state = (
+                    exc.state if exc.state is not None else state
+                )
+                if exc.state is not None:
+                    self._events.extend(exc.events)
                 next_state, draw_runtime = self._finish_game_as_draw(
-                    state, runtime
+                    exhausted_state, runtime
                 )
                 self._commit_runtime(runtime, draw_runtime)
                 return next_state
@@ -14425,14 +14537,16 @@ class ProductionBasicCardBatch:
         pending: _PendingJudgment,
     ) -> tuple[GameState, tuple[GameEvent, ...], dict[str, object]]:
         """原子取判定牌：预检→重洗→牌堆顶→REVEALED→公开→结果→弃置。"""
-        # 原子预检：牌堆 + 可重洗弃牌堆 >= 1（在任何状态/RNG变化前失败关闭）
+        # 原子预检：非正式 reshuffle / no_reshuffle_draw 保持原契约；
+        # C5 reshuffle_draw 改为逐张取得。
         self._deck_supply_precheck(state, 1, "判定需要1张牌")
         next_state = state
-        if not next_state.card_ids_in(DRAW_PILE):
-            next_state, reshuffle_events = self._reshuffle_discard_into_draw(
-                next_state
-            )
-            self._events.extend(reshuffle_events)
+        take_events: list[GameEvent] = []
+        next_state, take_events = self._require_next_draw_card(
+            next_state, take_events, "判定需要1张牌"
+        )
+        if take_events:
+            self._events.extend(take_events)
         judge_id = next_state.card_ids_in(DRAW_PILE)[0]
         judge_card = next_state.cards_by_id[judge_id]
         take_event = GameEvent(
@@ -15560,7 +15674,40 @@ class ProductionBasicCardBatch:
             if len(state.card_ids_in(DRAW_PILE)) < count:
                 raise _DeckExhaustedDraw(label)
             return
+        if self.deck_supply_mode == "reshuffle_draw":
+            # C5：逐张取得，不得对整个 N 张 operation 做原子合计预检。
+            return
         _assert_deck_available(state, count, label)
+
+    def _require_next_draw_card(
+        self,
+        state: GameState,
+        events: list[GameEvent],
+        label: str,
+    ) -> tuple[GameState, list[GameEvent]]:
+        """保证牌堆顶至少有一张可取实体。
+
+        reshuffle_draw：牌堆空则只重洗当前 DISCARD_PILE；若仍需要下一张
+        且牌堆与可重洗弃牌堆都空，携带已发生的局部 state/events 发出
+        正式平局信号。不得把 HAND/EQUIPMENT/JUDGMENT/PROCESSING/REVEALED
+        洗回牌堆。
+        """
+
+        if state.card_ids_in(DRAW_PILE):
+            return state, events
+        if self.deck_supply_mode == "reshuffle_draw":
+            if not state.card_ids_in(DISCARD_PILE):
+                raise _DeckExhaustedDraw(
+                    label, state=state, events=tuple(events)
+                )
+            next_state, reshuffle_events = self._reshuffle_discard_into_draw(
+                state
+            )
+            events.extend(reshuffle_events)
+            return next_state, events
+        next_state, reshuffle_events = self._reshuffle_discard_into_draw(state)
+        events.extend(reshuffle_events)
+        return next_state, events
 
     def _check_2v2_draw_after_consumption(
         self, state: GameState, runtime: _BatchRuntime
@@ -15593,10 +15740,125 @@ class ProductionBasicCardBatch:
             next_state, draw_events = self._draw_cards(
                 state, player_id, count, reason=reason
             )
-        except _DeckExhaustedDraw:
+        except _DeckExhaustedDraw as exc:
+            if exc.state is not None:
+                self._events.extend(exc.events)
+                return self._finish_game_as_draw(exc.state, runtime)
             return self._finish_game_as_draw(state, runtime)
         self._events.extend(draw_events)
         return self._check_2v2_draw_after_consumption(next_state, runtime)
+
+    def _mode_identity_lord_penalty_discard(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        lord_id: str,
+    ) -> tuple[GameState, _BatchRuntime]:
+        """C5：主公击杀忠臣惩罚——弃置全部手牌与装备区，判定区保留。"""
+
+        next_state = state
+        events: list[GameEvent] = []
+        reason = "identity_lord_kill_loyalist_penalty"
+        hand_zone = ZoneRef.hand(lord_id)
+        for instance_id in list(next_state.card_ids_in(hand_zone)):
+            card_key = _card_key(next_state, instance_id)
+            next_state = next_state.move_card(instance_id, DISCARD_PILE)
+            events.extend(
+                (
+                    GameEvent(
+                        event_type=EventType.CARD_MOVED,
+                        card_instance_id=instance_id,
+                        card_key=card_key,
+                        card_user=lord_id,
+                        payload={
+                            "source": _zone_payload(hand_zone),
+                            "destination": _zone_payload(DISCARD_PILE),
+                            "reason": reason,
+                        },
+                    ),
+                    GameEvent(
+                        event_type=EventType.CARD_LOST,
+                        card_instance_id=instance_id,
+                        card_key=card_key,
+                        target_ids=(lord_id,),
+                        payload={
+                            "reason": reason,
+                            "source_zone": _zone_id(hand_zone),
+                        },
+                    ),
+                    GameEvent(
+                        event_type=EventType.CARD_DISCARDED,
+                        card_instance_id=instance_id,
+                        card_key=card_key,
+                        card_user=lord_id,
+                        target_ids=(lord_id,),
+                        payload={
+                            "reason": reason,
+                            "source_zone": _zone_id(hand_zone),
+                        },
+                    ),
+                )
+            )
+        for slot in (
+            "weapon",
+            "armor",
+            "attack_horse",
+            "defense_horse",
+            "treasure",
+        ):
+            zone = ZoneRef.equipment(lord_id, slot)
+            for instance_id in list(next_state.card_ids_in(zone)):
+                card_key = _card_key(next_state, instance_id)
+                next_state = next_state.move_card(instance_id, DISCARD_PILE)
+                if slot == "armor":
+                    next_state, recovery_events = (
+                        self._apply_armor_leave_recovery(
+                            next_state,
+                            instance_id=instance_id,
+                            owner_id=lord_id,
+                            reason=reason,
+                        )
+                    )
+                    events.extend(recovery_events)
+                events.extend(
+                    (
+                        GameEvent(
+                            event_type=EventType.CARD_MOVED,
+                            card_instance_id=instance_id,
+                            card_key=card_key,
+                            card_user=lord_id,
+                            payload={
+                                "source": _zone_payload(zone),
+                                "destination": _zone_payload(DISCARD_PILE),
+                                "reason": reason,
+                                "equipment_slot": slot,
+                            },
+                        ),
+                        GameEvent(
+                            event_type=EventType.CARD_LOST,
+                            card_instance_id=instance_id,
+                            card_key=card_key,
+                            target_ids=(lord_id,),
+                            payload={
+                                "reason": reason,
+                                "source_zone": _zone_id(zone),
+                            },
+                        ),
+                        GameEvent(
+                            event_type=EventType.CARD_DISCARDED,
+                            card_instance_id=instance_id,
+                            card_key=card_key,
+                            card_user=lord_id,
+                            target_ids=(lord_id,),
+                            payload={
+                                "reason": reason,
+                                "source_zone": _zone_id(zone),
+                            },
+                        ),
+                    )
+                )
+        self._events.extend(tuple(events))
+        return next_state, runtime
 
     def _finish_game_as_draw(
         self, state: GameState, runtime: _BatchRuntime
@@ -15665,11 +15927,9 @@ class ProductionBasicCardBatch:
         next_state = state
         events: list[GameEvent] = []
         for _ in range(count):
-            if not next_state.card_ids_in(DRAW_PILE):
-                next_state, reshuffle_events = self._reshuffle_discard_into_draw(
-                    next_state
-                )
-                events.extend(reshuffle_events)
+            next_state, events = self._require_next_draw_card(
+                next_state, events, f"摸{count}张牌"
+            )
             instance_id = next_state.card_ids_in(DRAW_PILE)[0]
             source = next_state.location_of(instance_id)
             next_state = next_state.move_card(
@@ -15714,6 +15974,7 @@ __all__ = [
     "ProductionBatchResult",
     "ProductionBatchSafetyLimitError",
     "ProductionBasicCardBatch",
+    "DeathConfirmationContext",
     "ProductionPhase",
     "ScriptedBatchController",
     "cleanup_finished_transient_runtime",

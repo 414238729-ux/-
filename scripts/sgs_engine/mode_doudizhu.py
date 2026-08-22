@@ -556,6 +556,7 @@ class DoudizhuModePolicy:
         state: GameState,
         runtime: object,
         dying_id: str,
+        death_context: object | None = None,
     ) -> tuple[GameState, object]:
         """POST-B C4：农民死亡确认钩子（§3.7 当前确认：存活农民三选一）。
 
@@ -565,7 +566,7 @@ class DoudizhuModePolicy:
         核心检测到该阶段后执行真正的暂停（commit runtime 并挂起 continuation），
         等待存活农民提交动作。
         """
-        del session
+        del session, death_context
         if self.camp_of(dying_id) != _CAMP_PEASANTS:
             return state, runtime
         surviving = self.surviving_peasant_id(state)

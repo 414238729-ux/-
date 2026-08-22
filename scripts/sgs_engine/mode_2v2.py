@@ -406,6 +406,7 @@ class TwoVsTwoModePolicy:
         state: GameState,
         runtime: object,
         dying_id: str,
+        death_context: object | None = None,
     ) -> tuple[GameState, object]:
         """POST-B C3：死亡确认钩子（§2.7 当前确认：存活队友摸1张）。
 
@@ -415,6 +416,7 @@ class TwoVsTwoModePolicy:
         绝不执行半截取牌。返回 (state, runtime)，平局时 runtime 携带
         game_over_reason 与 FINISHED 阶段。
         """
+        del death_context
         count = self.configuration.death_reward_draw_count
         if count <= 0:
             return state, runtime
