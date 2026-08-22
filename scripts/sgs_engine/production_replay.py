@@ -19,7 +19,10 @@ from .actions import ActionContext, LegalAction
 from .engine import ENGINE_VERSION, canonical_state_snapshot
 from .mode_2v2 import FORMAL_NO_SKILL_2V2_MODE
 from .mode_doudizhu import FORMAL_NO_SKILL_DOUDIZHU_MODE
-from .mode_identity import FORMAL_NO_SKILL_IDENTITY_5P_MODE
+from .mode_identity import (
+    FORMAL_NO_SKILL_IDENTITY_5P_MODE,
+    FORMAL_NO_SKILL_IDENTITY_8P_MODE,
+)
 from .production_batch import (
     FORMAL_NO_SKILL_DUEL_MODE,
     PRODUCTION_BASIC_CARDS_MODE,
@@ -44,6 +47,7 @@ SUPPORTED_REPLAY_MODES: frozenset[str] = frozenset(
         FORMAL_NO_SKILL_2V2_MODE,
         FORMAL_NO_SKILL_DOUDIZHU_MODE,
         FORMAL_NO_SKILL_IDENTITY_5P_MODE,
+        FORMAL_NO_SKILL_IDENTITY_8P_MODE,
     }
 )
 
@@ -319,6 +323,21 @@ _FORMAL_IDENTITY_INITIAL_CONFIGURATION_FIELDS = {
     "analysis_only",
     "max_steps",
 }
+_FORMAL_EIGHT_PLAYER_IDENTITY_INITIAL_CONFIGURATION_FIELDS = {
+    "formal_eight_player_identity_configuration",
+    "physical_player_ids",
+    "identities",
+    "numbered_player_order",
+    "lord_player_id",
+    "analysis_only",
+    "max_steps",
+}
+_IDENTITY_REPLAY_MODES: frozenset[str] = frozenset(
+    {
+        FORMAL_NO_SKILL_IDENTITY_5P_MODE,
+        FORMAL_NO_SKILL_IDENTITY_8P_MODE,
+    }
+)
 
 _PRIVATE_FIELDS = {
     "schema",
@@ -578,71 +597,159 @@ def _teams_from_record(value: Mapping[str, object]) -> Mapping[str, str] | None:
 _CANONICAL_IDENTITY_TOKENS: frozenset[str] = frozenset(
     {"lord", "loyalist", "rebel", "spy"}
 )
-_CANONICAL_IDENTITY_COUNTS: dict[str, int] = {
-    "lord": 1,
-    "loyalist": 1,
-    "rebel": 2,
-    "spy": 1,
+_CANONICAL_IDENTITY_COUNTS_BY_MODE: dict[str, dict[str, int]] = {
+    FORMAL_NO_SKILL_IDENTITY_5P_MODE: {
+        "lord": 1,
+        "loyalist": 1,
+        "rebel": 2,
+        "spy": 1,
+    },
+    FORMAL_NO_SKILL_IDENTITY_8P_MODE: {
+        "lord": 1,
+        "loyalist": 2,
+        "rebel": 4,
+        "spy": 1,
+    },
 }
+
+
+def _identity_replay_spec(
+    mode_id: str,
+) -> tuple[
+    tuple[str, ...],
+    dict[str, int],
+    str,
+    set[str],
+    str,
+    bool,
+]:
+    """返回 C5/C6 一等 replay profile；C6 容器边界从首版 exact。"""
+
+    if mode_id == FORMAL_NO_SKILL_IDENTITY_5P_MODE:
+        return (
+            ("p1", "p2", "p3", "p4", "p5"),
+            _CANONICAL_IDENTITY_COUNTS_BY_MODE[mode_id],
+            "formal_identity_configuration",
+            _FORMAL_IDENTITY_INITIAL_CONFIGURATION_FIELDS,
+            "正式身份",
+            False,
+        )
+    if mode_id == FORMAL_NO_SKILL_IDENTITY_8P_MODE:
+        return (
+            ("p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8"),
+            _CANONICAL_IDENTITY_COUNTS_BY_MODE[mode_id],
+            "formal_eight_player_identity_configuration",
+            _FORMAL_EIGHT_PLAYER_IDENTITY_INITIAL_CONFIGURATION_FIELDS,
+            "正式普通八人身份",
+            True,
+        )
+    raise ProductionReplayFormatError("正式身份回放mode/profile不受支持")
+
+
+def _identity_replay_runtime(
+    mode_id: str,
+) -> tuple[type[Any], type[ProductionBasicCardBatch], str]:
+    """C5/C6 replay runtime façade 映射；核心记录与重执行路径共享。"""
+
+    from .mode_identity import (
+        FormalEightPlayerIdentityConfiguration,
+        FormalEightPlayerIdentitySession,
+        FormalIdentityConfiguration,
+        FormalIdentitySession,
+    )
+
+    if mode_id == FORMAL_NO_SKILL_IDENTITY_5P_MODE:
+        return (
+            FormalIdentityConfiguration,
+            FormalIdentitySession,
+            "formal_identity_configuration",
+        )
+    if mode_id == FORMAL_NO_SKILL_IDENTITY_8P_MODE:
+        return (
+            FormalEightPlayerIdentityConfiguration,
+            FormalEightPlayerIdentitySession,
+            "formal_eight_player_identity_configuration",
+        )
+    raise ProductionReplayFormatError("正式身份回放runtime façade不受支持")
 
 
 def _validate_identity_replay_assignment(
     config: Mapping[str, object],
+    mode_id: str,
 ) -> tuple[tuple[str, ...], dict[str, str], tuple[str, ...], str]:
     """校验身份回放一等输入：类型、数量、主公派生一致性。"""
 
+    (
+        expected_physical,
+        expected_counts,
+        _configuration_field,
+        _configuration_fields,
+        label,
+        exact_containers,
+    ) = _identity_replay_spec(mode_id)
+    player_count = len(expected_physical)
     raw_physical = config.get("physical_player_ids")
-    if type(raw_physical) not in (list, tuple) or len(raw_physical) != 5:
+    valid_physical_container = (
+        type(raw_physical) is list
+        if exact_containers
+        else type(raw_physical) in (list, tuple)
+    )
+    if not valid_physical_container or len(raw_physical) != player_count:  # type: ignore[arg-type]
         raise ProductionReplayFormatError(
-            "正式身份 physical_player_ids必须是5项序列"
+            f"{label} physical_player_ids必须是{player_count}项序列"
         )
     physical: list[str] = []
-    for item in raw_physical:
+    for item in raw_physical:  # type: ignore[union-attr]
         if type(item) is not str or not item.strip():
             raise ProductionReplayFormatError(
-                "正式身份 physical_player_ids必须是非空字符串"
+                f"{label} physical_player_ids必须是非空字符串"
             )
         physical.append(item)
-    if tuple(physical) != ("p1", "p2", "p3", "p4", "p5"):
+    if tuple(physical) != expected_physical:
         raise ProductionReplayFormatError(
-            "正式身份 physical_player_ids必须是 ('p1','p2','p3','p4','p5')"
+            f"{label} physical_player_ids必须精确等于canonical physical IDs"
         )
-    if len(set(physical)) != 5:
+    if len(set(physical)) != player_count:
         raise ProductionReplayFormatError(
-            "正式身份 physical_player_ids不能重复"
+            f"{label} physical_player_ids不能重复"
         )
 
     raw_identities = config.get("identities")
-    if not isinstance(raw_identities, Mapping) or len(raw_identities) != 5:
+    valid_identity_container = (
+        type(raw_identities) is dict
+        if exact_containers
+        else isinstance(raw_identities, Mapping)
+    )
+    if not valid_identity_container or len(raw_identities) != player_count:  # type: ignore[arg-type]
         raise ProductionReplayFormatError(
-            "正式身份 identities必须是5项角色→身份映射"
+            f"{label} identities必须是{player_count}项角色→身份映射"
         )
     identities: dict[str, str] = {}
-    for key, item in raw_identities.items():
+    for key, item in raw_identities.items():  # type: ignore[union-attr]
         if type(key) is not str or type(item) is not str:
             raise ProductionReplayFormatError(
-                "正式身份 identities的键与值必须是字符串；"
+                f"{label} identities的键与值必须是字符串；"
                 "不得用bool/int/float或enum对象伪装"
             )
         if key not in physical:
             raise ProductionReplayFormatError(
-                "正式身份 identities必须恰好覆盖 physical_player_ids"
+                f"{label} identities必须恰好覆盖 physical_player_ids"
             )
         if item not in _CANONICAL_IDENTITY_TOKENS:
             raise ProductionReplayFormatError(
-                f"正式身份 identities含有非法身份token：{item!r}"
+                f"{label} identities含有非法身份token：{item!r}"
             )
         identities[key] = item
     if set(identities) != set(physical):
         raise ProductionReplayFormatError(
-            "正式身份 identities必须恰好覆盖全部 physical_player_ids"
+            f"{label} identities必须恰好覆盖全部 physical_player_ids"
         )
     counts = {token: 0 for token in _CANONICAL_IDENTITY_TOKENS}
     for token in identities.values():
         counts[token] += 1
-    if counts != _CANONICAL_IDENTITY_COUNTS:
+    if counts != expected_counts:
         raise ProductionReplayFormatError(
-            "正式身份 identities必须恰好1主公、1忠臣、2反贼、1内奸"
+            f"{label} identities角色组成与canonical profile不一致"
         )
 
     lords = [pid for pid, role in identities.items() if role == "lord"]
@@ -650,26 +757,31 @@ def _validate_identity_replay_assignment(
     raw_lord = config.get("lord_player_id")
     if type(raw_lord) is not str or raw_lord != derived_lord:
         raise ProductionReplayFormatError(
-            "正式身份 lord_player_id必须与 identities 中唯一主公严格一致"
+            f"{label} lord_player_id必须与 identities 中唯一主公严格一致"
         )
 
     raw_numbered = config.get("numbered_player_order")
-    if type(raw_numbered) not in (list, tuple) or len(raw_numbered) != 5:
+    valid_numbered_container = (
+        type(raw_numbered) is list
+        if exact_containers
+        else type(raw_numbered) in (list, tuple)
+    )
+    if not valid_numbered_container or len(raw_numbered) != player_count:  # type: ignore[arg-type]
         raise ProductionReplayFormatError(
-            "正式身份 numbered_player_order必须是5项序列"
+            f"{label} numbered_player_order必须是{player_count}项序列"
         )
     numbered: list[str] = []
-    for item in raw_numbered:
+    for item in raw_numbered:  # type: ignore[union-attr]
         if type(item) is not str:
             raise ProductionReplayFormatError(
-                "正式身份 numbered_player_order必须是字符串序列"
+                f"{label} numbered_player_order必须是字符串序列"
             )
         numbered.append(item)
     lord_index = physical.index(derived_lord)
     expected = tuple(physical[lord_index:] + physical[:lord_index])
     if tuple(numbered) != expected:
         raise ProductionReplayFormatError(
-            "正式身份 numbered_player_order必须从主公 physical position 旋转"
+            f"{label} numbered_player_order必须从主公 physical position 旋转"
         )
     return tuple(physical), identities, tuple(numbered), derived_lord
 
@@ -1021,6 +1133,7 @@ class ProductionReexecutionReplay:
                 FORMAL_NO_SKILL_2V2_MODE,
                 FORMAL_NO_SKILL_DOUDIZHU_MODE,
                 FORMAL_NO_SKILL_IDENTITY_5P_MODE,
+                FORMAL_NO_SKILL_IDENTITY_8P_MODE,
             }:
                 raise ProductionReplayFormatError(
                     "正式结果只能出现在正式单挑、正式2v2、正式斗地主或正式身份模式回放中"
@@ -1164,30 +1277,45 @@ class ProductionReexecutionReplay:
                     raise ProductionReplayFormatError(
                         "正式斗地主回放的阵营映射与canonical profile不一致"
                     )
-        elif header["mode_id"] == FORMAL_NO_SKILL_IDENTITY_5P_MODE:
+        elif header["mode_id"] in _IDENTITY_REPLAY_MODES:
+            identity_mode_id = str(header["mode_id"])
+            (
+                _expected_physical,
+                _expected_counts,
+                configuration_field,
+                configuration_fields,
+                identity_label,
+                _exact_containers,
+            ) = _identity_replay_spec(identity_mode_id)
             _require_exact_fields(
                 initial_configuration,
-                _FORMAL_IDENTITY_INITIAL_CONFIGURATION_FIELDS,
-                "正式身份 initial_configuration",
+                configuration_fields,
+                f"{identity_label} initial_configuration",
             )
             if not isinstance(initial_configuration["analysis_only"], bool):
                 raise ProductionReplayFormatError(
-                    "正式身份 initial_configuration.analysis_only必须是布尔值"
+                    f"{identity_label} initial_configuration.analysis_only"
+                    "必须是布尔值"
                 )
-            _validate_identity_replay_assignment(initial_configuration)
+            _validate_identity_replay_assignment(
+                initial_configuration, identity_mode_id
+            )
             if header["formal_result"] is not False:
                 if initial_configuration["analysis_only"] is not False:
                     raise ProductionReplayFormatError(
                         "正式结果回放禁止analysis_only"
                     )
-                from .mode_identity import FormalIdentityConfiguration
-
-                raw_config = initial_configuration.get(
-                    "formal_identity_configuration"
+                configuration_type, _session_type, runtime_field = (
+                    _identity_replay_runtime(identity_mode_id)
                 )
+                if runtime_field != configuration_field:
+                    raise ProductionReplayFormatError(
+                        "正式身份回放profile字段映射内部不一致"
+                    )
+                raw_config = initial_configuration.get(configuration_field)
                 try:
                     canonical_replay_config = (
-                        FormalIdentityConfiguration.from_canonical_profile_value(
+                        configuration_type.from_canonical_profile_value(
                             raw_config
                         )
                     )
@@ -1384,7 +1512,7 @@ class ProductionReexecutionReplay:
         for key in ("initial_execution_hash", "initial_game_state_hash"):
             header.pop(key, None)
         header["rng_material_redacted"] = True
-        if header.get("mode_id") == FORMAL_NO_SKILL_IDENTITY_5P_MODE:
+        if header.get("mode_id") in _IDENTITY_REPLAY_MODES:
             header = _redact_identity_header(header, viewer_id)
         value["header"] = header
         value["random_consumptions"] = []
@@ -1582,7 +1710,7 @@ def record_reference_production_batch(
     formal_game = game.mode_id == FORMAL_NO_SKILL_DUEL_MODE
     two_vs_two_game = game.mode_id == FORMAL_NO_SKILL_2V2_MODE
     doudizhu_game = game.mode_id == FORMAL_NO_SKILL_DOUDIZHU_MODE
-    identity_game = game.mode_id == FORMAL_NO_SKILL_IDENTITY_5P_MODE
+    identity_game = game.mode_id in _IDENTITY_REPLAY_MODES
     if formal_game:
         from .formal_duel import FormalNoSkillDuelSession
 
@@ -1605,11 +1733,37 @@ def record_reference_production_batch(
                 "正式斗地主回放必须来自canonical FormalDoudizhuSession"
             )
     if identity_game:
-        from .mode_identity import FormalIdentitySession
-
-        if type(game) is not FormalIdentitySession:
+        _configuration_type, expected_session_type, _configuration_field = (
+            _identity_replay_runtime(game.mode_id)
+        )
+        if type(game) is not expected_session_type:
             raise ProductionReplayFormatError(
-                "正式身份回放必须来自canonical FormalIdentitySession"
+                "正式身份回放必须来自对应mode的exact canonical session façade"
+            )
+        formal_configuration = getattr(game, "formal_configuration", None)
+        analysis_only = getattr(game, "analysis_only", None)
+        if formal_configuration is None or type(analysis_only) is not bool:
+            raise ProductionReplayFormatError(
+                "正式身份会话缺少可验证的canonical初始化authority"
+            )
+        canonical_initial = expected_session_type(
+            seed=seed,
+            configuration=formal_configuration,
+            analysis_only=analysis_only,
+            session_id=game.session_id,
+            session_secret=bytes.fromhex(game.session_secret_hex),
+        )
+        if (
+            game.step_count != 0
+            or _game_state_hash(game) != _game_state_hash(canonical_initial)
+            or _execution_hash(game) != _execution_hash(canonical_initial)
+            or _event_values(game) != _event_values(canonical_initial)
+            or [call.to_dict() for call in game.rng_calls]
+            != [call.to_dict() for call in canonical_initial.rng_calls]
+        ):
+            raise ProductionReplayFormatError(
+                "正式身份回放拒绝fixture或预突变state；必须从对应mode的"
+                "canonical post-redraw初始化原样开始"
             )
     if formal_game and fixture is not None:
         raise ProductionReplayFormatError(
@@ -1685,6 +1839,9 @@ def record_reference_production_batch(
             "max_steps": max_steps,
         }
     elif identity_game:
+        _configuration_type, _session_type, configuration_field = (
+            _identity_replay_runtime(game.mode_id)
+        )
         formal_configuration = getattr(game, "formal_configuration", None)
         if formal_configuration is None or not hasattr(
             formal_configuration, "to_dict"
@@ -1697,7 +1854,7 @@ def record_reference_production_batch(
             for player_id, role in dict(game.identities_by_player).items()
         }
         initial_configuration = {
-            "formal_identity_configuration": formal_configuration.to_dict(),
+            configuration_field: formal_configuration.to_dict(),
             "physical_player_ids": list(game.physical_player_ids),
             "identities": identities,
             "numbered_player_order": list(game.numbered_player_order),
@@ -1965,16 +2122,55 @@ def record_reference_formal_identity(
     （winner=None + identity_draw_deck_exhausted）。
     """
 
-    from .mode_identity import (
-        FormalIdentityConfiguration,
-        FormalIdentitySession,
+    return _record_reference_standard_identity(
+        FORMAL_NO_SKILL_IDENTITY_5P_MODE,
+        seed,
+        configuration=configuration,
+        analysis_only=analysis_only,
+        controller=controller,
+        max_steps=max_steps,
     )
 
-    if not isinstance(configuration, FormalIdentityConfiguration):
-        raise TypeError("正式身份回放必须接收FormalIdentityConfiguration")
+
+def record_reference_formal_eight_player_identity(
+    seed: int,
+    *,
+    configuration: object,
+    analysis_only: bool = True,
+    controller: Any | None = None,
+    max_steps: int = 4000,
+) -> ProductionReexecutionReplay:
+    """录制 C6 普通八人一等 strict replay；绝不伪装为 C5 mode/schema。"""
+
+    return _record_reference_standard_identity(
+        FORMAL_NO_SKILL_IDENTITY_8P_MODE,
+        seed,
+        configuration=configuration,
+        analysis_only=analysis_only,
+        controller=controller,
+        max_steps=max_steps,
+    )
+
+
+def _record_reference_standard_identity(
+    mode_id: str,
+    seed: int,
+    *,
+    configuration: object,
+    analysis_only: bool,
+    controller: Any | None,
+    max_steps: int,
+) -> ProductionReexecutionReplay:
+    """C5/C6 共享 recorder：由 mode 映射 exact config/session façade。"""
+
+    configuration_type, session_type, _configuration_field = (
+        _identity_replay_runtime(mode_id)
+    )
+    if not isinstance(configuration, configuration_type):
+        raise TypeError("正式身份回放收到与mode不匹配的configuration type")
     if not isinstance(analysis_only, bool):
         raise TypeError("analysis_only必须是布尔值")
-    game = FormalIdentitySession(
+    game = session_type(
         seed=seed,
         configuration=configuration,
         analysis_only=analysis_only,
@@ -2243,37 +2439,36 @@ def reexecute_production_replay(
             session_id=session_id,
             session_secret=session_secret,
         )
-    elif mode_id == FORMAL_NO_SKILL_IDENTITY_5P_MODE:
-        from .mode_identity import (
-            FormalIdentityConfiguration,
-            FormalIdentitySession,
+    elif mode_id in _IDENTITY_REPLAY_MODES:
+        configuration_type, session_type, configuration_field = (
+            _identity_replay_runtime(mode_id)
         )
-
+        identity_label = _identity_replay_spec(mode_id)[4]
         if header.get("fixture_applied") is not False:
             raise ProductionReplayFormatError("正式身份回放不得包含初始化夹具")
         formal_value = _plain(
             _require_mapping(
-                config.get("formal_identity_configuration"),
-                "initial_configuration.formal_identity_configuration",
+                config.get(configuration_field),
+                f"initial_configuration.{configuration_field}",
             )
         )
         analysis_only = config.get("analysis_only")
         if not isinstance(analysis_only, bool):
             raise ProductionReplayFormatError(
-                "正式身份 initial_configuration.analysis_only必须是布尔值"
+                f"{identity_label} initial_configuration.analysis_only必须是布尔值"
             )
-        recorded = _validate_identity_replay_assignment(config)
+        recorded = _validate_identity_replay_assignment(
+            _plain(config), mode_id
+        )
         if analysis_only:
-            formal_configuration = FormalIdentityConfiguration.from_dict(
-                formal_value
-            )
+            formal_configuration = configuration_type.from_dict(formal_value)
         else:
             formal_configuration = (
-                FormalIdentityConfiguration.from_canonical_profile_value(
+                configuration_type.from_canonical_profile_value(
                     formal_value
                 )
             )
-        game = FormalIdentitySession(
+        game = session_type(
             seed=int(header["seed"]),
             configuration=formal_configuration,
             analysis_only=analysis_only,
@@ -2322,6 +2517,7 @@ def reexecute_production_replay(
             FORMAL_NO_SKILL_2V2_MODE,
             FORMAL_NO_SKILL_DOUDIZHU_MODE,
             FORMAL_NO_SKILL_IDENTITY_5P_MODE,
+            FORMAL_NO_SKILL_IDENTITY_8P_MODE,
         }
         and fixture is not None
     ):
@@ -2541,6 +2737,7 @@ __all__ = [
     "SUPPORTED_REPLAY_MODES",
     "record_reference_formal_2v2",
     "record_reference_formal_doudizhu",
+    "record_reference_formal_eight_player_identity",
     "record_reference_formal_identity",
     "record_reference_formal_duel",
     "record_reference_production_batch",
