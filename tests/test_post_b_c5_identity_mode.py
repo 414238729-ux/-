@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+import scripts.sgs_engine.mode_identity as identity_module
 from scripts.sgs_engine.actions import InvalidActionError, LegalAction
 from scripts.sgs_engine.events import EventType
 from scripts.sgs_engine.model import DISCARD_PILE, DRAW_PILE, PlayerState, ZoneRef
@@ -392,6 +393,38 @@ def test_inspect_formal_identity_readiness() -> None:
     assert readiness.multi_player_production_proven is False
     assert readiness.authoritative_full_game_core is False
     assert readiness.blockers == ()
+
+
+def test_readiness_fails_closed_when_only_formal_trusted_path_breaks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_init = FormalIdentitySession.__init__
+
+    def fail_formal_init(
+        self: FormalIdentitySession,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        if kwargs.get("analysis_only") is False:
+            raise FormalIdentityConfigurationError(
+                "adversarial formal trusted path failure"
+            )
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        identity_module.FormalIdentitySession,
+        "__init__",
+        fail_formal_init,
+    )
+    readiness = inspect_formal_identity_readiness()
+    assert readiness.mode_runtime_reachable is True
+    assert readiness.formal_identity_no_skill_ready is False
+    assert readiness.identity_ready is False
+    assert any(
+        blocker.code == "FORMAL_IDENTITY_TRUSTED_RUNTIME_UNREACHABLE"
+        and "analysis_only=False trusted path" in blocker.message
+        for blocker in readiness.blockers
+    )
 
 
 def test_analysis_only_does_not_produce_formal_result() -> None:

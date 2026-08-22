@@ -22,6 +22,7 @@ from scripts.sgs_engine.production_batch import (
     BatchActionIdController,
     ProductionBasicCardBatch,
     ProductionBatchError,
+    ProductionBatchFinishedError,
     ProductionPhase,
     _replace_player,
 )
@@ -153,8 +154,9 @@ def test_group_target_nonterminal_death_resumes_and_rewards_before_continuation(
     start = len(game.events)
     _step(game, _require_op(game, "use_nanman"))
     _pass_trick(game)
-    if _op(game, "pass_nanman_slash") is not None:
-        _step(game, _require_op(game, "pass_nanman_slash"))
+    assert game.runtime.pending_group_trick is not None
+    assert game.runtime.pending_group_trick.responder_id == victim
+    _step(game, _require_op(game, "pass_nanman_slash"))
     _pass_rescues(game)
     assert game.state.players_by_id[victim].alive is False
     assert game.is_finished is False
@@ -203,30 +205,95 @@ def test_group_target_nonterminal_death_resumes_and_rewards_before_continuation(
 def test_fangtian_multi_target_nonterminal_death() -> None:
     game = _session(202)
     lord = game.lord_player_id
-    others = [pid for pid in game.numbered_player_order if pid != lord]
+    rebels = [
+        player_id
+        for player_id in game.numbered_player_order
+        if game.identities_by_player[player_id] is StandardIdentityRole.REBEL
+    ]
+    victim, second = rebels
     _enter_play(game)
     _strip_hand(game, lord)
     fangtian = _give_card(game, lord, "sgs_weapon_fangtianhuaji")
     game._state = game.state.move_card(fangtian, ZoneRef.equipment(lord, "weapon"))
     slash = _give_card(game, lord, SHA)
-    victim = others[0]
-    second = others[1]
     _strip_hand(game, victim)
+    _strip_hand(game, second)
     game._state = _replace_player(game.state, victim, hp=1)
-    action = None
-    for candidate in game.legal_actions():
-        if candidate.payload.get("operation") == "use_slash" and set(candidate.target_ids) >= {victim, second}:
-            action = candidate
-            break
-    if action is None:
-        action = _require_op(game, "use_slash", targets=(victim,))
+    action = next(
+        (
+            candidate
+            for candidate in game.legal_actions()
+            if candidate.payload.get("operation") == "use_slash"
+            and candidate.card_instance_id == slash
+            and candidate.target_ids == (victim, second)
+        ),
+        None,
+    )
+    assert action is not None
+    assert action.payload.get("operation") == "use_slash"
+    assert action.payload.get("fangtian_multi_target") is True
+    assert len(action.target_ids) == 2
+    start = len(game.events)
     _step(game, action)
-    if _op(game, "pass_slash_response") is not None:
-        _step(game, _require_op(game, "pass_slash_response"))
+    assert game.phase is ProductionPhase.SLASH_RESPONSE
+    assert game.runtime.pending_slash is not None
+    assert game.runtime.pending_slash.target_sequence == (victim, second)
+    assert game.runtime.pending_slash.current_target_index == 0
+    assert game.state.card_ids_in(PROCESSING_ZONE).count(slash) == 1
+    _step(game, _require_op(game, "pass_slash_response"))
+    assert game.phase is ProductionPhase.DYING_RESCUE
+    assert game.runtime.pending_dying_id == victim
+    assert game.state.card_ids_in(PROCESSING_ZONE).count(slash) == 1
     _pass_rescues(game)
+
     assert game.state.players_by_id[victim].alive is False
     assert game.is_finished is False
-    assert slash not in game.state.card_ids_in(PROCESSING_ZONE) or game.runtime.pending_slash is not None
+    assert game.phase is ProductionPhase.SLASH_RESPONSE
+    assert game.runtime.pending_slash is not None
+    assert game.runtime.pending_slash.target_id == second
+    assert game.runtime.pending_slash.target_sequence == (victim, second)
+    assert game.runtime.pending_slash.current_target_index == 1
+    assert game.state.card_ids_in(PROCESSING_ZONE).count(slash) == 1
+
+    events_before_second = game.events[start:]
+    revealed = next(
+        event
+        for event in events_before_second
+        if event.event_type is EventType.IDENTITY_REVEALED
+        and event.target_ids == (victim,)
+    )
+    death = next(
+        event
+        for event in events_before_second
+        if event.event_type is EventType.DEATH
+        and event.target_ids == (victim,)
+    )
+    rewards = [
+        event
+        for event in events_before_second
+        if event.event_type is EventType.CARD_GAINED
+        and event.target_ids == (lord,)
+        and event.payload.get("reason") == "identity_kill_rebel_draw"
+    ]
+    assert revealed.sequence < death.sequence
+    assert len(rewards) == 3
+    assert death.sequence < rewards[0].sequence
+
+    second_hp_before = game.state.players_by_id[second].hp
+    _step(game, _require_op(game, "pass_slash_response"))
+    assert game.state.players_by_id[second].hp == second_hp_before - 1
+    assert game.state.players_by_id[second].alive is True
+    assert game.phase is ProductionPhase.PLAY
+    assert game.runtime.pending_slash is None
+    assert game.state.card_ids_in(PROCESSING_ZONE).count(slash) == 0
+    assert len(_discard_moves(game, slash)) == 1
+    second_damage = next(
+        event
+        for event in game.events[start:]
+        if event.event_type is EventType.DAMAGE
+        and event.target_ids == (second,)
+    )
+    assert rewards[-1].sequence < second_damage.sequence
 
 
 def test_rescue_success_does_not_reveal_identity() -> None:
@@ -243,8 +310,7 @@ def test_rescue_success_does_not_reveal_identity() -> None:
     peach = _give_card(game, lord, "sgs_basic_tao")
     game._state = _replace_player(game.state, victim, hp=1)
     _step(game, _require_op(game, "use_slash", targets=(victim,)))
-    if _op(game, "pass_slash_response") is not None:
-        _step(game, _require_op(game, "pass_slash_response"))
+    _step(game, _require_op(game, "pass_slash_response"))
     assert game.phase is ProductionPhase.DYING_RESCUE
     rescue = _op(game, "use_peach") or _op(game, "rescue_peach")
     if rescue is None:
@@ -362,7 +428,12 @@ def test_borrowed_sword_parent_root_survives_nonterminal_death() -> None:
     _strip_hand(game, lord)
     jiedao = _give_card(game, lord, "sgs_trick_jiedaosharen")
     weapon_holder = others[0]
-    victim = others[1]
+    victim = next(
+        player_id
+        for player_id in game.numbered_player_order
+        if player_id != weapon_holder
+        and game.identities_by_player[player_id] is StandardIdentityRole.REBEL
+    )
     _strip_hand(game, weapon_holder)
     qinglong = _give_card(game, weapon_holder, "sgs_weapon_qinglongyanyuedao")
     game._state = game.state.move_card(
@@ -371,92 +442,158 @@ def test_borrowed_sword_parent_root_survives_nonterminal_death() -> None:
     _give_card(game, weapon_holder, SHA)
     _strip_hand(game, victim)
     game._state = _replace_player(game.state, victim, hp=1)
-    used = None
-    for action in game.legal_actions():
-        if action.payload.get("operation") == "use_jiedao" or (
-            action.card_instance_id == jiedao
-        ):
-            used = action
-            break
-    if used is None:
-        return
+    used = next(
+        (
+            action
+            for action in game.legal_actions()
+            if action.payload.get("operation") == "use_jiedao"
+            and action.card_instance_id == jiedao
+            and action.target_ids == (weapon_holder,)
+            and action.payload.get("second_target_id") == victim
+        ),
+        None,
+    )
+    assert used is not None
+    start = len(game.events)
     _step(game, used)
+    assert game.state.card_ids_in(PROCESSING_ZONE).count(jiedao) == 1
+    assert game.runtime.pending_borrowed_sword is not None
+    assert game.runtime.pending_borrowed_sword.stage == "awaiting_wuxie"
     _pass_trick(game)
-    if _op(game, "jiedao_use_slash") is not None:
-        _step(game, _require_op(game, "jiedao_use_slash"))
-    if _op(game, "pass_slash_response") is not None:
-        _step(game, _require_op(game, "pass_slash_response"))
+    choice = _require_op(game, "choose_borrowed_sword_slash")
+    assert choice.payload.get("operation") == "choose_borrowed_sword_slash"
+    _step(game, choice)
+    assert game.phase is ProductionPhase.SLASH_RESPONSE
+    assert game.runtime.pending_borrowed_sword is not None
+    assert game.runtime.pending_borrowed_sword.stage == "slash_resolving"
+    assert game.state.card_ids_in(PROCESSING_ZONE).count(jiedao) == 1
+    _step(game, _require_op(game, "pass_slash_response"))
+    assert game.phase is ProductionPhase.DYING_RESCUE
+    assert game.runtime.pending_dying_id == victim
+    assert game.state.card_ids_in(PROCESSING_ZONE).count(jiedao) == 1
     _pass_rescues(game)
-    if not game.state.players_by_id[victim].alive:
-        assert game.is_finished is False
-        moves = [
-            event
-            for event in game.events
-            if event.card_instance_id == jiedao
-            and event.event_type is EventType.CARD_MOVED
-            and event.payload.get("destination", {}).get("kind") == "discard_pile"
-        ]
-        assert len(moves) <= 1
+
+    assert game.state.players_by_id[victim].alive is False
+    assert game.is_finished is False
+    assert game.winner_id is None
+    assert game.phase is ProductionPhase.PLAY
+    assert game.runtime.pending_borrowed_sword is None
+    assert game.runtime.pending_slash is None
+    assert game.state.card_ids_in(PROCESSING_ZONE).count(jiedao) == 0
+    moves = _discard_moves(game, jiedao)
+    assert len(moves) == 1
+    events = game.events[start:]
+    revealed = next(
+        event
+        for event in events
+        if event.event_type is EventType.IDENTITY_REVEALED
+        and event.target_ids == (victim,)
+    )
+    death = next(
+        event
+        for event in events
+        if event.event_type is EventType.DEATH
+        and event.target_ids == (victim,)
+    )
+    rewards = [
+        event
+        for event in events
+        if event.event_type is EventType.CARD_GAINED
+        and event.target_ids == (weapon_holder,)
+        and event.payload.get("reason") == "identity_kill_rebel_draw"
+    ]
+    assert revealed.sequence < death.sequence
+    assert len(rewards) == 3
+    assert death.sequence < rewards[0].sequence
+    assert rewards[-1].sequence < moves[0].sequence
 
 
 def test_lightning_pending_judgment_nonterminal() -> None:
     game = _session(206)
-    lord = game.lord_player_id
-    _enter_play(game)
-    lightning = _give_card(game, lord, "sgs_delayed_shandian")
-    game._state = game.state.move_card(lightning, ZoneRef.judgment(lord))
+    victim = next(
+        player_id
+        for player_id in game.numbered_player_order
+        if player_id != game.lord_player_id
+    )
+    _advance_to(game, victim)
+    assert game.current_player_id == victim
+    assert game.phase is ProductionPhase.PREPARE
+    for player_id in game.numbered_player_order:
+        _strip_hand(game, player_id)
+    lightning = _give_card(game, victim, "sgs_delayed_shandian")
+    game._state = game.state.move_card(lightning, ZoneRef.judgment(victim))
     game._runtime = replace(
         game.runtime,
         judgment_entry_indices=MappingProxyType({lightning: 1}),
-        judgment_entry_counter=1,
+        judgment_entry_counter=max(game.runtime.judgment_entry_counter, 1),
     )
-    game._state = _replace_player(game.state, lord, hp=5)
-    _step(game, _require_op(game, "end_play_phase"))
-    while game.phase is ProductionPhase.DISCARD:
-        submit = _op(game, "discard_phase_submit")
-        if submit is not None:
-            _step(game, submit)
-        else:
-            _step(game, _require_op(game, "select_discard_card"))
-    _step(game, _require_op(game, "end_turn"))
-    while game.current_player_id != lord:
-        _enter_play(game)
-        _step(game, _require_op(game, "end_play_phase"))
-        while game.phase is ProductionPhase.DISCARD:
-            submit = _op(game, "discard_phase_submit")
-            if submit is not None:
-                _step(game, submit)
-            else:
-                _step(game, _require_op(game, "select_discard_card"))
-        _step(game, _require_op(game, "end_turn"))
+    game._state = _replace_player(game.state, victim, hp=2)
     draw_cards = list(game.state.card_ids_in(DRAW_PILE))
     spade = next(
-        (
-            cid
-            for cid in draw_cards
-            if game.state.cards_by_id[cid].suit in ("♠", "spade", "黑桃")
-            and str(game.state.cards_by_id[cid].rank) in set("23456789")
-        ),
-        None,
+        cid
+        for cid in draw_cards
+        if game.state.cards_by_id[cid].suit in ("♠", "spade", "黑桃")
+        and str(game.state.cards_by_id[cid].rank) in set("23456789")
     )
-    if spade is None:
-        return
     others = [c for c in draw_cards if c != spade]
     game._state = game.state.reorder_zone(DRAW_PILE, (spade, *others))
+    start = len(game.events)
     _step(game, _require_op(game, "proceed_prepare"))
     _step(game, _require_op(game, "proceed_judgment"))
-    while game.phase in (ProductionPhase.JUDGMENT_WUXIE, ProductionPhase.TRICK_RESPONSE):
-        op = "pass_judgment_wuxie" if _op(game, "pass_judgment_wuxie") else "pass_trick_response"
-        _step(game, _require_op(game, op))
+    while game.phase in (
+        ProductionPhase.JUDGMENT_WUXIE,
+        ProductionPhase.TRICK_RESPONSE,
+    ):
+        if _op(game, "pass_judgment_wuxie") is not None:
+            _step(game, _require_op(game, "pass_judgment_wuxie"))
+        else:
+            _step(game, _require_op(game, "pass_trick_response"))
+    assert game.phase is ProductionPhase.DYING_RESCUE
+    assert game.runtime.pending_dying_id == victim
+    assert game.runtime.pending_judgment is not None
+    assert game.runtime.pending_judgment.stage == "resolving_effect"
+    assert game.state.card_ids_in(PROCESSING_ZONE).count(lightning) == 1
+    assert len(_discard_moves(game, lightning)) == 0
     _pass_rescues(game)
-    moves = [
+
+    assert game.state.players_by_id[victim].alive is False
+    assert game.is_finished is False
+    assert game.winner_id is None
+    assert game.current_player_id != victim
+    assert game.phase is ProductionPhase.PREPARE
+    assert game.runtime.pending_judgment is None
+    assert game.state.card_ids_in(PROCESSING_ZONE).count(lightning) == 0
+    moves = _discard_moves(game, lightning)
+    assert len(moves) == 1
+    events = game.events[start:]
+    result = next(
         event
-        for event in game.events
-        if event.card_instance_id == lightning
-        and event.event_type is EventType.CARD_MOVED
-        and event.payload.get("destination", {}).get("kind") == "discard_pile"
-    ]
-    assert len(moves) <= 1
+        for event in events
+        if event.event_type is EventType.JUDGMENT_RESULT
+        and event.target_ids == (victim,)
+    )
+    dying = next(
+        event
+        for event in events
+        if event.event_type is EventType.DYING
+        and event.target_ids == (victim,)
+    )
+    revealed = next(
+        event
+        for event in events
+        if event.event_type is EventType.IDENTITY_REVEALED
+        and event.target_ids == (victim,)
+    )
+    death = next(
+        event
+        for event in events
+        if event.event_type is EventType.DEATH
+        and event.target_ids == (victim,)
+    )
+    assert result.payload.get("hit") is True
+    assert result.sequence < dying.sequence
+    assert dying.sequence < revealed.sequence < death.sequence
+    assert death.sequence < moves[0].sequence
 
 
 def test_lord_kills_loyalist_then_resumes_parent_group() -> None:
@@ -469,71 +606,172 @@ def test_lord_kills_loyalist_then_resumes_parent_group() -> None:
     )
     _enter_play(game)
     _strip_hand(game, lord)
-    nanman = _give_card(game, lord, "sgs_trick_nanmanruqin")
-    _strip_hand(game, loyalist)
-    game._state = _replace_player(game.state, loyalist, hp=1)
-    lord_hand_before = list(game.state.card_ids_in(ZoneRef.hand(lord)))
-    _step(game, _require_op(game, "use_nanman"))
-    _pass_trick(game)
-    if _op(game, "pass_nanman_slash") is not None:
-        _step(game, _require_op(game, "pass_nanman_slash"))
-    _pass_rescues(game)
-    if game.state.players_by_id[loyalist].alive:
-        return
-    assert game.is_finished is False
-    assert game.state.card_ids_in(ZoneRef.hand(lord)) == ()
-    assert any(
-        event.payload.get("reason") == "identity_lord_kill_loyalist_penalty"
-        for event in game.events
-        if event.payload
+    equipment = _give_card(game, lord, "sgs_weapon_qinglongyanyuedao")
+    game._state = game.state.move_card(
+        equipment, ZoneRef.equipment(lord, "weapon")
     )
-    del lord_hand_before
-    if game.phase is not ProductionPhase.PLAY:
-        if _op(game, "pass_nanman_slash") is not None:
-            _step(game, _require_op(game, "pass_nanman_slash"))
+    judgment = _give_card(game, lord, "sgs_delayed_lebusi")
+    game._state = game.state.move_card(judgment, ZoneRef.judgment(lord))
+    nanman = _give_card(game, lord, "sgs_trick_nanmanruqin")
+    penalty_hand = _give_card(game, lord, "sgs_basic_tao")
+    target_order = [
+        player_id for player_id in game.numbered_player_order if player_id != lord
+    ]
+    for player_id in target_order:
+        _strip_hand(game, player_id)
+    game._state = _replace_player(game.state, loyalist, hp=1)
+    start = len(game.events)
+    _step(game, _require_op(game, "use_nanman"))
+    assert game.state.card_ids_in(PROCESSING_ZONE).count(nanman) == 1
+    _pass_trick(game)
+    assert game.runtime.pending_group_trick is not None
+    assert game.runtime.pending_group_trick.target_sequence == tuple(target_order)
+    assert game.runtime.pending_group_trick.responder_id == target_order[0]
+    assert target_order[1] == loyalist
+
+    first_target = target_order[0]
+    first_hp = game.state.players_by_id[first_target].hp
+    _step(game, _require_op(game, "pass_nanman_slash"))
+    assert game.state.players_by_id[first_target].hp == first_hp - 1
+    assert game.state.players_by_id[first_target].alive is True
+    _pass_trick(game)
+    assert game.runtime.pending_group_trick is not None
+    assert game.runtime.pending_group_trick.responder_id == loyalist
+    _step(game, _require_op(game, "pass_nanman_slash"))
+    assert game.phase is ProductionPhase.DYING_RESCUE
+    assert game.runtime.pending_dying_id == loyalist
+    assert game.state.card_ids_in(PROCESSING_ZONE).count(nanman) == 1
+    _pass_rescues(game)
+
+    assert game.state.players_by_id[loyalist].alive is False
+    assert game.is_finished is False
+    assert game.winner_id is None
+    assert game.state.card_ids_in(ZoneRef.hand(lord)) == ()
+    assert game.state.card_ids_in(ZoneRef.equipment(lord, "weapon")) == ()
+    assert game.state.card_ids_in(ZoneRef.judgment(lord)) == (judgment,)
+    assert game.state.card_ids_in(PROCESSING_ZONE).count(nanman) == 1
+    penalty_moves = [
+        event
+        for event in game.events[start:]
+        if event.event_type is EventType.CARD_MOVED
+        and event.payload.get("reason")
+        == "identity_lord_kill_loyalist_penalty"
+    ]
+    assert {event.card_instance_id for event in penalty_moves} == {
+        penalty_hand,
+        equipment,
+    }
+    assert len(penalty_moves) == 2
+    assert judgment not in {event.card_instance_id for event in penalty_moves}
+    loyalist_death = next(
+        event
+        for event in game.events[start:]
+        if event.event_type is EventType.DEATH
+        and event.target_ids == (loyalist,)
+    )
+    assert loyalist_death.kill_credit == lord
+    assert loyalist_death.sequence < penalty_moves[0].sequence
+
+    assert game.runtime.pending_group_trick is not None
+    assert game.runtime.pending_group_trick.current_target_index == 2
+    assert game.runtime.pending_group_trick.responder_id is None
+    _pass_trick(game)
+    assert game.runtime.pending_group_trick is not None
+    future_target = target_order[2]
+    assert game.runtime.pending_group_trick.responder_id == future_target
+    future_hp = game.state.players_by_id[future_target].hp
+    _step(game, _require_op(game, "pass_nanman_slash"))
+    assert game.state.players_by_id[future_target].hp == future_hp - 1
+    future_damage = next(
+        event
+        for event in game.events[start:]
+        if event.event_type is EventType.DAMAGE
+        and event.target_ids == (future_target,)
+    )
+    assert penalty_moves[-1].sequence < future_damage.sequence
+
+    while game.runtime.pending_group_trick is not None:
         _pass_trick(game)
-    assert nanman not in game.state.card_ids_in(PROCESSING_ZONE)
+        _step(game, _require_op(game, "pass_nanman_slash"))
+    assert game.phase is ProductionPhase.PLAY
+    assert game.state.card_ids_in(PROCESSING_ZONE).count(nanman) == 0
+    assert len(_discard_moves(game, nanman)) == 1
 
 
 def test_terminal_victory_stops_remaining_targets() -> None:
     game = _session(208)
     lord = game.lord_player_id
-    enemies = [
-        pid
-        for pid, role in game.identities_by_player.items()
-        if role in {StandardIdentityRole.REBEL, StandardIdentityRole.SPY}
-    ]
+    user = game.numbered_player_order[-1]
+    assert game.identities_by_player[user] is StandardIdentityRole.REBEL
+    _advance_to(game, user)
     _enter_play(game)
-    for enemy in enemies[:-1]:
-        _strip_hand(game, enemy)
-        _give_card(game, lord, SHA)
-        game._state = _replace_player(game.state, enemy, hp=1)
-        if game.current_player_id != lord:
-            return
-        slash = None
-        for action in game.legal_actions():
-            if (
-                action.payload.get("operation") == "use_slash"
-                and enemy in action.target_ids
-            ):
-                slash = action
-                break
-        if slash is None:
-            return
-        _step(game, slash)
-        if _op(game, "pass_slash_response") is not None:
-            _step(game, _require_op(game, "pass_slash_response"))
-        _pass_rescues(game)
-        if game.is_finished:
-            break
-        _strip_hand(game, lord)
-    if game.is_finished:
-        assert game.winner_id in {"lord_and_loyalists", "rebels", "spy"}
-        assert not any(
-            event.event_type is EventType.DRAW
-            and event.payload.get("reason") == "identity_draw_deck_exhausted"
-            for event in game.events
-        )
+    _strip_hand(game, user)
+    nanman = _give_card(game, user, "sgs_trick_nanmanruqin")
+    _strip_hand(game, lord)
+    game._state = _replace_player(game.state, lord, hp=1)
+    start = len(game.events)
+
+    _step(game, _require_op(game, "use_nanman"))
+    assert game.runtime.pending_group_trick is not None
+    target_sequence = game.runtime.pending_group_trick.target_sequence
+    assert len(target_sequence) >= 2
+    assert target_sequence[0] == lord
+    future_targets = target_sequence[1:]
+    future_hp = {
+        player_id: game.state.players_by_id[player_id].hp
+        for player_id in future_targets
+    }
+    assert game.state.card_ids_in(PROCESSING_ZONE).count(nanman) == 1
+    _pass_trick(game)
+    assert game.runtime.pending_group_trick is not None
+    assert game.runtime.pending_group_trick.responder_id == lord
+    _step(game, _require_op(game, "pass_nanman_slash"))
+    assert game.phase is ProductionPhase.DYING_RESCUE
+    assert game.runtime.pending_dying_id == lord
+    terminal_start = len(game.events)
+    _pass_rescues(game)
+
+    assert game.state.players_by_id[lord].alive is False
+    assert game.is_finished is True
+    assert game.winner_id == "rebels"
+    assert game.phase is ProductionPhase.FINISHED
+    assert game.runtime.pending_group_trick is None
+    with pytest.raises(ProductionBatchFinishedError):
+        game.legal_actions()
+    assert game.state.card_ids_in(PROCESSING_ZONE).count(nanman) == 0
+    root_moves = _discard_moves(game, nanman)
+    assert len(root_moves) == 1
+    terminal_events = game.events[terminal_start:]
+    victory_events = [
+        event
+        for event in terminal_events
+        if event.event_type is EventType.VICTORY
+    ]
+    assert len(victory_events) == 1
+    assert victory_events[0].target_ids == ("rebels",)
+    forbidden_future_types = {
+        EventType.CARD_EFFECT_CANCELLED,
+        EventType.CARD_INVALIDATED,
+        EventType.DAMAGE,
+        EventType.DYING,
+        EventType.GROUP_TARGET_RESOLVED,
+    }
+    assert not any(
+        event.event_type in forbidden_future_types
+        and any(player_id in event.target_ids for player_id in future_targets)
+        for event in game.events[start:]
+    )
+    assert all(
+        game.state.players_by_id[player_id].alive is True
+        and game.state.players_by_id[player_id].hp == future_hp[player_id]
+        for player_id in future_targets
+    )
+    death = next(
+        event
+        for event in terminal_events
+        if event.event_type is EventType.DEATH and event.target_ids == (lord,)
+    )
+    assert root_moves[0].sequence < death.sequence < victory_events[0].sequence
 
 
 def test_chain_damage_nonterminal_child_death_continues() -> None:
@@ -577,8 +815,7 @@ def test_chain_damage_nonterminal_child_death_continues() -> None:
     assert slash is not None
     start = len(game.events)
     _step(game, slash)
-    if _op(game, "pass_slash_response") is not None:
-        _step(game, _require_op(game, "pass_slash_response"))
+    _step(game, _require_op(game, "pass_slash_response"))
     assert game.phase is ProductionPhase.DYING_RESCUE
     assert game.runtime.pending_dying_id == dying
     assert game.runtime.pending_chain is not None

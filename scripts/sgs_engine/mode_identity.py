@@ -937,6 +937,38 @@ def inspect_formal_identity_readiness() -> FormalIdentityReadiness:
                 "正式身份模式不能从canonical factory到达统一生产核心",
             )
         )
+    formal_runtime_reachable = False
+    formal_runtime_error: str | None = None
+    try:
+        formal_configuration = FormalIdentityConfiguration.formal_profile()
+        formal_probe = FormalIdentitySession(
+            seed=0,
+            configuration=formal_configuration,
+            analysis_only=False,
+            session_id="formal-identity-trusted-readiness-probe",
+            session_secret=b"formal-identity-trusted-probe-01",
+        )
+        formal_runtime_reachable = (
+            formal_probe.analysis_only is False
+            and formal_probe.formal_configuration is formal_configuration
+            and formal_probe.formal_result_eligible is True
+        )
+    except Exception as exc:
+        formal_runtime_error = f"{type(exc).__name__}:{exc}"
+    if not formal_runtime_reachable:
+        detail = (
+            f"：{formal_runtime_error}"
+            if formal_runtime_error is not None
+            else "：canonical formal session 未取得正式结果资格"
+        )
+        blockers.append(
+            FormalIdentityBlocker(
+                "FORMAL_IDENTITY_TRUSTED_RUNTIME_UNREACHABLE",
+                "MODE_GAP",
+                "正式身份 analysis_only=False trusted path 现场自检失败"
+                f"{detail}",
+            )
+        )
     if not global_card_semantics_complete:
         blockers.append(
             FormalIdentityBlocker(
@@ -959,10 +991,16 @@ def inspect_formal_identity_readiness() -> FormalIdentityReadiness:
             )
         )
     unsupported_rules = len(blockers)
+    # C5 没有另设 approximation/controller registry：前者是 canonical
+    # no-skill scope 的 declarative invariant；后者由统一生产核心提供。
+    # 两者都不能替代上面的 analysis-only 与 formal trusted runtime probes。
     approximation_count = 0
-    mode_implemented = mode_runtime_reachable and not blockers
+    mode_implemented = (
+        mode_runtime_reachable and formal_runtime_reachable and not blockers
+    )
     ready = (
         mode_implemented
+        and formal_runtime_reachable
         and replay_supported
         and global_card_semantics_complete
         and unsupported_rules == 0
