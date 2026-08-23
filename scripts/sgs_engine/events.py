@@ -258,10 +258,16 @@ _CHAIN_FINISHED_FIELDS: frozenset[str] = frozenset(
 _EQUIPMENT_EQUIPPED_REASONS: frozenset[str] = frozenset({"equip"})
 _EQUIPMENT_REMOVED_REASONS: frozenset[str] = frozenset({"replaced"})
 _IDENTITY_REVEAL_REASONS: frozenset[str] = frozenset(
-    {"initial_lord_reveal", "confirmed_death"}
+    {
+        "initial_lord_reveal",
+        "confirmed_death",
+        "succession_lord_reveal",
+        "ambitionist_conversion",
+        "spy_converted_loyalist_announced",
+    }
 )
 _IDENTITY_REVEAL_ROLES: frozenset[str] = frozenset(
-    {"lord", "loyalist", "rebel", "spy"}
+    {"lord", "loyalist", "rebel", "spy", "ambitionist"}
 )
 
 
@@ -827,24 +833,38 @@ def validate_event_contract(event: GameEvent) -> GameEvent:
     if event.event_type is EventType.VICTORY and not event.target_ids:
         raise ValueError("胜利事件必须至少指定一名获胜角色")
     if event.event_type is EventType.IDENTITY_REVEALED:
+        payload = event.payload
+        reason = payload.get("reason")
+        if reason == "spy_converted_loyalist_announced":
+            if event.target_ids:
+                raise ValueError("转忠公告不得指定具体角色")
+            if set(payload) != {"reason", "identity", "subject_revealed"}:
+                raise ValueError(
+                    "转忠公告payload必须恰好为reason、identity与subject_revealed"
+                )
+            if payload["identity"] != "loyalist":
+                raise ValueError("转忠公告identity必须是loyalist")
+            if payload["subject_revealed"] is not False:
+                raise ValueError("转忠公告不得公开具体转忠者")
+            return event
         if len(event.target_ids) != 1:
             raise ValueError("身份公开事件必须且只能指定一名角色")
-        payload = event.payload
         if set(payload) != {"reason", "identity"}:
             raise ValueError(
                 "身份公开事件payload字段必须恰好为reason与identity；"
                 "不得携带完整身份映射或其他旁路字段"
             )
-        reason = payload["reason"]
         identity = payload["identity"]
         if not isinstance(reason, str) or reason not in _IDENTITY_REVEAL_REASONS:
-            raise ValueError(
-                "身份公开事件reason只能是initial_lord_reveal或confirmed_death"
-            )
+            raise ValueError("身份公开事件reason不受支持")
         if not isinstance(identity, str) or identity not in _IDENTITY_REVEAL_ROLES:
             raise ValueError("身份公开事件identity必须是canonical身份")
         if reason == "initial_lord_reveal" and identity != "lord":
             raise ValueError("initial_lord_reveal必须公开lord")
+        if reason == "succession_lord_reveal" and identity != "lord":
+            raise ValueError("succession_lord_reveal必须公开lord")
+        if reason == "ambitionist_conversion" and identity != "ambitionist":
+            raise ValueError("ambitionist_conversion必须公开ambitionist")
     return event
 
 

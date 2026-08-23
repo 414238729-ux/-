@@ -23,6 +23,7 @@ from .mode_identity import (
     FORMAL_NO_SKILL_IDENTITY_5P_MODE,
     FORMAL_NO_SKILL_IDENTITY_8P_MODE,
 )
+from .mode_identity_heir import FORMAL_NO_SKILL_IDENTITY_8P_HEIR_MODE
 from .production_batch import (
     FORMAL_NO_SKILL_DUEL_MODE,
     PRODUCTION_BASIC_CARDS_MODE,
@@ -48,6 +49,7 @@ SUPPORTED_REPLAY_MODES: frozenset[str] = frozenset(
         FORMAL_NO_SKILL_DOUDIZHU_MODE,
         FORMAL_NO_SKILL_IDENTITY_5P_MODE,
         FORMAL_NO_SKILL_IDENTITY_8P_MODE,
+        FORMAL_NO_SKILL_IDENTITY_8P_HEIR_MODE,
     }
 )
 
@@ -332,10 +334,20 @@ _FORMAL_EIGHT_PLAYER_IDENTITY_INITIAL_CONFIGURATION_FIELDS = {
     "analysis_only",
     "max_steps",
 }
+_FORMAL_HEIR_AND_SPY_CHOICE_INITIAL_CONFIGURATION_FIELDS = {
+    "formal_heir_and_spy_choice_identity_configuration",
+    "physical_player_ids",
+    "identities",
+    "numbered_player_order",
+    "lord_player_id",
+    "analysis_only",
+    "max_steps",
+}
 _IDENTITY_REPLAY_MODES: frozenset[str] = frozenset(
     {
         FORMAL_NO_SKILL_IDENTITY_5P_MODE,
         FORMAL_NO_SKILL_IDENTITY_8P_MODE,
+        FORMAL_NO_SKILL_IDENTITY_8P_HEIR_MODE,
     }
 )
 
@@ -610,6 +622,12 @@ _CANONICAL_IDENTITY_COUNTS_BY_MODE: dict[str, dict[str, int]] = {
         "rebel": 4,
         "spy": 1,
     },
+    FORMAL_NO_SKILL_IDENTITY_8P_HEIR_MODE: {
+        "lord": 1,
+        "loyalist": 2,
+        "rebel": 4,
+        "spy": 1,
+    },
 }
 
 
@@ -643,6 +661,15 @@ def _identity_replay_spec(
             "正式普通八人身份",
             True,
         )
+    if mode_id == FORMAL_NO_SKILL_IDENTITY_8P_HEIR_MODE:
+        return (
+            ("p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8"),
+            _CANONICAL_IDENTITY_COUNTS_BY_MODE[mode_id],
+            "formal_heir_and_spy_choice_identity_configuration",
+            _FORMAL_HEIR_AND_SPY_CHOICE_INITIAL_CONFIGURATION_FIELDS,
+            "正式立储择途八人身份",
+            True,
+        )
     raise ProductionReplayFormatError("正式身份回放mode/profile不受支持")
 
 
@@ -657,6 +684,10 @@ def _identity_replay_runtime(
         FormalIdentityConfiguration,
         FormalIdentitySession,
     )
+    from .mode_identity_heir import (
+        FormalHeirAndSpyChoiceIdentityConfiguration,
+        FormalHeirAndSpyChoiceIdentitySession,
+    )
 
     if mode_id == FORMAL_NO_SKILL_IDENTITY_5P_MODE:
         return (
@@ -669,6 +700,12 @@ def _identity_replay_runtime(
             FormalEightPlayerIdentityConfiguration,
             FormalEightPlayerIdentitySession,
             "formal_eight_player_identity_configuration",
+        )
+    if mode_id == FORMAL_NO_SKILL_IDENTITY_8P_HEIR_MODE:
+        return (
+            FormalHeirAndSpyChoiceIdentityConfiguration,
+            FormalHeirAndSpyChoiceIdentitySession,
+            "formal_heir_and_spy_choice_identity_configuration",
         )
     raise ProductionReplayFormatError("正式身份回放runtime façade不受支持")
 
@@ -1134,6 +1171,7 @@ class ProductionReexecutionReplay:
                 FORMAL_NO_SKILL_DOUDIZHU_MODE,
                 FORMAL_NO_SKILL_IDENTITY_5P_MODE,
                 FORMAL_NO_SKILL_IDENTITY_8P_MODE,
+                FORMAL_NO_SKILL_IDENTITY_8P_HEIR_MODE,
             }:
                 raise ProductionReplayFormatError(
                     "正式结果只能出现在正式单挑、正式2v2、正式斗地主或正式身份模式回放中"
@@ -2152,6 +2190,26 @@ def record_reference_formal_eight_player_identity(
     )
 
 
+def record_reference_formal_heir_and_spy_choice_identity(
+    seed: int,
+    *,
+    configuration: object,
+    analysis_only: bool = True,
+    controller: Any | None = None,
+    max_steps: int = 4000,
+) -> ProductionReexecutionReplay:
+    """录制 C7 立储择途八人一等 strict replay；绝不伪装为 C5/C6。"""
+
+    return _record_reference_standard_identity(
+        FORMAL_NO_SKILL_IDENTITY_8P_HEIR_MODE,
+        seed,
+        configuration=configuration,
+        analysis_only=analysis_only,
+        controller=controller,
+        max_steps=max_steps,
+    )
+
+
 def _record_reference_standard_identity(
     mode_id: str,
     seed: int,
@@ -2518,6 +2576,7 @@ def reexecute_production_replay(
             FORMAL_NO_SKILL_DOUDIZHU_MODE,
             FORMAL_NO_SKILL_IDENTITY_5P_MODE,
             FORMAL_NO_SKILL_IDENTITY_8P_MODE,
+            FORMAL_NO_SKILL_IDENTITY_8P_HEIR_MODE,
         }
         and fixture is not None
     ):
@@ -2738,6 +2797,7 @@ __all__ = [
     "record_reference_formal_2v2",
     "record_reference_formal_doudizhu",
     "record_reference_formal_eight_player_identity",
+    "record_reference_formal_heir_and_spy_choice_identity",
     "record_reference_formal_identity",
     "record_reference_formal_duel",
     "record_reference_production_batch",

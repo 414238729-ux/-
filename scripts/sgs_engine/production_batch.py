@@ -26,7 +26,7 @@ import json
 from pathlib import Path
 import secrets
 from types import MappingProxyType
-from typing import Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from ..deck_data import DeckRecord, load_deck_csv
 from .actions import (
@@ -139,6 +139,12 @@ class ProductionPhase(str, Enum):
     FEIYANG_ACTIVATE = "feiyang_activate"
     # POST-B C4：正式斗地主存活农民死亡奖励选择窗口（模式层阶段）。
     PEASANT_REWARD_CHOICE = "peasant_reward_choice"
+    # POST-B C7：异步模式决策窗口（立储 / 内奸择途）；不改变 turn ownership。
+    MODE_DECISION = "mode_decision"
+    # POST-B C7：合法储君从原主公区域获得至多1张牌。
+    SUCCESSION_CARD_CHOICE = "succession_card_choice"
+    # POST-B C7：野心家击杀后的可选摸3张。
+    IDENTITY_REWARD_CHOICE = "identity_reward_choice"
 
 
 BATCH_PHASES: tuple[ProductionPhase, ...] = (
@@ -147,6 +153,9 @@ BATCH_PHASES: tuple[ProductionPhase, ...] = (
     ProductionPhase.FEIYANG_ACTIVATE,
     # POST-B C4：正式斗地主存活农民死亡奖励选择窗口（模式层阶段）。
     ProductionPhase.PEASANT_REWARD_CHOICE,
+    ProductionPhase.MODE_DECISION,
+    ProductionPhase.SUCCESSION_CARD_CHOICE,
+    ProductionPhase.IDENTITY_REWARD_CHOICE,
     ProductionPhase.JUDGMENT,
     ProductionPhase.JUDGMENT_WUXIE,
     ProductionPhase.DRAW,
@@ -528,6 +537,78 @@ PENDING_PEASANT_DEATH_REWARD_EXECUTION_FIELD_INVENTORY: frozenset[str] = frozens
 )
 
 
+@dataclass(frozen=True, slots=True)
+class _PendingModeDecision:
+    """C7 异步模式决策窗口：actor 可变，current_player_id 保持回合所有者。"""
+
+    actor_id: str
+    queue: tuple[str, ...]
+    resume_phase: ProductionPhase
+    window_id: str
+
+
+PENDING_MODE_DECISION_EXECUTION_FIELD_INVENTORY: frozenset[str] = frozenset(
+    {"actor_id", "queue", "resume_phase", "window_id"}
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingSuccession:
+    """C7 继位选牌窗口：发生在原主公区域清空与确认死亡之前。"""
+
+    old_lord_id: str
+    successor_id: str
+    window_id: str
+    handles: Mapping[str, str] = MappingProxyType({})
+    snapshot_digest: str | None = None
+
+
+PENDING_SUCCESSION_EXECUTION_FIELD_INVENTORY: frozenset[str] = frozenset(
+    {
+        "old_lord_id",
+        "successor_id",
+        "window_id",
+        "handles",
+        "snapshot_digest",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingIdentityReward:
+    """C7 野心家击杀后可选摸3张窗口。"""
+
+    chooser_id: str
+    dying_id: str
+    window_id: str
+    is_nonterminal_chain_child: bool = False
+
+
+PENDING_IDENTITY_REWARD_EXECUTION_FIELD_INVENTORY: frozenset[str] = frozenset(
+    {"chooser_id", "dying_id", "window_id", "is_nonterminal_chain_child"}
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingOuterDeath:
+    """C7 储君死亡嵌套当前主公濒死时，外层死亡的胜负/奖惩尚未结算。"""
+
+    dying_id: str
+    is_nonterminal_chain_child: bool = False
+    kill_credit: str | None = None
+    final_damage_source: str | None = None
+
+
+PENDING_OUTER_DEATH_EXECUTION_FIELD_INVENTORY: frozenset[str] = frozenset(
+    {
+        "dying_id",
+        "is_nonterminal_chain_child",
+        "kill_credit",
+        "final_damage_source",
+    }
+)
+
+
 # MB-M-008 FINISHED transient inventory：这些 _BatchRuntime 字段在
 # FINISHED 时必须是空/默认值（B 类 transient/pending）。A 类永久/历史
 # 字段（current_player_id、turn_number、phase、slash_used_counts、
@@ -598,6 +679,12 @@ FINISHED_TRANSIENT_RUNTIME_FIELDS: frozenset[str] = frozenset({
     "deferred_turn_end_after_owner_death",
     # POST-B C4 农民死亡奖励选择挂起状态。
     "pending_peasant_reward",
+    # POST-B C7 变体窗口。
+    "pending_mode_decision",
+    "pending_succession",
+    "pending_identity_reward",
+    "pending_outer_death",
+    "pending_lose_hp_dying",
 })
 
 # R2-NEW-001：execution snapshot/hash 的运行时字段清单（A 类＝会改变未来
@@ -758,6 +845,12 @@ class _BatchRuntime:
     pending_hanbing_discard: _PendingHanbingDiscard | None = None
     # POST-B C4 农民死亡奖励选择挂起状态（斗地主非终局农民死亡）。
     pending_peasant_reward: _PendingPeasantDeathReward | None = None
+    # POST-B C7 变体窗口。
+    pending_mode_decision: _PendingModeDecision | None = None
+    pending_succession: _PendingSuccession | None = None
+    pending_identity_reward: _PendingIdentityReward | None = None
+    pending_outer_death: _PendingOuterDeath | None = None
+    pending_lose_hp_dying: bool = False
     # C123-R1-NEW-001：当前回合角色已确认死亡，但当时仍有未完成的
     # parent/root（传导、方天剩余目标、判定根等），回合结束必须推迟。
     # 不得用 “PLAY 且当前角色已死亡” 做全局兜底。
@@ -919,6 +1012,11 @@ class _BatchRuntime:
             "pending_hanbing_discard": self._pending_hanbing_discard_value(),
             "pending_weapon_choice": self._pending_weapon_choice_value(),
             "pending_peasant_reward": self._pending_peasant_reward_value(),
+            "pending_mode_decision": self._pending_mode_decision_value(),
+            "pending_succession": self._pending_succession_value(),
+            "pending_identity_reward": self._pending_identity_reward_value(),
+            "pending_outer_death": self._pending_outer_death_value(),
+            "pending_lose_hp_dying": self.pending_lose_hp_dying,
             "deferred_turn_end_after_owner_death": (
                 self.deferred_turn_end_after_owner_death
             ),
@@ -1053,6 +1151,51 @@ class _BatchRuntime:
             "chooser_id": pending.chooser_id,
             "window_id": pending.window_id,
             "is_nonterminal_chain_child": pending.is_nonterminal_chain_child,
+        }
+
+    def _pending_mode_decision_value(self) -> dict[str, object] | None:
+        pending = self.pending_mode_decision
+        if pending is None:
+            return None
+        return {
+            "actor_id": pending.actor_id,
+            "queue": list(pending.queue),
+            "resume_phase": pending.resume_phase.value,
+            "window_id": pending.window_id,
+        }
+
+    def _pending_succession_value(self) -> dict[str, object] | None:
+        pending = self.pending_succession
+        if pending is None:
+            return None
+        return {
+            "old_lord_id": pending.old_lord_id,
+            "successor_id": pending.successor_id,
+            "window_id": pending.window_id,
+            "handles": dict(pending.handles),
+            "snapshot_digest": pending.snapshot_digest,
+        }
+
+    def _pending_identity_reward_value(self) -> dict[str, object] | None:
+        pending = self.pending_identity_reward
+        if pending is None:
+            return None
+        return {
+            "chooser_id": pending.chooser_id,
+            "dying_id": pending.dying_id,
+            "window_id": pending.window_id,
+            "is_nonterminal_chain_child": pending.is_nonterminal_chain_child,
+        }
+
+    def _pending_outer_death_value(self) -> dict[str, object] | None:
+        pending = self.pending_outer_death
+        if pending is None:
+            return None
+        return {
+            "dying_id": pending.dying_id,
+            "is_nonterminal_chain_child": pending.is_nonterminal_chain_child,
+            "kill_credit": pending.kill_credit,
+            "final_damage_source": pending.final_damage_source,
         }
 
     def _pending_borrowed_sword_value(
@@ -1988,6 +2131,7 @@ def _replace_player(
     player_id: str,
     *,
     hp: int | None = None,
+    max_hp: int | None = None,
     alive: bool | None = None,
     chained: bool | None = None,
 ) -> GameState:
@@ -2004,6 +2148,7 @@ def _replace_player(
             replace(
                 player,
                 hp=player.hp if hp is None else hp,
+                max_hp=player.max_hp if max_hp is None else max_hp,
                 alive=player.alive if alive is None else alive,
                 chained=player.chained if chained is None else chained,
             )
@@ -2362,7 +2507,9 @@ class BatchReferenceController:
             elif context.phase == ProductionPhase.ZONE_CHOICE.value:
                 rank = 0 if operation == "choose_target_zone_card" else 9
             elif context.phase == ProductionPhase.DYING_RESCUE.value:
-                if operation == "rescue_with_peach" and action.target_ids == (
+                if action.payload.get("virtual") is True:
+                    rank = 3
+                elif operation == "rescue_with_peach" and action.target_ids == (
                     action.actor_id,
                 ):
                     rank = 0
@@ -2385,11 +2532,26 @@ class BatchReferenceController:
                     rank = 1
                 else:
                     rank = 2
+            elif context.phase == ProductionPhase.MODE_DECISION.value:
+                rank = 0 if operation == "pass_mode_decision" else 9
+            elif context.phase == ProductionPhase.SUCCESSION_CARD_CHOICE.value:
+                rank = 0 if operation == "succession_obtain_none" else 1
+            elif context.phase == ProductionPhase.IDENTITY_REWARD_CHOICE.value:
+                rank = 0 if operation == "ambitionist_reward_decline" else 1
             elif context.phase == ProductionPhase.JUDGMENT_WUXIE.value:
                 # 自然对局默认不主动无懈判定窗口：先判牌，无懈路径由脚本控制器显式驱动
                 rank = 0 if action.action_type is ActionType.PASS else 1
             elif context.phase == ProductionPhase.PLAY.value:
-                if operation == "heal_self":
+                if operation in {
+                    "select_heir",
+                    "choose_spy_path",
+                    "ambitionist_mark_draw_two",
+                } or (
+                    operation == "heal_self"
+                    and action.payload.get("virtual") is True
+                ):
+                    rank = 20
+                elif operation == "heal_self":
                     rank = 0
                 elif operation == "use_wine_buff":
                     rank = 1
@@ -2480,6 +2642,15 @@ class ScriptedBatchController:
                     return False
             elif key == "handle":
                 if action.payload.get("handle") != value:
+                    return False
+            elif key == "actor_id":
+                if action.actor_id != value:
+                    return False
+            elif key == "skill_id":
+                if action.skill_id != value:
+                    return False
+            elif key == "path":
+                if action.payload.get("path") != value:
                     return False
             else:
                 return False
@@ -3044,6 +3215,21 @@ class ProductionBasicCardBatch:
             if runtime.pending_peasant_reward is None:
                 raise ProductionBatchError("农民死亡奖励阶段缺少挂起状态")
             return runtime.pending_peasant_reward.chooser_id
+        if runtime.phase is ProductionPhase.MODE_DECISION:
+            pending = runtime.pending_mode_decision
+            if pending is None:
+                raise ProductionBatchError("模式决策阶段缺少挂起状态")
+            return pending.actor_id
+        if runtime.phase is ProductionPhase.SUCCESSION_CARD_CHOICE:
+            pending = runtime.pending_succession
+            if pending is None:
+                raise ProductionBatchError("继位选牌阶段缺少挂起状态")
+            return pending.successor_id
+        if runtime.phase is ProductionPhase.IDENTITY_REWARD_CHOICE:
+            pending = runtime.pending_identity_reward
+            if pending is None:
+                raise ProductionBatchError("身份奖励阶段缺少挂起状态")
+            return pending.chooser_id
         if runtime.phase in (
             ProductionPhase.PREPARE,
             ProductionPhase.JUDGMENT,
@@ -3559,6 +3745,16 @@ class ProductionBasicCardBatch:
             ],
             "game_state": canonical_state_snapshot(self.state),
         }
+        if self._mode_policy is not None and hasattr(
+            self._mode_policy, "current_lord_player_id"
+        ):
+            snapshot["current_lord_player_id"] = (
+                self._mode_policy.current_lord_player_id
+            )
+        if self._mode_policy is not None and hasattr(
+            self._mode_policy, "variant_id"
+        ):
+            snapshot["variant_id"] = self._mode_policy.variant_id
         normalized = json.loads(canonical_json(snapshot))
         assert isinstance(normalized, dict)
         return normalized
@@ -3763,6 +3959,13 @@ class ProductionBasicCardBatch:
                     payload={"operation": "end_play_phase"},
                 )
             )
+            mode_policy = self._mode_policy
+            if mode_policy is not None and hasattr(
+                mode_policy, "extra_play_actions"
+            ):
+                extra = mode_policy.extra_play_actions(self, state, context)
+                if extra:
+                    actions.extend(extra)
         elif self.phase is ProductionPhase.END:
             actions.append(
                 LegalAction(
@@ -4360,6 +4563,18 @@ class ProductionBasicCardBatch:
         elif self.phase is ProductionPhase.DYING_RESCUE:
             for adapter in self._formal_registry.adapters.values():
                 actions.extend(adapter.enumerate_legal_actions(state, context))
+            dying_id = self._runtime.pending_dying_id
+            mode_policy = self._mode_policy
+            if (
+                dying_id is not None
+                and mode_policy is not None
+                and hasattr(mode_policy, "extra_rescue_actions")
+            ):
+                extra = mode_policy.extra_rescue_actions(
+                    self, state, context, dying_id
+                )
+                if extra:
+                    actions.extend(extra)
             actions.append(
                 LegalAction(
                     action_type=ActionType.PASS,
@@ -4367,6 +4582,49 @@ class ProductionBasicCardBatch:
                     payload={"operation": "pass_rescue"},
                 )
             )
+        elif self.phase is ProductionPhase.MODE_DECISION:
+            pending = self._runtime.pending_mode_decision
+            if pending is None:
+                raise ProductionBatchError("模式决策阶段缺少挂起状态")
+            if actor != pending.actor_id:
+                return ()
+            mode_policy = self._mode_policy
+            if mode_policy is None or not hasattr(
+                mode_policy, "extra_mode_decision_actions"
+            ):
+                raise ProductionBatchError("模式决策阶段缺少变体策略")
+            actions.extend(
+                mode_policy.extra_mode_decision_actions(state, actor)
+            )
+        elif self.phase is ProductionPhase.SUCCESSION_CARD_CHOICE:
+            actions.extend(
+                self._enumerate_succession_card_actions(state, context)
+            )
+        elif self.phase is ProductionPhase.IDENTITY_REWARD_CHOICE:
+            reward = self._runtime.pending_identity_reward
+            if reward is None:
+                raise ProductionBatchError("身份奖励阶段缺少挂起状态")
+            if actor == reward.chooser_id:
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.CHOOSE_OPTION,
+                        actor_id=actor,
+                        payload={
+                            "operation": "ambitionist_reward_draw_three",
+                            "window_id": reward.window_id,
+                        },
+                    )
+                )
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.PASS,
+                        actor_id=actor,
+                        payload={
+                            "operation": "ambitionist_reward_decline",
+                            "window_id": reward.window_id,
+                        },
+                    )
+                )
         else:
             raise ProductionBatchError(
                 f"阶段{self.phase.value!r}不能枚举合法动作"
@@ -4416,6 +4674,36 @@ class ProductionBasicCardBatch:
                 "农民死亡奖励阶段只能选择回血、摸2张或放弃"
             )
 
+        if self.phase is ProductionPhase.MODE_DECISION:
+            if operation == "select_heir":
+                return self._c7_apply_select_heir(state, context, action)
+            if operation == "choose_spy_path":
+                return self._c7_apply_spy_path_choice(state, context, action)
+            if (
+                action.action_type is ActionType.PASS
+                and operation == "pass_mode_decision"
+            ):
+                return self._c7_apply_pass_mode_decision(state, context, action)
+            raise InvalidActionError("模式决策窗口不支持当前动作")
+
+        if self.phase is ProductionPhase.SUCCESSION_CARD_CHOICE:
+            if operation in (
+                "succession_obtain_card",
+                "succession_obtain_none",
+            ):
+                return self._c7_apply_succession_choice(state, context, action)
+            raise InvalidActionError("继位选牌窗口不支持当前动作")
+
+        if self.phase is ProductionPhase.IDENTITY_REWARD_CHOICE:
+            if operation in (
+                "ambitionist_reward_draw_three",
+                "ambitionist_reward_decline",
+            ):
+                return self._c7_apply_ambitionist_reward_choice(
+                    state, context, action
+                )
+            raise InvalidActionError("身份奖励窗口不支持当前动作")
+
         if self.phase is ProductionPhase.JUDGMENT:
             if action.action_type is ActionType.PASS and operation == (
                 "proceed_judgment"
@@ -4446,9 +4734,17 @@ class ProductionBasicCardBatch:
                 adapter = self._adapter_for_action(state, action)
                 return adapter.apply_action(state, context, action)
             if operation == "heal_self":
+                if action.payload.get("virtual") is True:
+                    return self._c7_apply_virtual_peach(state, context, action)
                 return self._formal_registry.adapter_for(
                     "sgs_basic_tao"
                 ).apply_action(state, context, action)
+            if operation == "select_heir":
+                return self._c7_apply_select_heir(state, context, action)
+            if operation == "choose_spy_path":
+                return self._c7_apply_spy_path_choice(state, context, action)
+            if operation == "ambitionist_mark_draw_two":
+                return self._c7_apply_mark_draw_two(state, context, action)
             if operation == "use_wine_buff":
                 return self._formal_registry.adapter_for(
                     "sgs_basic_jiu"
@@ -4625,6 +4921,8 @@ class ProductionBasicCardBatch:
 
         if self.phase is ProductionPhase.DYING_RESCUE:
             if operation == "rescue_with_peach":
+                if action.payload.get("virtual") is True:
+                    return self._c7_apply_virtual_peach(state, context, action)
                 return self._formal_registry.adapter_for(
                     "sgs_basic_tao"
                 ).apply_action(state, context, action)
@@ -12985,6 +13283,8 @@ class ProductionBasicCardBatch:
         return next_state
 
     def _pending_damage_card_id(self, runtime: _BatchRuntime) -> str:
+        if runtime.pending_lose_hp_dying:
+            raise ProductionBatchError("失去体力濒死没有伤害来源实体牌")
         if runtime.pending_slash is not None:
             return runtime.pending_slash.slash_instance_id
         if runtime.pending_damage_card_id is not None:
@@ -12992,6 +13292,8 @@ class ProductionBasicCardBatch:
         raise ProductionBatchError("濒死结算缺少伤害来源实体牌")
 
     def _pending_damage_rescue_reason(self, runtime: _BatchRuntime) -> str:
+        if runtime.pending_lose_hp_dying:
+            return "heir_death_lose_hp_rescued"
         if runtime.pending_slash is not None:
             return "slash_damage_resolved_after_rescue"
         if runtime.pending_damage_rescue_reason is not None:
@@ -12999,6 +13301,8 @@ class ProductionBasicCardBatch:
         raise ProductionBatchError("濒死结算缺少救援完成原因")
 
     def _pending_damage_death_reason(self, runtime: _BatchRuntime) -> str:
+        if runtime.pending_lose_hp_dying:
+            return "heir_death_lose_hp"
         if runtime.pending_slash is not None:
             return "slash_damage_resolved_with_death"
         if runtime.pending_damage_death_reason is not None:
@@ -13006,6 +13310,8 @@ class ProductionBasicCardBatch:
         raise ProductionBatchError("濒死结算缺少死亡完成原因")
 
     def _pending_damage_source(self, runtime: _BatchRuntime) -> str | None:
+        if runtime.pending_lose_hp_dying:
+            return None
         if runtime.pending_slash is not None:
             return runtime.pending_slash.attacker_id
         if runtime.pending_damage_source_id is not None:
@@ -13028,6 +13334,8 @@ class ProductionBasicCardBatch:
         重复弃置；丈八虚拟杀绝不因该标记跳过材料清理（MB-B-002）。
         """
 
+        if runtime.pending_lose_hp_dying:
+            return state, runtime, ()
         if runtime.defer_damage_card_finish:
             return state, runtime, ()
         pending = runtime.pending_slash
@@ -13107,6 +13415,11 @@ class ProductionBasicCardBatch:
             *move_events,
         ]
         if next_state.players_by_id[dying_id].hp >= 1:
+            nested = self._c7_resume_after_lose_hp_rescue(
+                next_state, runtime, dying_id, pending_events
+            )
+            if nested is not None:
+                return nested
             if runtime.pending_group_trick is not None:
                 self._events.extend(pending_events)
                 # 群体锦囊：救援完成后恢复逐目标队列，原锦囊继续留在
@@ -13205,6 +13518,11 @@ class ProductionBasicCardBatch:
             *move_events,
         ]
         if next_state.players_by_id[dying_id].hp >= 1:
+            nested = self._c7_resume_after_lose_hp_rescue(
+                next_state, runtime, dying_id, pending_events
+            )
+            if nested is not None:
+                return nested
             if runtime.pending_group_trick is not None:
                 self._events.extend(pending_events)
                 # 群体锦囊：救援完成后恢复逐目标队列，原锦囊继续留在
@@ -13280,6 +13598,11 @@ class ProductionBasicCardBatch:
             return state
         dying = state.players_by_id[dying_id]
         if dying.hp >= 1:
+            nested = self._c7_resume_after_lose_hp_rescue(
+                state, runtime, dying_id, ()
+            )
+            if nested is not None:
+                return nested
             if runtime.pending_group_trick is not None:
                 # 群体锦囊：救援完成后恢复逐目标队列，原锦囊继续留在
                 # 处理区，直到全部目标完成才进入弃牌堆。
@@ -13327,6 +13650,25 @@ class ProductionBasicCardBatch:
             self._events.extend((wugu_finish_event,))
         else:
             next_state = state
+        mode_policy = self._mode_policy
+        if mode_policy is not None and hasattr(
+            mode_policy, "pre_confirmed_death_hook"
+        ):
+            hooked_state, hooked_runtime = mode_policy.pre_confirmed_death_hook(
+                self, next_state, runtime, dying_id
+            )
+            if hooked_runtime.phase is ProductionPhase.SUCCESSION_CARD_CHOICE:
+                self._commit_runtime(runtime, hooked_runtime)
+                return hooked_state
+            next_state, runtime = hooked_state, hooked_runtime
+        return self._complete_unrescued_death(next_state, runtime, dying_id)
+
+    def _complete_unrescued_death(
+        self,
+        next_state: GameState,
+        runtime: _BatchRuntime,
+        dying_id: str,
+    ) -> GameState:
         chain = runtime.pending_chain
         preview_winner = resolve_victory_after_death(
             PlayerTopology.from_state(
@@ -13440,12 +13782,6 @@ class ProductionBasicCardBatch:
             )
             finish_events = [*finish_events, borrowed_finish]
         next_state = _replace_player(next_state, dying_id, alive=False)
-        winner = resolve_victory_after_death(
-            PlayerTopology.from_state(next_state),
-            dying_id,
-            policy=self._outcome_policy,
-            explicit_two_player_fallback=True,
-        )
         damage_source = self._pending_damage_source(runtime)
         kill_credit = (
             runtime.pending_damage_kill_credit
@@ -13470,6 +13806,40 @@ class ProductionBasicCardBatch:
                         "身份公开钩子必须返回GameEvent或None"
                     )
                 reveal_events = (reveal,)
+        death_events_emitted = False
+        if mode_policy is not None and hasattr(
+            mode_policy, "post_confirmed_death_pre_outcome_hook"
+        ):
+            # C7：储君死亡的失去体力属于该死亡的胜利前置处理，必须在
+            # 外层胜负判定之前完整结算；因此先落确认死亡事件/状态。
+            self._events.extend(
+                [*finish_events, *cleanup_events, *reveal_events, death_event]
+            )
+            death_events_emitted = True
+            finish_events = []
+            cleanup_events = ()
+            reveal_events = ()
+            next_state, runtime = mode_policy.post_confirmed_death_pre_outcome_hook(
+                self, next_state, runtime, dying_id
+            )
+            if (
+                runtime.phase is ProductionPhase.DYING_RESCUE
+                and runtime.pending_lose_hp_dying
+            ):
+                self._commit_runtime(self._runtime, runtime)
+                return next_state
+            if (
+                runtime.winner_id is not None
+                or runtime.game_over_reason is not None
+            ):
+                self._commit_runtime(self._runtime, runtime)
+                return next_state
+        winner = resolve_victory_after_death(
+            PlayerTopology.from_state(next_state),
+            dying_id,
+            policy=self._outcome_policy,
+            explicit_two_player_fallback=True,
+        )
         death_context = DeathConfirmationContext(
             dying_id=dying_id,
             final_damage_source=damage_source,
@@ -13481,9 +13851,10 @@ class ProductionBasicCardBatch:
             # 对局继续。事件顺序：根牌收尾 → 死亡区域清理 → 身份公开
             # （C5 非主公）→ 死亡 → 模式死亡奖励（2v2 §2.7 / 斗地主 §3.7
             # / C5 身份击杀奖惩）→ 继续结算/平局终局。
-            self._events.extend(
-                [*finish_events, *cleanup_events, *reveal_events, death_event]
-            )
+            if not death_events_emitted:
+                self._events.extend(
+                    [*finish_events, *cleanup_events, *reveal_events, death_event]
+                )
             # C123-R1-NEW-001：确认当前回合角色死亡后，回合结束责任成立。
             # 若此时仍有未完成 parent/root 或模式死亡奖励挂起窗口，不得立即切回合，
             # 但该责任必须先持久记录到 runtime。
@@ -13520,8 +13891,11 @@ class ProductionBasicCardBatch:
                 if runtime.game_over_reason is not None:
                     self._commit_runtime(pre_hook_runtime, runtime)
                     return next_state
-                if runtime.phase is ProductionPhase.PEASANT_REWARD_CHOICE:
-                    # 真正暂停！进入存活农民三选一决策窗口，等待行动者提交动作后再 continuation。
+                if runtime.phase in (
+                    ProductionPhase.PEASANT_REWARD_CHOICE,
+                    ProductionPhase.IDENTITY_REWARD_CHOICE,
+                ):
+                    # 真正暂停！进入模式死亡奖励决策窗口，等待行动者提交后再 continuation。
                     self._commit_runtime(pre_hook_runtime, runtime)
                     return next_state
 
@@ -13536,8 +13910,12 @@ class ProductionBasicCardBatch:
             finish_events
             + list(cleanup_events)
             + list(reveal_events)
+            + (
+                []
+                if death_events_emitted
+                else [death_event]
+            )
             + [
-                death_event,
                 GameEvent(
                     event_type=EventType.VICTORY,
                     target_ids=(winner,),
@@ -15458,6 +15836,14 @@ class ProductionBasicCardBatch:
             feiyang_selected_ids=(),
             feiyang_judgment_choice=None,
             deferred_turn_end_after_owner_death=False,
+            pending_mode_decision=None,
+            pending_succession=None,
+            pending_identity_reward=None,
+            pending_outer_death=None,
+            pending_lose_hp_dying=False,
+        )
+        next_state, next_runtime = self._after_turn_advanced(
+            next_state, next_runtime
         )
         self._commit_runtime(runtime, next_runtime)
         return next_state
@@ -15547,8 +15933,13 @@ class ProductionBasicCardBatch:
             feiyang_selected_ids=(),
             feiyang_judgment_choice=None,
             deferred_turn_end_after_owner_death=False,
+            pending_mode_decision=None,
+            pending_succession=None,
+            pending_identity_reward=None,
+            pending_outer_death=None,
+            pending_lose_hp_dying=False,
         )
-        return state, next_runtime
+        return self._after_turn_advanced(state, next_runtime)
 
     # ------------------------------------------------------------------
     # 实体牌移动与摸牌事务（真实 move_card / move_cards 原子移动）
@@ -15959,6 +16350,854 @@ class ProductionBasicCardBatch:
                 )
             )
         return next_state, tuple(events)
+
+    def _after_turn_advanced(
+        self, state: GameState, runtime: _BatchRuntime
+    ) -> tuple[GameState, _BatchRuntime]:
+        mode_policy = self._mode_policy
+        if mode_policy is None or not hasattr(mode_policy, "on_turn_start"):
+            return state, runtime
+        return mode_policy.on_turn_start(
+            self, state, runtime, is_extra_turn=False
+        )
+
+    def _c7_variant(self) -> Any:
+        policy = self._mode_policy
+        variant = getattr(policy, "_variant", None)
+        if variant is None:
+            raise ProductionBatchError("当前模式没有立储择途变体状态")
+        return variant
+
+    def _c7_sync_outcome(self) -> None:
+        sync = getattr(self, "_sync_outcome_policy", None)
+        if callable(sync):
+            sync()
+
+    def _c7_open_mode_decision_window(
+        self, runtime: _BatchRuntime, queue: tuple[str, ...]
+    ) -> _BatchRuntime:
+        if not queue:
+            return runtime
+        return replace(
+            runtime,
+            phase=ProductionPhase.MODE_DECISION,
+            pending_mode_decision=_PendingModeDecision(
+                actor_id=queue[0],
+                queue=queue[1:],
+                resume_phase=ProductionPhase.PREPARE,
+                window_id=(
+                    f"mode-decision:{runtime.turn_number}:{queue[0]}"
+                ),
+            ),
+        )
+
+    def _c7_advance_mode_decision(
+        self, state: GameState, runtime: _BatchRuntime
+    ) -> tuple[GameState, _BatchRuntime]:
+        pending = runtime.pending_mode_decision
+        if pending is None:
+            return state, runtime
+        if pending.queue:
+            return state, replace(
+                runtime,
+                pending_mode_decision=replace(
+                    pending,
+                    actor_id=pending.queue[0],
+                    queue=pending.queue[1:],
+                    window_id=(
+                        f"mode-decision:{runtime.turn_number}:"
+                        f"{pending.queue[0]}"
+                    ),
+                ),
+            )
+        return state, replace(
+            runtime,
+            phase=pending.resume_phase,
+            pending_mode_decision=None,
+        )
+
+    def _c7_apply_pass_mode_decision(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        del action
+        runtime = self._runtime
+        pending = runtime.pending_mode_decision
+        if pending is None or context.actor_id != pending.actor_id:
+            raise InvalidActionError("当前不是模式决策行动者")
+        next_state, next_runtime = self._c7_advance_mode_decision(
+            state, runtime
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def _c7_apply_select_heir(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        variant = self._c7_variant()
+        policy = self._mode_policy
+        if policy is None or not hasattr(policy, "heir_window_available"):
+            raise InvalidActionError("当前模式不能立储")
+        if not policy.heir_window_available(state):
+            raise InvalidActionError("当前不能立储")
+        if context.actor_id != variant.original_lord_player_id:
+            raise InvalidActionError("只有开局主公可以立储")
+        target_id = action.payload.get("target_id")
+        if type(target_id) is not str:
+            if action.target_ids:
+                target_id = action.target_ids[0]
+            else:
+                raise InvalidActionError("立储必须指定一名其他角色")
+        if target_id == context.actor_id:
+            raise InvalidActionError("不能立自己为储君")
+        target = state.players_by_id.get(target_id)
+        if target is None or not target.alive:
+            raise InvalidActionError("立储目标必须仍在场")
+        variant.heir_player_id = target_id
+        variant.heir_selection_used = True
+        runtime = self._runtime
+        next_state, next_runtime = state, runtime
+        if runtime.phase is ProductionPhase.MODE_DECISION:
+            next_state, next_runtime = self._c7_advance_mode_decision(
+                state, runtime
+            )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def _c7_apply_spy_path_choice(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        variant = self._c7_variant()
+        policy = self._mode_policy
+        if policy is None or not hasattr(policy, "spy_path_chooser_id"):
+            raise InvalidActionError("当前模式不能择途")
+        chooser = policy.spy_path_chooser_id(state)
+        if chooser is None or context.actor_id != chooser:
+            raise InvalidActionError("当前不能择途")
+        path = action.payload.get("path")
+        if path not in ("loyalist", "ambitionist"):
+            raise InvalidActionError("择途只能选择忠臣或野心家")
+        variant.spy_path_choice = path
+        variant.spy_path_pending = True
+        variant.spy_path_locked = True
+        variant.spy_path_chooser_id = chooser
+        runtime = self._runtime
+        next_state, next_runtime = state, runtime
+        if runtime.phase is ProductionPhase.MODE_DECISION:
+            next_state, next_runtime = self._c7_advance_mode_decision(
+                state, runtime
+            )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
+
+    def _c7_apply_spy_conversion(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        chooser_id: str,
+        path: str | None,
+    ) -> tuple[GameState, _BatchRuntime]:
+        variant = self._c7_variant()
+        variant.spy_path_pending = False
+        if path == "loyalist":
+            variant.role_current[chooser_id] = "loyalist"
+            if chooser_id not in variant.converted_loyalist_ids:
+                variant.converted_loyalist_ids = (
+                    *variant.converted_loyalist_ids,
+                    chooser_id,
+                )
+            variant.spy_became_loyalist_announced = True
+            self._events.extend(
+                (
+                    GameEvent(
+                        event_type=EventType.IDENTITY_REVEALED,
+                        payload={
+                            "reason": "spy_converted_loyalist_announced",
+                            "identity": "loyalist",
+                            "subject_revealed": False,
+                        },
+                    ),
+                )
+            )
+        elif path == "ambitionist":
+            variant.role_current[chooser_id] = "ambitionist"
+            variant.ambitionist_mark_available[chooser_id] = True
+            self._events.extend(
+                (
+                    GameEvent(
+                        event_type=EventType.IDENTITY_REVEALED,
+                        target_ids=(chooser_id,),
+                        payload={
+                            "reason": "ambitionist_conversion",
+                            "identity": "ambitionist",
+                        },
+                    ),
+                )
+            )
+        else:
+            return state, runtime
+        self._c7_sync_outcome()
+        winner = resolve_victory_after_death(
+            PlayerTopology.from_state(state),
+            chooser_id,
+            policy=self._outcome_policy,
+            explicit_two_player_fallback=True,
+        )
+        if winner is None:
+            return state, runtime
+        self._events.extend(
+            (
+                GameEvent(
+                    event_type=EventType.VICTORY,
+                    target_ids=(winner,),
+                ),
+            )
+        )
+        return state, replace(
+            cleanup_finished_transient_runtime(runtime),
+            phase=ProductionPhase.FINISHED,
+            winner_id=winner,
+        )
+
+    def _c7_open_succession_window(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        old_lord_id: str,
+        successor_id: str,
+    ) -> tuple[GameState, _BatchRuntime]:
+        hand_ids = tuple(state.card_ids_in(ZoneRef.hand(old_lord_id)))
+        snapshot_digest = sha256_value(hand_ids)
+        window_id = (
+            f"succession:{runtime.turn_number}:{old_lord_id}:{successor_id}"
+        )
+        handles = _zone_choice_handle_snapshot(
+            self._session_id,
+            self._session_secret,
+            state,
+            old_lord_id,
+            window_id,
+            snapshot_digest,
+        )
+        return state, replace(
+            runtime,
+            phase=ProductionPhase.SUCCESSION_CARD_CHOICE,
+            pending_succession=_PendingSuccession(
+                old_lord_id=old_lord_id,
+                successor_id=successor_id,
+                window_id=window_id,
+                handles=handles,
+                snapshot_digest=snapshot_digest,
+            ),
+        )
+
+    def _enumerate_succession_card_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        runtime = self._runtime
+        pending = runtime.pending_succession
+        if pending is None:
+            raise ProductionBatchError("继位选牌阶段缺少挂起状态")
+        if context.actor_id != pending.successor_id:
+            return ()
+        old_lord_id = pending.old_lord_id
+        state_hash = state_sha256(canonical_state_snapshot(state))
+        actions: list[LegalAction] = [
+            LegalAction(
+                action_type=ActionType.PASS,
+                actor_id=context.actor_id,
+                payload={
+                    "operation": "succession_obtain_none",
+                    "window_id": pending.window_id,
+                    "state_hash": state_hash,
+                },
+            )
+        ]
+        hand_zone = ZoneRef.hand(old_lord_id)
+        if (
+            pending.snapshot_digest is not None
+            and sha256_value(tuple(state.card_ids_in(hand_zone)))
+            == pending.snapshot_digest
+        ):
+            for instance_id in state.card_ids_in(hand_zone):
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.MOVE_CARD,
+                        actor_id=context.actor_id,
+                        target_ids=(old_lord_id,),
+                        payload={
+                            "operation": "succession_obtain_card",
+                            "window_id": pending.window_id,
+                            "zone": "hand",
+                            "handle": _hand_choice_handle(
+                                self._session_id,
+                                self._session_secret,
+                                pending.window_id,
+                                old_lord_id,
+                                "hand",
+                                pending.snapshot_digest,
+                                instance_id,
+                            ),
+                            "state_hash": state_hash,
+                        },
+                    )
+                )
+        for slot in EQUIPMENT_SLOTS:
+            zone = ZoneRef.equipment(old_lord_id, slot)
+            for instance_id in state.card_ids_in(zone):
+                actions.append(
+                    LegalAction(
+                        action_type=ActionType.MOVE_CARD,
+                        actor_id=context.actor_id,
+                        card_instance_id=instance_id,
+                        target_ids=(old_lord_id,),
+                        payload={
+                            "operation": "succession_obtain_card",
+                            "window_id": pending.window_id,
+                            "zone": f"equipment:{slot}",
+                            "card_key": _card_key(state, instance_id),
+                            "state_hash": state_hash,
+                        },
+                    )
+                )
+        judgment = ZoneRef.judgment(old_lord_id)
+        for instance_id in state.card_ids_in(judgment):
+            actions.append(
+                LegalAction(
+                    action_type=ActionType.MOVE_CARD,
+                    actor_id=context.actor_id,
+                    card_instance_id=instance_id,
+                    target_ids=(old_lord_id,),
+                    payload={
+                        "operation": "succession_obtain_card",
+                        "window_id": pending.window_id,
+                        "zone": "judgment",
+                        "card_key": _card_key(state, instance_id),
+                        "state_hash": state_hash,
+                    },
+                )
+            )
+        return tuple(actions)
+
+    def _c7_apply_succession_choice(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        runtime = self._runtime
+        pending = runtime.pending_succession
+        if pending is None:
+            raise InvalidActionError("当前没有继位选牌窗口")
+        if context.actor_id != pending.successor_id:
+            raise InvalidActionError("只有合法储君可以获得原主公区域牌")
+        if action.payload.get("window_id") != pending.window_id:
+            raise InvalidActionError("继位选牌窗口已过期")
+        next_state = state
+        operation = str(action.payload.get("operation", ""))
+        if operation == "succession_obtain_card":
+            next_state = self._c7_obtain_succession_card(
+                state, pending, action
+            )
+            runtime = self._runtime
+        elif operation != "succession_obtain_none":
+            raise InvalidActionError("继位选牌窗口不支持当前动作")
+        next_state, runtime = self._c7_apply_succession_effects(
+            next_state,
+            replace(runtime, pending_succession=None),
+            pending.old_lord_id,
+            pending.successor_id,
+        )
+        return self._complete_unrescued_death(
+            next_state, runtime, pending.old_lord_id
+        )
+
+    def _c7_obtain_succession_card(
+        self,
+        state: GameState,
+        pending: _PendingSuccession,
+        action: LegalAction,
+    ) -> GameState:
+        zone_id = action.payload.get("zone")
+        if type(zone_id) is not str:
+            raise InvalidActionError("继位获得必须指定区域")
+        zone = _zone_from_id(zone_id, pending.old_lord_id)
+        if zone.kind is ZoneKind.HAND:
+            instance_id = _resolve_hand_choice_handle(
+                self._session_id,
+                self._session_secret,
+                state,
+                pending.window_id,
+                pending.old_lord_id,
+                "hand",
+                pending.snapshot_digest,
+                pending.handles,
+                action.payload.get("handle"),
+            )
+            if instance_id is None:
+                raise InvalidActionError("继位隐藏手牌句柄无效或已过期")
+            from_hidden = True
+        else:
+            instance_id = action.card_instance_id
+            if instance_id is None:
+                raise InvalidActionError("公开区域必须指定实体牌")
+            if state.location_of(instance_id) != zone:
+                raise InvalidActionError("所选实体牌已不在原主公区域")
+            from_hidden = False
+        destination = ZoneRef.hand(pending.successor_id)
+        next_state = state.move_card(instance_id, destination)
+        extra_events: list[GameEvent] = []
+        if zone == ZoneRef.equipment(pending.old_lord_id, "armor"):
+            next_state, recovery_events = self._apply_armor_leave_recovery(
+                next_state,
+                instance_id=instance_id,
+                owner_id=pending.old_lord_id,
+                reason="succession_obtain",
+            )
+            extra_events.extend(recovery_events)
+        card_key = _card_key(state, instance_id)
+        self._events.extend(
+            (
+                GameEvent(
+                    event_type=EventType.CARD_MOVED,
+                    card_instance_id=instance_id,
+                    card_key=card_key,
+                    card_user=pending.successor_id,
+                    target_ids=(pending.old_lord_id,),
+                    payload={
+                        "source": _zone_payload(zone),
+                        "destination": _zone_payload(destination),
+                        "reason": "succession_obtain",
+                        "from_hidden_zone": from_hidden,
+                    },
+                ),
+                GameEvent(
+                    event_type=EventType.CARD_LOST,
+                    card_instance_id=instance_id,
+                    card_key=card_key,
+                    target_ids=(pending.old_lord_id,),
+                    payload={
+                        "reason": "succession_obtain",
+                        "source_zone": _zone_id(zone),
+                        "from_hidden_zone": from_hidden,
+                    },
+                ),
+                GameEvent(
+                    event_type=EventType.CARD_GAINED,
+                    card_instance_id=instance_id,
+                    card_key=card_key,
+                    target_ids=(pending.successor_id,),
+                    payload={
+                        "reason": "succession_obtain",
+                        "from_hidden_zone": from_hidden,
+                    },
+                ),
+                *extra_events,
+            )
+        )
+        if zone.kind is ZoneKind.JUDGMENT:
+            self._runtime = replace(
+                self._runtime,
+                judgment_entry_indices=self._without_judgment_index(
+                    self._runtime, instance_id
+                ),
+            )
+        return next_state
+
+    def _c7_apply_succession_effects(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        old_lord_id: str,
+        successor_id: str,
+    ) -> tuple[GameState, _BatchRuntime]:
+        del old_lord_id
+        variant = self._c7_variant()
+        variant.role_current[successor_id] = "lord"
+        variant.current_lord_player_id = successor_id
+        variant.heir_player_id = None
+        variant.heir_window_open = False
+        variant.successor_cannot_select_heir = True
+        self._c7_sync_outcome()
+        player = state.players_by_id[successor_id]
+        new_max = player.max_hp + 1
+        recovered = min(new_max, player.hp + 1)
+        next_state = _replace_player(
+            state, successor_id, hp=recovered, max_hp=new_max
+        )
+        events: list[GameEvent] = [
+            GameEvent(
+                event_type=EventType.IDENTITY_REVEALED,
+                target_ids=(successor_id,),
+                payload={
+                    "reason": "succession_lord_reveal",
+                    "identity": "lord",
+                },
+            )
+        ]
+        if recovered > player.hp:
+            events.append(
+                GameEvent(
+                    event_type=EventType.HP_RECOVER,
+                    target_ids=(successor_id,),
+                    payload={
+                        "amount": recovered - player.hp,
+                        "reason": "succession_recover",
+                    },
+                )
+            )
+        self._events.extend(tuple(events))
+        return next_state, runtime
+
+    def _c7_apply_lose_hp(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        player_id: str,
+        amount: int,
+        reason: str,
+        outer_dying_id: str | None,
+    ) -> tuple[GameState, _BatchRuntime]:
+        player = state.players_by_id[player_id]
+        next_state = _replace_player(state, player_id, hp=player.hp - amount)
+        self._events.extend(
+            (
+                GameEvent(
+                    event_type=EventType.LOSE_HP,
+                    target_ids=(player_id,),
+                    payload={"amount": amount, "reason": reason},
+                ),
+            )
+        )
+        if next_state.players_by_id[player_id].hp > 0:
+            return next_state, runtime
+        dying_event = GameEvent(
+            event_type=EventType.DYING,
+            target_ids=(player_id,),
+        )
+        self._events.extend((dying_event,))
+        dying_sequence = self._events.snapshot()[-1].sequence
+        rescue_order = self._response_order_from_turn_player(next_state, runtime)
+        outer = None
+        if outer_dying_id is not None:
+            kill_credit = runtime.pending_damage_kill_credit
+            if kill_credit is None:
+                kill_credit = self._pending_damage_source(runtime)
+            outer = _PendingOuterDeath(
+                dying_id=outer_dying_id,
+                is_nonterminal_chain_child=(
+                    runtime.pending_chain is not None
+                    and outer_dying_id != runtime.current_player_id
+                ),
+                kill_credit=kill_credit,
+                final_damage_source=self._pending_damage_source(runtime),
+            )
+        return next_state, replace(
+            runtime,
+            phase=ProductionPhase.DYING_RESCUE,
+            pending_dying_id=player_id,
+            rescue_order=rescue_order,
+            rescue_index=0,
+            rescue_decision_count=0,
+            response_window_id=(
+                f"dying:{runtime.turn_number}:{player_id}:seat0:dec0"
+            ),
+            response_window_order=(rescue_order[0],) if rescue_order else (),
+            response_window_source_sequence=dying_sequence,
+            pending_lose_hp_dying=True,
+            pending_outer_death=outer,
+        )
+
+    def _c7_resume_after_lose_hp_rescue(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        rescued_id: str,
+        pending_events: Sequence[GameEvent],
+    ) -> GameState | None:
+        del rescued_id
+        if not runtime.pending_lose_hp_dying:
+            return None
+        if pending_events:
+            self._events.extend(tuple(pending_events))
+        outer = runtime.pending_outer_death
+        runtime = replace(
+            runtime,
+            pending_lose_hp_dying=False,
+            pending_outer_death=None,
+            pending_dying_id=None,
+            rescue_order=(),
+            rescue_index=0,
+            rescue_decision_count=0,
+            response_window_id=None,
+            response_window_order=(),
+            response_window_source_sequence=None,
+        )
+        if outer is None:
+            next_state, next_runtime = self._complete_root_resolution(
+                state, runtime
+            )
+            self._commit_runtime(self._runtime, next_runtime)
+            return next_state
+        winner = resolve_victory_after_death(
+            PlayerTopology.from_state(state),
+            outer.dying_id,
+            policy=self._outcome_policy,
+            explicit_two_player_fallback=True,
+        )
+        if winner is not None:
+            self._events.extend(
+                (
+                    GameEvent(
+                        event_type=EventType.VICTORY,
+                        target_ids=(winner,),
+                    ),
+                )
+            )
+            next_runtime = replace(
+                cleanup_finished_transient_runtime(runtime),
+                phase=ProductionPhase.FINISHED,
+                winner_id=winner,
+            )
+            self._commit_runtime(self._runtime, next_runtime)
+            return state
+        mode_policy = self._mode_policy
+        if mode_policy is not None and hasattr(
+            mode_policy, "death_confirmed_hook"
+        ):
+            death_context = DeathConfirmationContext(
+                dying_id=outer.dying_id,
+                final_damage_source=outer.final_damage_source,
+                kill_credit=outer.kill_credit,
+                winner=None,
+            )
+            pre_hook_runtime = runtime
+            state, runtime = mode_policy.death_confirmed_hook(
+                self,
+                state,
+                runtime,
+                outer.dying_id,
+                death_context=death_context,
+            )
+            if runtime.game_over_reason is not None:
+                self._commit_runtime(pre_hook_runtime, runtime)
+                return state
+            if runtime.phase is ProductionPhase.IDENTITY_REWARD_CHOICE:
+                self._commit_runtime(pre_hook_runtime, runtime)
+                return state
+        return self._continue_after_nonterminal_death(
+            state,
+            runtime,
+            outer.dying_id,
+            runtime.judgment_entry_indices,
+            outer.is_nonterminal_chain_child,
+        )
+
+    def _c7_open_ambitionist_reward(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        killer_id: str,
+        dying_id: str,
+    ) -> tuple[GameState, _BatchRuntime]:
+        return state, replace(
+            runtime,
+            phase=ProductionPhase.IDENTITY_REWARD_CHOICE,
+            pending_identity_reward=_PendingIdentityReward(
+                chooser_id=killer_id,
+                dying_id=dying_id,
+                window_id=f"ambitionist-reward:{runtime.turn_number}:{dying_id}",
+                is_nonterminal_chain_child=(
+                    runtime.pending_chain is not None
+                    and dying_id != runtime.current_player_id
+                ),
+            ),
+        )
+
+    def _c7_apply_ambitionist_reward_choice(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        runtime = self._runtime
+        reward = runtime.pending_identity_reward
+        if reward is None:
+            raise InvalidActionError("当前没有身份奖励窗口")
+        if context.actor_id != reward.chooser_id:
+            raise InvalidActionError("只有击杀者可以领取野心家奖励")
+        if action.payload.get("window_id") != reward.window_id:
+            raise InvalidActionError("身份奖励窗口已过期")
+        operation = str(action.payload.get("operation", ""))
+        next_state = state
+        next_runtime = replace(runtime, pending_identity_reward=None)
+        if operation == "ambitionist_reward_draw_three":
+            next_state, next_runtime = self._mode_death_reward_draw(
+                state,
+                next_runtime,
+                reward.chooser_id,
+                3,
+                reason="ambitionist_kill_optional_draw",
+            )
+            if next_runtime.game_over_reason is not None:
+                self._commit_runtime(runtime, next_runtime)
+                return next_state
+        elif operation != "ambitionist_reward_decline":
+            raise InvalidActionError("身份奖励窗口不支持当前动作")
+        return self._continue_after_nonterminal_death(
+            next_state,
+            next_runtime,
+            reward.dying_id,
+            next_runtime.judgment_entry_indices,
+            reward.is_nonterminal_chain_child,
+        )
+
+    def _c7_apply_mark_draw_two(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        del action
+        runtime = self._runtime
+        if runtime.phase is not ProductionPhase.PLAY:
+            raise InvalidActionError("野心家标记摸牌只能在出牌阶段使用")
+        variant = self._c7_variant()
+        actor_id = context.actor_id
+        if not variant.ambitionist_mark_available.get(actor_id, False):
+            raise InvalidActionError("没有可用的野心家标记")
+        variant.ambitionist_mark_available[actor_id] = False
+        try:
+            next_state, draw_events = self._draw_cards(
+                state, actor_id, 2, reason="ambitionist_mark_draw_two"
+            )
+        except _DeckExhaustedDraw as exc:
+            exhausted_state = exc.state if exc.state is not None else state
+            if exc.state is not None:
+                self._events.extend(exc.events)
+            next_state, draw_runtime = self._finish_game_as_draw(
+                exhausted_state, runtime
+            )
+            self._commit_runtime(runtime, draw_runtime)
+            return next_state
+        self._events.extend(draw_events)
+        self._commit_runtime(runtime, runtime)
+        return next_state
+
+    def _c7_apply_virtual_peach(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        variant = self._c7_variant()
+        actor_id = context.actor_id
+        if not variant.ambitionist_mark_available.get(actor_id, False):
+            raise InvalidActionError("没有可用的野心家标记")
+        if action.payload.get("virtual") is not True:
+            raise InvalidActionError("虚拟桃必须标记virtual=true")
+        runtime = self._runtime
+        variant.ambitionist_mark_available[actor_id] = False
+        if runtime.phase is ProductionPhase.PLAY:
+            if action.target_ids != (actor_id,):
+                raise InvalidActionError("出牌阶段虚拟桃只能以自己为目标")
+            player = state.players_by_id[actor_id]
+            if player.hp >= player.max_hp:
+                raise InvalidActionError("满体力时不能使用虚拟桃")
+            next_state = _replace_player(
+                state, actor_id, hp=min(player.max_hp, player.hp + 1)
+            )
+            self._events.extend(
+                (
+                    GameEvent(
+                        event_type=EventType.CARD_USED,
+                        card_key="sgs_basic_tao",
+                        card_user=actor_id,
+                        target_ids=(actor_id,),
+                        payload={
+                            "purpose": "heal_self",
+                            "virtual": True,
+                            "source": "ambitionist_mark",
+                        },
+                    ),
+                    GameEvent(
+                        event_type=EventType.HP_RECOVER,
+                        target_ids=(actor_id,),
+                        payload={
+                            "amount": 1,
+                            "reason": "ambitionist_mark_virtual_peach",
+                        },
+                    ),
+                )
+            )
+            self._commit_runtime(runtime, runtime)
+            return next_state
+        if runtime.phase is not ProductionPhase.DYING_RESCUE:
+            raise InvalidActionError("虚拟桃只能在出牌阶段或濒死救援使用")
+        dying_id = runtime.pending_dying_id
+        if dying_id is None or action.target_ids != (dying_id,):
+            raise InvalidActionError("救援虚拟桃只能以濒死角色为目标")
+        if context.actor_id != runtime.rescue_order[runtime.rescue_index]:
+            raise InvalidActionError("当前不是该角色的救援时机")
+        window = self._build_window(runtime)
+        rescue_event = GameEvent(
+            event_type=EventType.CARD_USED,
+            card_key="sgs_basic_tao",
+            card_user=actor_id,
+            target_ids=(dying_id,),
+            payload={
+                "purpose": "dying_rescue",
+                "virtual": True,
+                "source": "ambitionist_mark",
+            },
+        )
+        record = window.respond(actor_id, rescue_event)
+        assert record.response_event is not None
+        dying = state.players_by_id[dying_id]
+        next_state = _replace_player(
+            state, dying_id, hp=min(dying.max_hp, dying.hp + 1)
+        )
+        pending_events: list[GameEvent] = [
+            record.response_event,
+            GameEvent(
+                event_type=EventType.HP_RECOVER,
+                target_ids=(dying_id,),
+                payload={
+                    "amount": 1,
+                    "reason": "ambitionist_mark_virtual_peach",
+                },
+            ),
+        ]
+        if next_state.players_by_id[dying_id].hp >= 1:
+            nested = self._c7_resume_after_lose_hp_rescue(
+                next_state, runtime, dying_id, pending_events
+            )
+            if nested is not None:
+                return nested
+            if runtime.pending_group_trick is not None:
+                self._events.extend(pending_events)
+                next_state, next_runtime = self._resume_group_after_damage(
+                    next_state, runtime, dying_id, rescued=True
+                )
+            elif runtime.pending_chain is not None:
+                self._events.extend(pending_events)
+                next_state, next_runtime = self._resume_chain_after_rescue(
+                    next_state, runtime, dying_id, rescued=True
+                )
+            else:
+                next_state, runtime, finish_events = (
+                    self._finish_pending_damage_card(
+                        next_state,
+                        runtime,
+                        self._pending_damage_rescue_reason(runtime),
+                    )
+                )
+                pending_events.extend(finish_events)
+                self._events.extend(pending_events)
+                next_state, next_runtime = self._complete_root_resolution(
+                    next_state, runtime
+                )
+            self._commit_runtime(self._runtime, next_runtime)
+            return next_state
+        self._events.extend(pending_events)
+        decision_count = runtime.rescue_decision_count + 1
+        next_runtime = replace(
+            runtime,
+            rescue_decision_count=decision_count,
+            response_window_id=self._rescue_window_id(
+                runtime, runtime.rescue_index, decision_count
+            ),
+            response_window_order=(context.actor_id,),
+        )
+        self._commit_runtime(runtime, next_runtime)
+        return next_state
 
 
 __all__ = [
