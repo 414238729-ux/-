@@ -13680,6 +13680,10 @@ class ProductionBasicCardBatch:
         runtime: _BatchRuntime,
         dying_id: str,
     ) -> GameState:
+        completing_lose_hp_death = (
+            runtime.pending_lose_hp_dying
+            and runtime.pending_dying_id == dying_id
+        )
         chain = runtime.pending_chain
         preview_winner = resolve_victory_after_death(
             PlayerTopology.from_state(
@@ -13724,13 +13728,29 @@ class ProductionBasicCardBatch:
         else:
             # MB-B-002：死亡/game-over 前必须统一 finalize 根杀（丈八
             # 材料 PROCESSING→DISCARD 恰好一次），不允许跳过清理。
-            next_state, runtime, damage_finish_events = (
+            # C7 A1：储君死亡触发的 loseHP 濒死本身没有伤害来源，但若
+            # 当前主公未获救并形成终局，仍须借用外层死亡保存的 damage
+            # root 上下文做 terminal finalize。这里只暂时关闭 loseHP
+            # source shield 以清理 parent root；随后恢复该标志，确保主公
+            # DEATH 继续保持无 damage_source / kill_credit。
+            finish_runtime = runtime
+            if completing_lose_hp_death:
+                finish_runtime = replace(
+                    runtime,
+                    pending_lose_hp_dying=False,
+                )
+            next_state, finish_runtime, damage_finish_events = (
                 self._finish_pending_damage_card(
                     next_state,
-                    runtime,
-                    self._pending_damage_death_reason(runtime),
+                    finish_runtime,
+                    self._pending_damage_death_reason(finish_runtime),
                     terminal_cleanup=(preview_winner is not None),
                 )
+            )
+            runtime = (
+                replace(finish_runtime, pending_lose_hp_dying=True)
+                if completing_lose_hp_death
+                else finish_runtime
             )
             finish_events = list(damage_finish_events)
         # F-005 / C4-COMPLETION-001 / C4-COMPLETION-002：
@@ -13834,7 +13854,8 @@ class ProductionBasicCardBatch:
                 self, next_state, runtime, dying_id
             )
             if (
-                runtime.phase is ProductionPhase.DYING_RESCUE
+                not completing_lose_hp_death
+                and runtime.phase is ProductionPhase.DYING_RESCUE
                 and runtime.pending_lose_hp_dying
             ):
                 self._commit_runtime(self._runtime, runtime)

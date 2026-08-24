@@ -7,6 +7,8 @@ import importlib.util
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from scripts.sgs_engine.events import EventType
 from scripts.sgs_engine.model import DISCARD_PILE, PROCESSING_ZONE, ZoneRef
 from scripts.sgs_engine.mode_identity import StandardIdentityRole
@@ -18,6 +20,7 @@ from scripts.sgs_engine.mode_identity_heir import (
 from scripts.sgs_engine.production_batch import (
     BatchActionIdController,
     ProductionBasicCardBatch,
+    ProductionBatchFinishedError,
     ProductionPhase,
     _replace_player,
 )
@@ -485,6 +488,293 @@ def _setup_seed1_lord_nanman() -> tuple[
         game._state = _replace_player(game.state, victim, hp=1)
     _step(game, "use_nanman")
     return game, lord, spy, loyalist, nanman_id
+
+
+def _drive_to_nested_lord_dying(
+    game: FormalHeirAndSpyChoiceIdentitySession,
+    lord: str,
+) -> None:
+    for _ in range(96):
+        runtime = game.runtime
+        if (
+            game.phase is ProductionPhase.DYING_RESCUE
+            and runtime.pending_dying_id == lord
+            and runtime.pending_lose_hp_dying
+        ):
+            return
+        operations = _operations(game)
+        if game.phase is ProductionPhase.MODE_DECISION:
+            _pass_mode(game)
+        elif game.phase is ProductionPhase.DYING_RESCUE:
+            _step(game, "pass_rescue")
+        elif "pass_trick_response" in operations:
+            _step(game, "pass_trick_response")
+        elif "pass_nanman_slash" in operations:
+            _step(game, "pass_nanman_slash")
+        else:
+            raise AssertionError(
+                "无法推进到储君死亡触发的主公嵌套濒死："
+                f"phase={game.phase} operations={operations}"
+            )
+    raise AssertionError("推进主公嵌套濒死超过硬上限")
+
+
+def _finish_pending_group(game: FormalHeirAndSpyChoiceIdentitySession) -> None:
+    for _ in range(96):
+        if game.runtime.pending_group_trick is None:
+            return
+        before = (
+            game.phase,
+            game.runtime.pending_group_trick.current_target_index,
+            len(game.events),
+        )
+        if game.phase is ProductionPhase.MODE_DECISION:
+            _pass_mode(game)
+        else:
+            _drive_group_until_mode(game)
+        group = game.runtime.pending_group_trick
+        after = (
+            game.phase,
+            None if group is None else group.current_target_index,
+            len(game.events),
+        )
+        assert after != before, "南蛮 parent/root 继续未取得进展"
+    raise AssertionError("南蛮 parent/root 完成超过硬上限")
+
+
+def test_c7_a1_nested_lord_death_finishes_once_and_cleans_nanman_root() -> None:
+    game, lord, _spy, heir, nanman_id = _setup_seed1_lord_nanman()
+    game._variant.heir_player_id = heir
+    game._variant.heir_selection_used = True
+    game._state = _replace_player(game.state, lord, hp=1)
+    death_cleanup_marker = _give_card(game, lord, "sgs_basic_sha")
+    start = len(game.events)
+
+    _drive_to_nested_lord_dying(game, lord)
+    group = game.runtime.pending_group_trick
+    assert group is not None
+    assert group.target_sequence[group.current_target_index] == heir
+    future_targets = group.target_sequence[group.current_target_index + 1 :]
+    future_state = {
+        player_id: (
+            game.state.players_by_id[player_id].hp,
+            game.state.players_by_id[player_id].alive,
+        )
+        for player_id in future_targets
+    }
+    assert game.runtime.pending_outer_death is not None
+    assert game.runtime.pending_outer_death.dying_id == heir
+    rescue_order = game.runtime.rescue_order
+    assert rescue_order
+    for _ in rescue_order:
+        _step(game, "pass_rescue")
+
+    assert game.state.players_by_id[lord].alive is False
+    assert game.is_finished is True
+    assert game.phase is ProductionPhase.FINISHED
+    assert game.winner_id == "rebels"
+    assert game.runtime.pending_dying_id is None
+    assert game.runtime.pending_lose_hp_dying is False
+    assert game.runtime.pending_outer_death is None
+    assert game.runtime.pending_group_trick is None
+    with pytest.raises(ProductionBatchFinishedError):
+        game.legal_actions()
+
+    events = game.events[start:]
+    heir_deaths = [
+        event
+        for event in events
+        if event.event_type is EventType.DEATH
+        and event.target_ids == (heir,)
+    ]
+    lord_lose_hp = [
+        event
+        for event in events
+        if event.event_type is EventType.LOSE_HP
+        and event.target_ids == (lord,)
+    ]
+    lord_dying = [
+        event
+        for event in events
+        if event.event_type is EventType.DYING
+        and event.target_ids == (lord,)
+    ]
+    lord_deaths = [
+        event
+        for event in events
+        if event.event_type is EventType.DEATH
+        and event.target_ids == (lord,)
+    ]
+    victories = [
+        event for event in events if event.event_type is EventType.VICTORY
+    ]
+    assert len(heir_deaths) == 1
+    assert len(lord_lose_hp) == 1
+    assert len(lord_dying) == 1
+    assert len(lord_deaths) == 1
+    assert len(victories) == 1
+    assert victories[0].target_ids == ("rebels",)
+    for event in (*lord_lose_hp, *lord_dying, *lord_deaths):
+        assert event.damage_source is None
+        assert event.kill_credit is None
+
+    root_moves = [
+        event
+        for event in events
+        if event.card_instance_id == nanman_id
+        and event.event_type is EventType.CARD_MOVED
+        and event.payload.get("destination", {}).get("kind") == "discard_pile"
+    ]
+    assert len(root_moves) == 1
+    assert nanman_id not in game.state.card_ids_in(PROCESSING_ZONE)
+    assert (
+        heir_deaths[0].sequence
+        < lord_lose_hp[0].sequence
+        < lord_dying[0].sequence
+        < root_moves[0].sequence
+        < lord_deaths[0].sequence
+        < victories[0].sequence
+    )
+    assert game.state.location_of(death_cleanup_marker) == DISCARD_PILE
+    assert not any(
+        event.card_instance_id == death_cleanup_marker
+        and event.payload.get("reason")
+        == "identity_lord_kill_loyalist_penalty"
+        for event in events
+    )
+    forbidden_future_types = {
+        EventType.CARD_EFFECT_CANCELLED,
+        EventType.CARD_INVALIDATED,
+        EventType.DAMAGE,
+        EventType.DYING,
+        EventType.DEATH,
+        EventType.GROUP_TARGET_RESOLVED,
+    }
+    assert not any(
+        event.event_type in forbidden_future_types
+        and any(player_id in event.target_ids for player_id in future_targets)
+        for event in events
+    )
+    assert all(
+        (
+            game.state.players_by_id[player_id].hp,
+            game.state.players_by_id[player_id].alive,
+        )
+        == future_state[player_id]
+        for player_id in future_targets
+    )
+
+
+def test_c7_a1_rescued_lord_resumes_outer_death_then_nanman_once() -> None:
+    game, lord, _spy, heir, nanman_id = _setup_seed1_lord_nanman()
+    game._variant.heir_player_id = heir
+    game._variant.heir_selection_used = True
+    game._state = _replace_player(game.state, lord, hp=1)
+    peach_id = _give_card(game, lord, "sgs_basic_tao")
+    penalty_marker = _give_card(game, lord, "sgs_basic_sha")
+    start = len(game.events)
+
+    _drive_to_nested_lord_dying(game, lord)
+    group_before = game.runtime.pending_group_trick
+    assert group_before is not None
+    assert group_before.target_sequence[group_before.current_target_index] == heir
+    target_sequence = group_before.target_sequence
+    _step(game, "rescue_with_peach")
+
+    assert game.state.players_by_id[lord].alive is True
+    assert game.state.players_by_id[lord].hp == 1
+    assert game.state.players_by_id[heir].alive is False
+    assert game.runtime.pending_lose_hp_dying is False
+    assert game.runtime.pending_outer_death is None
+    group_after = game.runtime.pending_group_trick
+    assert group_after is not None
+    assert group_after.current_target_index == group_before.current_target_index + 1
+    assert group_after.completed_target_ids == (
+        *group_before.completed_target_ids,
+        heir,
+    )
+    assert (
+        group_after.target_sequence[group_after.current_target_index]
+        != heir
+    )
+    assert nanman_id in game.state.card_ids_in(PROCESSING_ZONE)
+    assert _nanman_discard_count(game, nanman_id) == 0
+
+    events_after_rescue = game.events[start:]
+    heir_death = next(
+        event
+        for event in events_after_rescue
+        if event.event_type is EventType.DEATH
+        and event.target_ids == (heir,)
+    )
+    lord_lose_hp = next(
+        event
+        for event in events_after_rescue
+        if event.event_type is EventType.LOSE_HP
+        and event.target_ids == (lord,)
+    )
+    lord_dying = next(
+        event
+        for event in events_after_rescue
+        if event.event_type is EventType.DYING
+        and event.target_ids == (lord,)
+    )
+    peach_move = next(
+        event
+        for event in events_after_rescue
+        if event.card_instance_id == peach_id
+        and event.event_type is EventType.CARD_MOVED
+        and event.payload.get("destination", {}).get("kind") == "discard_pile"
+    )
+    penalty_move = next(
+        event
+        for event in events_after_rescue
+        if event.card_instance_id == penalty_marker
+        and event.event_type is EventType.CARD_MOVED
+        and event.payload.get("reason")
+        == "identity_lord_kill_loyalist_penalty"
+    )
+    heir_group_resolved = [
+        event
+        for event in events_after_rescue
+        if event.card_instance_id == nanman_id
+        and event.event_type is EventType.GROUP_TARGET_RESOLVED
+        and event.target_ids == (heir,)
+    ]
+    assert len(heir_group_resolved) == 1
+    assert (
+        heir_death.sequence
+        < lord_lose_hp.sequence
+        < lord_dying.sequence
+        < peach_move.sequence
+        < penalty_move.sequence
+        < heir_group_resolved[0].sequence
+    )
+    for event in (lord_lose_hp, lord_dying):
+        assert event.damage_source is None
+        assert event.kill_credit is None
+    assert not any(
+        event.event_type is EventType.DAMAGE and lord in event.target_ids
+        for event in events_after_rescue
+    )
+    assert not any(
+        event.event_type is EventType.DEATH and event.target_ids == (lord,)
+        for event in events_after_rescue
+    )
+
+    _finish_pending_group(game)
+    assert game.is_finished is False
+    assert game.runtime.pending_group_trick is None
+    assert nanman_id not in game.state.card_ids_in(PROCESSING_ZONE)
+    assert _nanman_discard_count(game, nanman_id) == 1
+    resolved_targets = [
+        event.target_ids[0]
+        for event in game.events[start:]
+        if event.card_instance_id == nanman_id
+        and event.event_type is EventType.GROUP_TARGET_RESOLVED
+    ]
+    assert resolved_targets == list(target_sequence)
+    assert len(resolved_targets) == len(set(resolved_targets))
 
 
 def test_c7_spy_path_window_opens_during_live_nanman_group_root() -> None:
