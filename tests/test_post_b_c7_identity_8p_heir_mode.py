@@ -104,7 +104,7 @@ def _topology(
     return topology, policy
 
 
-def _step(game: FormalHeirAndSpyChoiceIdentitySession, operation: str) -> None:
+def _step(game: FormalHeirAndSpyChoiceIdentitySession | Any, operation: str) -> None:
     for action in game.legal_actions():
         if action.payload.get("operation") == operation:
             game.step(BatchActionIdController(action.action_id))
@@ -125,11 +125,14 @@ def _enter_play(game: FormalHeirAndSpyChoiceIdentitySession) -> None:
     _pass_mode(game)
     for operation in ("proceed_prepare", "proceed_judgment", "proceed_draw"):
         _step(game, operation)
+        _pass_mode(game)
 
 
 def _end_turn(game: FormalHeirAndSpyChoiceIdentitySession) -> None:
+    _pass_mode(game)
     if game.phase is ProductionPhase.PLAY:
         _step(game, "end_play_phase")
+        _pass_mode(game)
     while game.phase is ProductionPhase.DISCARD:
         operations = [
             action.payload.get("operation") for action in game.legal_actions()
@@ -138,8 +141,26 @@ def _end_turn(game: FormalHeirAndSpyChoiceIdentitySession) -> None:
             _step(game, "discard_phase_submit")
         else:
             _step(game, "select_discard_card")
+        _pass_mode(game)
     if game.phase is ProductionPhase.END:
         _step(game, "end_turn")
+
+
+def _operations(game: FormalHeirAndSpyChoiceIdentitySession) -> set[object]:
+    return {action.payload.get("operation") for action in game.legal_actions()}
+
+
+def _give_card(
+    game: FormalHeirAndSpyChoiceIdentitySession, player_id: str, card_key: str
+) -> str:
+    for instance_id, card in game.state.cards_by_id.items():
+        if card.card_key != card_key:
+            continue
+        destination = ZoneRef.hand(player_id)
+        if game.state.location_of(instance_id) != destination:
+            game._state = game.state.move_card(instance_id, destination)
+        return instance_id
+    raise AssertionError(card_key)
 
 
 def test_c7_contract_and_exact_canonical_profile() -> None:
@@ -406,10 +427,18 @@ def test_c6_standard_mode_never_creates_heir_or_ambitionist_state() -> None:
     assert game.mode_id == FORMAL_NO_SKILL_IDENTITY_8P_MODE
     assert not hasattr(game, "_variant")
     assert game.phase is ProductionPhase.PREPARE
-    operations = [action.payload.get("operation") for action in game.legal_actions()]
-    assert "select_heir" not in operations
-    assert "choose_spy_path" not in operations
-    assert "pass_mode_decision" not in operations
+    c7_ops = {"select_heir", "choose_spy_path", "pass_mode_decision"}
+    for operation in ("proceed_prepare", "proceed_judgment", "proceed_draw"):
+        operations = {
+            action.payload.get("operation") for action in game.legal_actions()
+        }
+        assert operations.isdisjoint(c7_ops)
+        _step(game, operation)
+    operations = {action.payload.get("operation") for action in game.legal_actions()}
+    assert operations.isdisjoint(c7_ops)
+    assert game.phase is ProductionPhase.PLAY
+    assert not hasattr(game, "_variant")
+    assert getattr(game.runtime, "pending_mode_decision", None) is None
 
 
 def test_c7_outcome_matrix_uses_current_lord_and_role_current() -> None:
@@ -545,3 +574,215 @@ def test_c7_ambitionist_skills_inactive_when_two_alive() -> None:
     )
     assert policy.slash_limit(spy) == 2
     assert policy.bahu_prepare_draw(spy) is True
+
+
+def test_c7_lord_can_select_heir_during_another_players_non_prepare_phase() -> None:
+    game = _session(0)
+    lord = game.lord_player_id
+    other = game.numbered_player_order[1]
+    turn_before = game.runtime.turn_number
+    _enter_play(game)
+    _end_turn(game)
+    assert game.current_player_id == other
+    assert game.phase is ProductionPhase.MODE_DECISION
+    _pass_mode(game)
+    assert game.phase is ProductionPhase.PREPARE
+    assert game.current_player_id == other
+    _step(game, "proceed_prepare")
+    assert game.phase is ProductionPhase.MODE_DECISION
+    pending = game.runtime.pending_mode_decision
+    assert pending is not None
+    assert pending.actor_id == lord
+    assert pending.resume_phase is ProductionPhase.JUDGMENT
+    assert game.current_player_id == other
+    assert game.current_actor_id == lord
+    chosen = None
+    for action in game.legal_actions():
+        if (
+            action.payload.get("operation") == "select_heir"
+            and action.payload.get("target_id") == other
+        ):
+            chosen = action
+            break
+    assert chosen is not None
+    game.step(BatchActionIdController(chosen.action_id))
+    assert game._variant.heir_player_id == other
+    assert game._variant.heir_selection_used is True
+    assert game.phase is ProductionPhase.JUDGMENT
+    assert game.current_player_id == other
+    assert game.runtime.turn_number == turn_before + 1
+    assert game.runtime.pending_mode_decision is None
+    assert game._variant.is_extra_turn is False
+
+
+def test_c7_lord_can_select_heir_during_own_judgment_after_defer() -> None:
+    game = _session(0)
+    lord = game.lord_player_id
+    other = game.numbered_player_order[1]
+    assert game.current_player_id == lord
+    assert game.phase is ProductionPhase.MODE_DECISION
+    pending = game.runtime.pending_mode_decision
+    assert pending is not None
+    assert pending.actor_id == lord
+    assert pending.resume_phase is ProductionPhase.PREPARE
+    assert "select_heir" in _operations(game)
+    _pass_mode(game)
+    assert game.phase is ProductionPhase.PREPARE
+    assert game.current_player_id == lord
+    assert "select_heir" not in _operations(game)
+    assert "pass_mode_decision" not in _operations(game)
+    _step(game, "proceed_prepare")
+    assert game.phase is ProductionPhase.MODE_DECISION
+    pending = game.runtime.pending_mode_decision
+    assert pending is not None
+    assert pending.actor_id == lord
+    assert pending.resume_phase is ProductionPhase.JUDGMENT
+    assert game.current_player_id == lord
+    assert game.current_actor_id == lord
+    assert "select_heir" in _operations(game)
+    assert "proceed_judgment" not in _operations(game)
+    chosen = None
+    for action in game.legal_actions():
+        if (
+            action.payload.get("operation") == "select_heir"
+            and action.payload.get("target_id") == other
+        ):
+            chosen = action
+            break
+    assert chosen is not None
+    _step(game, "pass_mode_decision")
+    assert game._variant.heir_selection_used is False
+    assert game.phase is ProductionPhase.JUDGMENT
+    assert game.current_player_id == lord
+    assert game.current_actor_id == lord
+    assert "proceed_judgment" in _operations(game)
+    assert "select_heir" not in _operations(game)
+    assert "pass_mode_decision" not in _operations(game)
+
+
+def test_c7_lord_can_select_heir_during_own_draw_after_defer() -> None:
+    game = _session(0)
+    lord = game.lord_player_id
+    other = game.numbered_player_order[1]
+    assert game.current_player_id == lord
+    _pass_mode(game)
+    _step(game, "proceed_prepare")
+    _pass_mode(game)
+    assert game.phase is ProductionPhase.JUDGMENT
+    _step(game, "proceed_judgment")
+    assert game.phase is ProductionPhase.MODE_DECISION
+    pending = game.runtime.pending_mode_decision
+    assert pending is not None
+    assert pending.actor_id == lord
+    assert pending.resume_phase is ProductionPhase.DRAW
+    assert game.current_player_id == lord
+    assert game.current_actor_id == lord
+    assert "select_heir" in _operations(game)
+    assert "proceed_draw" not in _operations(game)
+    chosen = None
+    for action in game.legal_actions():
+        if (
+            action.payload.get("operation") == "select_heir"
+            and action.payload.get("target_id") == other
+        ):
+            chosen = action
+            break
+    assert chosen is not None
+    game.step(BatchActionIdController(chosen.action_id))
+    assert game._variant.heir_player_id == other
+    assert game._variant.heir_selection_used is True
+    assert game.phase is ProductionPhase.DRAW
+    assert game.current_player_id == lord
+    assert game.runtime.pending_mode_decision is None
+    assert "proceed_draw" in _operations(game)
+    assert "select_heir" not in _operations(game)
+    assert "pass_mode_decision" not in _operations(game)
+
+
+def test_c7_lord_checkpoint_reopens_after_other_player_ordinary_play_action() -> None:
+    game = _session(0)
+    lord = game.lord_player_id
+    other = game.numbered_player_order[1]
+    _enter_play(game)
+    _end_turn(game)
+    assert game.current_player_id == other
+    _enter_play(game)
+    assert game.phase is ProductionPhase.PLAY
+    assert game.current_player_id == other
+    assert game.current_actor_id == other
+    play_ops = _operations(game)
+    assert "pass_mode_decision" not in play_ops
+    assert "select_heir" not in play_ops
+    assert "end_play_phase" in play_ops
+    weapon_id = _give_card(game, other, "sgs_weapon_qinglongyanyuedao")
+    ordinary = None
+    for action in game.legal_actions():
+        if (
+            action.payload.get("operation") == "use_weapon"
+            and action.card_instance_id == weapon_id
+        ):
+            ordinary = action
+            break
+    assert ordinary is not None
+    assert ordinary.payload.get("operation") == "use_weapon"
+    assert ordinary.payload.get("operation") != "pass_mode_decision"
+    game.step(BatchActionIdController(ordinary.action_id))
+    assert any(
+        event.event_type is EventType.EQUIPMENT_EQUIPPED
+        and event.card_instance_id == weapon_id
+        for event in game.events
+    )
+    assert game.phase is ProductionPhase.MODE_DECISION
+    pending = game.runtime.pending_mode_decision
+    assert pending is not None
+    assert pending.actor_id == lord
+    assert pending.resume_phase is ProductionPhase.PLAY
+    assert game.current_player_id == other
+    assert game.current_actor_id == lord
+    assert "select_heir" in _operations(game)
+    assert "use_weapon" not in _operations(game)
+    assert "end_play_phase" not in _operations(game)
+    _pass_mode(game)
+    assert game.phase is ProductionPhase.PLAY
+    assert game.current_player_id == other
+    assert game.current_actor_id == other
+    resumed_ops = _operations(game)
+    assert "end_play_phase" in resumed_ops
+    assert "pass_mode_decision" not in resumed_ops
+    assert "select_heir" not in resumed_ops
+
+
+def test_c7_mode_decision_pass_does_not_reopen_without_game_progress() -> None:
+    game = _session(0)
+    lord = game.lord_player_id
+    assert game.current_player_id == lord
+    assert game.phase is ProductionPhase.MODE_DECISION
+    pending = game.runtime.pending_mode_decision
+    assert pending is not None
+    assert isinstance(pending.window_id, str) and pending.window_id
+    _step(game, "pass_mode_decision")
+    assert game.phase is ProductionPhase.PREPARE
+    assert game.runtime.pending_mode_decision is None
+    first_ops = _operations(game)
+    assert "proceed_prepare" in first_ops
+    assert "pass_mode_decision" not in first_ops
+    assert "select_heir" not in first_ops
+    assert game.phase is ProductionPhase.PREPARE
+    assert _operations(game) == first_ops
+    assert game.runtime.pending_mode_decision is None
+
+    other = game.numbered_player_order[1]
+    _enter_play(game)
+    _end_turn(game)
+    assert game.current_player_id == other
+    assert game.phase is ProductionPhase.MODE_DECISION
+    _enter_play(game)
+    assert game.phase is ProductionPhase.PLAY
+    assert game.current_player_id == other
+    play_ops = _operations(game)
+    assert "pass_mode_decision" not in play_ops
+    assert "select_heir" not in play_ops
+    assert "end_play_phase" in play_ops
+    assert game.phase is ProductionPhase.PLAY
+    assert _operations(game) == play_ops
+    assert game.runtime.pending_mode_decision is None

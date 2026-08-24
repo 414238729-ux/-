@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.sgs_engine.events import EventType
-from scripts.sgs_engine.model import DISCARD_PILE, ZoneRef
+from scripts.sgs_engine.model import DISCARD_PILE, PROCESSING_ZONE, ZoneRef
 from scripts.sgs_engine.mode_identity import StandardIdentityRole
 from scripts.sgs_engine.mode_identity_heir import (
     FormalHeirAndSpyChoiceIdentityConfiguration,
@@ -67,11 +67,87 @@ def _enter_play(game: ProductionBasicCardBatch) -> None:
     _pass_mode(game)
     for operation in ("proceed_prepare", "proceed_judgment", "proceed_draw"):
         _step(game, operation)
+        _pass_mode(game)
 
 
 def _pass_rescues(game: ProductionBasicCardBatch) -> None:
     while game.phase is ProductionPhase.DYING_RESCUE:
         _step(game, "pass_rescue")
+
+
+_MODE_DECISION_OPERATIONS = {
+    "pass_mode_decision",
+    "select_heir",
+    "choose_spy_path",
+}
+
+
+def _install_c7_mode_passthrough(
+    module: Any,
+    original_enter: Any,
+    original_end: Any,
+    original_advance: Any,
+) -> None:
+    original_step = module._step
+    original_op = module._op
+    original_require = module._require_op
+
+    def pass_mode(game: ProductionBasicCardBatch) -> None:
+        while game.phase is ProductionPhase.MODE_DECISION:
+            original_step(game, original_require(game, "pass_mode_decision"))
+
+    def op(game: ProductionBasicCardBatch, operation: str, **filters: Any) -> Any:
+        if operation not in _MODE_DECISION_OPERATIONS:
+            pass_mode(game)
+        return original_op(game, operation, **filters)
+
+    def require_op(
+        game: ProductionBasicCardBatch, operation: str, **filters: Any
+    ) -> Any:
+        if operation not in _MODE_DECISION_OPERATIONS:
+            pass_mode(game)
+        return original_require(game, operation, **filters)
+
+    def step(game: ProductionBasicCardBatch, action: Any) -> None:
+        operation = (
+            action.payload.get("operation") if hasattr(action, "payload") else None
+        )
+        if operation not in _MODE_DECISION_OPERATIONS:
+            pass_mode(game)
+        original_step(game, action)
+
+    def enter(game: ProductionBasicCardBatch) -> None:
+        pass_mode(game)
+        for operation in ("proceed_prepare", "proceed_judgment", "proceed_draw"):
+            original_step(game, original_require(game, operation))
+            pass_mode(game)
+
+    def end(game: ProductionBasicCardBatch) -> None:
+        pass_mode(game)
+        original_end(game)
+
+    def advance(game: ProductionBasicCardBatch, player_id: str) -> None:
+        pass_mode(game)
+        original_advance(game, player_id)
+        pass_mode(game)
+
+    def pass_rescues(game: ProductionBasicCardBatch) -> None:
+        while game.phase is ProductionPhase.DYING_RESCUE:
+            original_step(game, original_require(game, "pass_rescue"))
+        pass_mode(game)
+
+    module._pass_mode = pass_mode
+    module._op = op
+    module._require_op = require_op
+    module._step = step
+    module._enter_play = enter
+    module._end_turn = end
+    module._advance_to = advance
+    if hasattr(module, "_pass_rescues"):
+        module._pass_rescues = pass_rescues
+    if hasattr(module, "_pass_all_rescues"):
+        module._pass_all_rescues = pass_rescues
+    del original_enter
 
 
 def _c5_mode_helpers() -> Any:
@@ -87,23 +163,8 @@ def _c5_mode_helpers() -> Any:
     original_end = module._end_turn
     original_advance = module._advance_to
 
-    def enter(game: ProductionBasicCardBatch) -> None:
-        _pass_mode(game)
-        original_enter(game)
-
-    def end(game: ProductionBasicCardBatch) -> None:
-        _pass_mode(game)
-        original_end(game)
-
-    def advance(game: ProductionBasicCardBatch, player_id: str) -> None:
-        _pass_mode(game)
-        original_advance(game, player_id)
-        _pass_mode(game)
-
+    _install_c7_mode_passthrough(module, original_enter, original_end, original_advance)
     module._session = _session
-    module._enter_play = enter
-    module._end_turn = end
-    module._advance_to = advance
     return module
 
 
@@ -113,7 +174,9 @@ _HELPERS = _c5_mode_helpers()
 def _kill(
     game: FormalHeirAndSpyChoiceIdentitySession, killer: str, victim: str
 ) -> None:
+    _pass_mode(game)
     _HELPERS._kill(game, killer, victim)
+    _pass_mode(game)
 
 
 def _players_of_role(
@@ -249,26 +312,9 @@ def test_c7_ambitionist_heir_cannot_succeed_but_still_loses_lord_hp() -> None:
 
 
 def _patch_c5_helpers(module: Any) -> None:
-    original_enter = module._enter_play
-    original_end = module._end_turn
-    original_advance = module._advance_to
-
-    def enter(game: ProductionBasicCardBatch) -> None:
-        _pass_mode(game)
-        original_enter(game)
-
-    def end(game: ProductionBasicCardBatch) -> None:
-        _pass_mode(game)
-        original_end(game)
-
-    def advance(game: ProductionBasicCardBatch, player_id: str) -> None:
-        _pass_mode(game)
-        original_advance(game, player_id)
-        _pass_mode(game)
-
-    module._enter_play = enter
-    module._end_turn = end
-    module._advance_to = advance
+    _install_c7_mode_passthrough(
+        module, module._enter_play, module._end_turn, module._advance_to
+    )
     module._session = _session
 
 
@@ -307,3 +353,271 @@ def test_c7_parent_root_group_and_chain_high_risk() -> None:
     assert game.state.players_by_id[victim].alive is False
     assert game.is_finished is False
     assert game.runtime.pending_group_trick is not None
+
+
+def _operations(game: ProductionBasicCardBatch) -> list[object]:
+    return [action.payload.get("operation") for action in game.legal_actions()]
+
+
+def _alive_count(game: ProductionBasicCardBatch) -> int:
+    return sum(1 for player in game.state.players if player.alive)
+
+
+def _strip_hand(game: ProductionBasicCardBatch, player_id: str) -> None:
+    for instance_id in tuple(game.state.card_ids_in(ZoneRef.hand(player_id))):
+        game._state = game.state.move_card(instance_id, DISCARD_PILE)
+
+
+def _give_card(game: ProductionBasicCardBatch, player_id: str, card_key: str) -> str:
+    for instance_id, card in game.state.cards_by_id.items():
+        if card.card_key == card_key:
+            destination = ZoneRef.hand(player_id)
+            if game.state.location_of(instance_id) != destination:
+                game._state = game.state.move_card(instance_id, destination)
+            return instance_id
+    raise AssertionError(card_key)
+
+
+def _end_turn(game: ProductionBasicCardBatch) -> None:
+    _pass_mode(game)
+    if game.phase is ProductionPhase.PLAY:
+        _step(game, "end_play_phase")
+        _pass_mode(game)
+    while game.phase is ProductionPhase.DISCARD:
+        operations = _operations(game)
+        if "discard_phase_submit" in operations:
+            _step(game, "discard_phase_submit")
+        else:
+            _step(game, "select_discard_card")
+        _pass_mode(game)
+    if game.phase is ProductionPhase.END:
+        _step(game, "end_turn")
+
+
+def _drive_group_until_mode(game: ProductionBasicCardBatch) -> None:
+    guard = 0
+    while guard < 48:
+        if game.phase is ProductionPhase.MODE_DECISION:
+            return
+        if game.runtime.pending_group_trick is None:
+            return
+        operations = _operations(game)
+        if "pass_trick_response" in operations:
+            _step(game, "pass_trick_response")
+        elif "pass_nanman_slash" in operations:
+            _step(game, "pass_nanman_slash")
+        elif "pass_rescue" in operations:
+            _step(game, "pass_rescue")
+        else:
+            return
+        guard += 1
+    raise AssertionError("群体锦囊推进超时")
+
+
+def _await_spy_choice_window(
+    game: FormalHeirAndSpyChoiceIdentitySession, spy: str
+) -> None:
+    guard = 0
+    while game.phase is ProductionPhase.MODE_DECISION:
+        if (
+            "choose_spy_path" in _operations(game)
+            and game.current_actor_id == spy
+        ):
+            return
+        if "pass_mode_decision" in _operations(game):
+            _step(game, "pass_mode_decision")
+        else:
+            break
+        guard += 1
+        assert guard < 8
+    raise AssertionError(
+        "内奸未取得 choose_spy_path 窗口: "
+        f"phase={game.phase} actor={getattr(game, 'current_actor_id', None)} "
+        f"ops={_operations(game)}"
+    )
+
+
+def _continue_nanman_until_alive(
+    game: FormalHeirAndSpyChoiceIdentitySession, until_alive: int
+) -> None:
+    guard = 0
+    while _alive_count(game) > until_alive and guard < 48:
+        if game.phase is ProductionPhase.MODE_DECISION:
+            _pass_mode(game)
+            continue
+        if game.runtime.pending_group_trick is None:
+            break
+        _drive_group_until_mode(game)
+        guard += 1
+
+
+def _nanman_discard_count(game: ProductionBasicCardBatch, nanman_id: str) -> int:
+    return sum(
+        1
+        for event in game.events
+        if event.card_instance_id == nanman_id
+        and event.event_type is EventType.CARD_MOVED
+        and event.payload.get("destination", {}).get("kind") == "discard_pile"
+    )
+
+
+def _setup_seed1_lord_nanman() -> tuple[
+    FormalHeirAndSpyChoiceIdentitySession, str, str, str, str
+]:
+    game = _session(1)
+    lord = game.lord_player_id
+    spy = next(
+        player_id
+        for player_id, role in game.role_current.items()
+        if role == "spy"
+    )
+    loyalist = "p8"
+    assert lord == "p6"
+    assert spy == "p5"
+    assert game.role_current[loyalist] == "loyalist"
+    _enter_play(game)
+    assert game.current_player_id == lord
+    assert game.phase is ProductionPhase.PLAY
+    _strip_hand(game, lord)
+    nanman_id = _give_card(game, lord, "sgs_trick_nanmanruqin")
+    for victim in ("p8", "p1", "p2", "p4"):
+        _strip_hand(game, victim)
+        game._state = _replace_player(game.state, victim, hp=1)
+    _step(game, "use_nanman")
+    return game, lord, spy, loyalist, nanman_id
+
+
+def test_c7_spy_path_window_opens_during_live_nanman_group_root() -> None:
+    game, lord, spy, loyalist, nanman_id = _setup_seed1_lord_nanman()
+    policy = game.mode_policy
+    _drive_group_until_mode(game)
+    assert game.state.players_by_id[loyalist].alive is False
+    assert _alive_count(game) == 7
+    assert policy.spy_path_chooser_id(game.state) == spy
+    assert game.phase is ProductionPhase.MODE_DECISION
+    group_before = game.runtime.pending_group_trick
+    assert group_before is not None
+    assert group_before.trick_key == "sgs_trick_nanmanruqin"
+    index_before = group_before.current_target_index
+    completed_before = group_before.completed_target_ids
+    assert loyalist in completed_before
+    assert group_before.target_sequence[index_before] != loyalist
+    assert nanman_id in game.state.card_ids_in(PROCESSING_ZONE)
+    _await_spy_choice_window(game, spy)
+    assert "choose_spy_path" in _operations(game)
+    assert game.current_actor_id == spy
+    assert game.current_player_id == lord
+    pending = game.runtime.pending_mode_decision
+    assert pending is not None
+    assert pending.resume_phase is not ProductionPhase.PREPARE
+    _step(game, "choose_spy_path", path="ambitionist")
+    assert game._variant.spy_path_locked is True
+    assert game._variant.spy_path_pending is True
+    assert game.role_current[spy] == "spy"
+    group_after = game.runtime.pending_group_trick
+    assert group_after is not None
+    assert group_after.trick_instance_id == group_before.trick_instance_id
+    assert group_after.current_target_index == index_before
+    assert group_after.completed_target_ids == completed_before
+    assert game.phase is pending.resume_phase
+    _continue_nanman_until_alive(game, 4)
+    assert _alive_count(game) == 4
+    assert game._variant.spy_path_locked is True
+    assert game._variant.spy_path_pending is True
+    assert game.role_current[spy] == "spy"
+    assert policy.spy_path_chooser_id(game.state) is None
+    while game.runtime.pending_group_trick is not None:
+        if game.phase is ProductionPhase.MODE_DECISION:
+            _pass_mode(game)
+            continue
+        before_index = game.runtime.pending_group_trick.current_target_index
+        _drive_group_until_mode(game)
+        if (
+            game.runtime.pending_group_trick is not None
+            and game.runtime.pending_group_trick.current_target_index
+            == before_index
+            and game.phase is not ProductionPhase.MODE_DECISION
+        ):
+            break
+    assert game.runtime.pending_group_trick is None
+    assert _nanman_discard_count(game, nanman_id) == 1
+    assert nanman_id not in game.state.card_ids_in(PROCESSING_ZONE)
+    _end_turn(game)
+    assert game.role_current[spy] == "ambitionist"
+    assert game._variant.spy_path_pending is False
+    assert game._variant.spy_path_locked is True
+
+
+def test_c7_spy_path_defer_keeps_later_checkpoint_until_alive_at_most_four() -> None:
+    game, lord, spy, loyalist, nanman_id = _setup_seed1_lord_nanman()
+    del lord, nanman_id
+    policy = game.mode_policy
+    _drive_group_until_mode(game)
+    assert _alive_count(game) == 7
+    assert game.state.players_by_id[loyalist].alive is False
+    assert policy.spy_path_chooser_id(game.state) == spy
+    _pass_mode(game)
+    assert game._variant.spy_path_locked is False
+    assert game._variant.spy_path_pending is False
+    assert game.role_current[spy] == "spy"
+    assert game.runtime.pending_group_trick is not None
+    _drive_group_until_mode(game)
+    assert _alive_count(game) == 6
+    assert policy.spy_path_chooser_id(game.state) == spy
+    assert game.phase is ProductionPhase.MODE_DECISION
+    _await_spy_choice_window(game, spy)
+    assert "choose_spy_path" in _operations(game)
+    _pass_mode(game)
+    _continue_nanman_until_alive(game, 4)
+    assert _alive_count(game) <= 4
+    assert game._variant.spy_path_locked is False
+    assert game._variant.spy_path_pending is False
+    assert policy.spy_path_chooser_id(game.state) is None
+    if game.phase is ProductionPhase.MODE_DECISION:
+        assert "choose_spy_path" not in _operations(game)
+    while game.runtime.pending_group_trick is not None:
+        if game.phase is ProductionPhase.MODE_DECISION:
+            assert "choose_spy_path" not in _operations(game)
+            _pass_mode(game)
+            continue
+        _drive_group_until_mode(game)
+
+
+def test_c7_mode_decision_preserves_nanman_parent_root_queue() -> None:
+    game, lord, spy, loyalist, nanman_id = _setup_seed1_lord_nanman()
+    del lord
+    _drive_group_until_mode(game)
+    group = game.runtime.pending_group_trick
+    assert group is not None
+    processed = set(group.completed_target_ids)
+    assert loyalist in processed
+    remaining = group.target_sequence[group.current_target_index :]
+    assert loyalist not in remaining
+    index_at_window = group.current_target_index
+    _await_spy_choice_window(game, spy)
+    _step(game, "choose_spy_path", path="loyalist")
+    group = game.runtime.pending_group_trick
+    assert group is not None
+    assert group.current_target_index == index_at_window
+    assert set(group.completed_target_ids) == processed
+    seen = list(processed)
+    guard = 0
+    while game.runtime.pending_group_trick is not None and guard < 48:
+        group = game.runtime.pending_group_trick
+        current = group.target_sequence[group.current_target_index]
+        assert current not in seen
+        if game.phase is ProductionPhase.MODE_DECISION:
+            _pass_mode(game)
+            guard += 1
+            continue
+        _drive_group_until_mode(game)
+        if game.runtime.pending_group_trick is None:
+            break
+        new_completed = game.runtime.pending_group_trick.completed_target_ids
+        for player_id in new_completed:
+            if player_id not in seen:
+                seen.append(player_id)
+        guard += 1
+    assert game.runtime.pending_group_trick is None
+    assert len(seen) == len(set(seen))
+    assert _nanman_discard_count(game, nanman_id) == 1

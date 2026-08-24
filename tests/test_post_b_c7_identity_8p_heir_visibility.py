@@ -86,9 +86,16 @@ def test_c7_heir_target_absent_from_public_events_and_other_legal_actions() -> N
                 return
         raise AssertionError(operation)
 
+    def _pass_mode() -> None:
+        while game.phase is ProductionPhase.MODE_DECISION:
+            _step_op("pass_mode_decision")
+
+    _pass_mode()
     for operation in ("proceed_prepare", "proceed_judgment", "proceed_draw"):
         _step_op(operation)
+        _pass_mode()
     _step_op("end_play_phase")
+    _pass_mode()
     while game.phase is ProductionPhase.DISCARD:
         operations = [
             action.payload.get("operation") for action in game.legal_actions()
@@ -98,6 +105,7 @@ def test_c7_heir_target_absent_from_public_events_and_other_legal_actions() -> N
             if "discard_phase_submit" in operations
             else "select_discard_card"
         )
+        _pass_mode()
     if game.phase is ProductionPhase.END:
         _step_op("end_turn")
     assert game.phase is ProductionPhase.MODE_DECISION

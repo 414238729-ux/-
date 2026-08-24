@@ -896,10 +896,11 @@ class HeirAndSpyChoiceModePolicy:
             return state, runtime
         if getattr(runtime, "winner_id", None) is not None:
             return state, runtime
-        queue = self._mode_decision_queue(state, current_player_id)
-        if queue:
-            open_window = getattr(session, "_open_c7_mode_decision")
-            runtime = open_window(runtime, queue)
+        checkpoint = getattr(
+            session, "_c7_maybe_open_mode_decision_checkpoint", None
+        )
+        if callable(checkpoint):
+            runtime = checkpoint(state, runtime)
         return state, runtime
 
     def _mode_decision_queue(
@@ -1145,6 +1146,11 @@ class FormalHeirAndSpyChoiceIdentitySession(ProductionBasicCardBatch):
                 ),
             )
         )
+        first_runtime = self._c7_maybe_open_mode_decision_checkpoint(
+            self._state, self._runtime
+        )
+        if first_runtime is not self._runtime:
+            self._commit_runtime(self._runtime, first_runtime)
         self._formal_runtime_integrity_valid = True
         self._formal_runtime_integrity_anchor = (
             self._current_execution_integrity_anchor()
@@ -1454,7 +1460,19 @@ def inspect_formal_heir_and_spy_choice_identity_readiness() -> (
             and probe.outcome_policy is not None
             and probe.outcome_policy.identity()
             == f"outcome:{FORMAL_NO_SKILL_IDENTITY_8P_HEIR_MODE}"
-            and probe.runtime.phase is ProductionPhase.PREPARE
+            and probe.runtime.current_player_id == lord_id
+            and (
+                probe.runtime.phase is ProductionPhase.PREPARE
+                or (
+                    probe.runtime.phase is ProductionPhase.MODE_DECISION
+                    and probe.runtime.pending_mode_decision is not None
+                    and (
+                        probe.runtime.pending_mode_decision.resume_phase
+                        is ProductionPhase.PREPARE
+                    )
+                    and probe.runtime.pending_mode_decision.actor_id == lord_id
+                )
+            )
             and len(probe.rng_calls) == 2
             and probe.rng_calls[0].method == "shuffle"
             and probe.rng_calls[1].method == "shuffle"

@@ -25,7 +25,7 @@ import hmac
 import json
 from pathlib import Path
 import secrets
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 from typing import Any, Iterable, Mapping, Sequence
 
 from ..deck_data import DeckRecord, load_deck_csv
@@ -681,6 +681,8 @@ FINISHED_TRANSIENT_RUNTIME_FIELDS: frozenset[str] = frozenset({
     "pending_peasant_reward",
     # POST-B C7 变体窗口。
     "pending_mode_decision",
+    # PASS 只推迟当前 production decision boundary；无新进展时不得重开。
+    "c7_deferred_mode_decision_boundary",
     "pending_succession",
     "pending_identity_reward",
     "pending_outer_death",
@@ -847,6 +849,9 @@ class _BatchRuntime:
     pending_peasant_reward: _PendingPeasantDeathReward | None = None
     # POST-B C7 变体窗口。
     pending_mode_decision: _PendingModeDecision | None = None
+    # 最近一次 MODE_DECISION PASS 所推迟的 production decision boundary。
+    # 相同 token 上不得立即重开；发生新的合法进展后 token 变化才可再选。
+    c7_deferred_mode_decision_boundary: str | None = None
     pending_succession: _PendingSuccession | None = None
     pending_identity_reward: _PendingIdentityReward | None = None
     pending_outer_death: _PendingOuterDeath | None = None
@@ -1013,6 +1018,9 @@ class _BatchRuntime:
             "pending_weapon_choice": self._pending_weapon_choice_value(),
             "pending_peasant_reward": self._pending_peasant_reward_value(),
             "pending_mode_decision": self._pending_mode_decision_value(),
+            "c7_deferred_mode_decision_boundary": (
+                self.c7_deferred_mode_decision_boundary
+            ),
             "pending_succession": self._pending_succession_value(),
             "pending_identity_reward": self._pending_identity_reward_value(),
             "pending_outer_death": self._pending_outer_death_value(),
@@ -2680,7 +2688,9 @@ class _BatchRuleAdapter(RuleAdapter):
     def apply_action(
         self, state: GameState, context: ActionContext, action: LegalAction
     ) -> GameState:
-        return self._session._apply_for_adapter(state, context, action)
+        next_state = self._session._apply_for_adapter(state, context, action)
+        self._session._c7_after_applied_action(next_state)
+        return next_state
 
 
 @dataclass(frozen=True, slots=True)
@@ -3334,6 +3344,7 @@ class ProductionBasicCardBatch:
                         ),
                     }
                 ),
+                "pending_mode_decision": runtime._pending_mode_decision_value(),
                 "pending_wugu": (
                     None
                     if runtime.pending_wugu is None
@@ -13990,6 +14001,9 @@ class ProductionBasicCardBatch:
                 next_runtime,
                 judgment_entry_indices=judgment_entry_indices_after_death,
             )
+            next_runtime = self._c7_maybe_open_mode_decision_checkpoint(
+                next_state, next_runtime, allow_parent_interrupt=True
+            )
             self._commit_runtime(runtime, next_runtime)
             return next_state
         if (
@@ -14016,6 +14030,9 @@ class ProductionBasicCardBatch:
                         judgment_entry_indices_after_death
                     ),
                 ),
+            )
+            next_runtime = self._c7_maybe_open_mode_decision_checkpoint(
+                next_state, next_runtime, allow_parent_interrupt=True
             )
             self._commit_runtime(runtime, next_runtime)
             return next_state
@@ -14080,6 +14097,9 @@ class ProductionBasicCardBatch:
                         state, base_runtime
                     )
                 )
+            next_runtime = self._c7_maybe_open_mode_decision_checkpoint(
+                next_state, next_runtime, allow_parent_interrupt=True
+            )
             self._commit_runtime(runtime, next_runtime)
             return next_state
         raise UnsupportedRuleError(
@@ -14335,6 +14355,9 @@ class ProductionBasicCardBatch:
             feiyang_runtime
             if feiyang_runtime is not None
             else replace(runtime, phase=ProductionPhase.JUDGMENT)
+        )
+        next_runtime = self._c7_maybe_open_mode_decision_checkpoint(
+            state, next_runtime
         )
         self._commit_runtime(runtime, next_runtime)
         return state
@@ -14593,6 +14616,9 @@ class ProductionBasicCardBatch:
             next_state, next_runtime = self._open_next_judgment(state, runtime)
         else:
             next_state, next_runtime = self._advance_past_judgment(state, runtime)
+        next_runtime = self._c7_maybe_open_mode_decision_checkpoint(
+            next_state, next_runtime
+        )
         self._commit_runtime(runtime, next_runtime)
         return next_state
 
@@ -14643,6 +14669,9 @@ class ProductionBasicCardBatch:
             next_state, next_runtime = self._enter_discard_or_end(
                 next_state, next_runtime
             )
+        next_runtime = self._c7_maybe_open_mode_decision_checkpoint(
+            next_state, next_runtime
+        )
         self._commit_runtime(runtime, next_runtime)
         return next_state
 
@@ -16373,20 +16402,215 @@ class ProductionBasicCardBatch:
         if callable(sync):
             sync()
 
+    def _c7_mode_decision_forbidden_resume_phases(self) -> frozenset[ProductionPhase]:
+        """这些阶段本身是更高优先级的嵌套窗口，不能被模式决策抢占。"""
+
+        return frozenset(
+            {
+                ProductionPhase.MODE_DECISION,
+                ProductionPhase.DYING_RESCUE,
+                ProductionPhase.SUCCESSION_CARD_CHOICE,
+                ProductionPhase.PEASANT_REWARD_CHOICE,
+                ProductionPhase.IDENTITY_REWARD_CHOICE,
+                ProductionPhase.FEIYANG_ACTIVATE,
+                ProductionPhase.FINISHED,
+            }
+        )
+
+    def _c7_mode_decision_safe_resume_phases(self) -> frozenset[ProductionPhase]:
+        """普通回合阶段：可在 production decision boundary 插入异步模式决策。"""
+
+        return frozenset(
+            {
+                ProductionPhase.PREPARE,
+                ProductionPhase.JUDGMENT,
+                ProductionPhase.DRAW,
+                ProductionPhase.PLAY,
+                ProductionPhase.DISCARD,
+                ProductionPhase.END,
+            }
+        )
+
+    def _c7_decision_boundary_token(
+        self, state: GameState, runtime: _BatchRuntime
+    ) -> str:
+        """当前可恢复 production decision boundary 的稳定指纹。
+
+        PASS 只推迟这一枚指纹。没有新的阶段/行动/parent 进展时指纹不变，
+        不得原地重开同一窗口。
+        """
+
+        group = runtime.pending_group_trick
+        slash = runtime.pending_slash
+        trick = runtime.pending_trick
+        wugu = runtime.pending_wugu
+        borrowed = runtime.pending_borrowed_sword
+        judgment = runtime.pending_judgment
+        chain = runtime.pending_chain
+        payload = {
+            "turn_number": runtime.turn_number,
+            "current_player_id": runtime.current_player_id,
+            "phase": runtime.phase.value,
+            "revision": state.revision,
+            "discard_phase_selected_ids": list(runtime.discard_phase_selected_ids),
+            "rescue_index": runtime.rescue_index,
+            "pending_dying_id": runtime.pending_dying_id,
+            "trick_response_index": runtime.trick_response_index,
+            "group": None
+            if group is None
+            else {
+                "trick_instance_id": group.trick_instance_id,
+                "current_target_index": group.current_target_index,
+                "completed_target_ids": list(group.completed_target_ids),
+                "responder_id": group.responder_id,
+            },
+            "slash": None
+            if slash is None
+            else {
+                "slash_instance_id": slash.slash_instance_id,
+                "current_target_index": slash.current_target_index,
+                "target_id": slash.target_id,
+            },
+            "trick": None
+            if trick is None
+            else {
+                "trick_instance_id": trick.trick_instance_id,
+                "target_id": trick.target_id,
+            },
+            "wugu": None
+            if wugu is None
+            else {
+                "trick_instance_id": wugu.trick_instance_id,
+                "current_target_index": wugu.current_target_index,
+            },
+            "borrowed": None
+            if borrowed is None
+            else {
+                "trick_instance_id": borrowed.trick_instance_id,
+                "stage": borrowed.stage,
+            },
+            "judgment": None
+            if judgment is None
+            else {
+                "trick_instance_id": judgment.trick_instance_id,
+                "stage": judgment.stage,
+            },
+            "chain": None
+            if chain is None
+            else {
+                "current_index": chain.current_index,
+                "current_target_id": chain.current_target_id,
+            },
+        }
+        return sha256_value(payload)
+
+    def _c7_player_has_equivalent_extra_mode_actions(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        player_id: str,
+    ) -> bool:
+        """仅当当前 PLAY 已通过 extra_play_actions 暴露相同 C7 动作时跳过。
+
+        不得把 player_id == current_player_id 推广到 JUDGMENT/DRAW 等阶段。
+        """
+
+        if runtime.phase is not ProductionPhase.PLAY:
+            return False
+        if player_id != runtime.current_player_id:
+            return False
+        policy = self._mode_policy
+        if policy is None or not hasattr(policy, "extra_play_actions"):
+            return False
+        extra = policy.extra_play_actions(
+            self, state, SimpleNamespace(actor_id=player_id)
+        )
+        return any(
+            action.payload.get("operation") in {"select_heir", "choose_spy_path"}
+            for action in extra
+        )
+
+    def _c7_maybe_open_mode_decision_checkpoint(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        *,
+        allow_parent_interrupt: bool = False,
+    ) -> _BatchRuntime:
+        """在真实 production decision boundary 插入可恢复的 C7 异步窗口。
+
+        保存被打断时的真实 ``resume_phase``，完成/放弃后原样恢复。
+        不改变 current_player_id、turn_number、座次，也不清 parent/root。
+        ``allow_parent_interrupt`` 仅用于死亡确认后、下一目标尚未开始的
+        可中断 parent/root 边界（如南蛮目标完成后的 spy/heir 选择）。
+        """
+
+        policy = self._mode_policy
+        if policy is None or not hasattr(policy, "_mode_decision_queue"):
+            return runtime
+        if runtime.pending_mode_decision is not None:
+            return runtime
+        if runtime.phase in self._c7_mode_decision_forbidden_resume_phases():
+            return runtime
+        if (
+            not allow_parent_interrupt
+            and runtime.phase not in self._c7_mode_decision_safe_resume_phases()
+        ):
+            return runtime
+        if runtime.winner_id is not None or runtime.game_over_reason is not None:
+            return runtime
+        token = self._c7_decision_boundary_token(state, runtime)
+        if token == runtime.c7_deferred_mode_decision_boundary:
+            return runtime
+        queue = policy._mode_decision_queue(state, runtime.current_player_id)
+        queue = tuple(
+            player_id
+            for player_id in queue
+            if not self._c7_player_has_equivalent_extra_mode_actions(
+                state, runtime, player_id
+            )
+        )
+        if not queue:
+            return runtime
+        return self._c7_open_mode_decision_window(
+            runtime, queue, boundary_token=token
+        )
+
+    def _c7_after_applied_action(self, state: GameState) -> None:
+        """每个已提交 production 动作之后的统一 decision-boundary 钩子。"""
+
+        next_runtime = self._c7_maybe_open_mode_decision_checkpoint(
+            state, self._runtime
+        )
+        if next_runtime is not self._runtime:
+            self._commit_runtime(self._runtime, next_runtime)
+
     def _c7_open_mode_decision_window(
-        self, runtime: _BatchRuntime, queue: tuple[str, ...]
+        self,
+        runtime: _BatchRuntime,
+        queue: tuple[str, ...],
+        *,
+        boundary_token: str = "",
     ) -> _BatchRuntime:
         if not queue:
             return runtime
+        if runtime.pending_mode_decision is not None:
+            return runtime
+        if runtime.phase in self._c7_mode_decision_forbidden_resume_phases():
+            return runtime
+        if runtime.winner_id is not None or runtime.game_over_reason is not None:
+            return runtime
+        resume_phase = runtime.phase
         return replace(
             runtime,
             phase=ProductionPhase.MODE_DECISION,
             pending_mode_decision=_PendingModeDecision(
                 actor_id=queue[0],
                 queue=queue[1:],
-                resume_phase=ProductionPhase.PREPARE,
+                resume_phase=resume_phase,
                 window_id=(
-                    f"mode-decision:{runtime.turn_number}:{queue[0]}"
+                    f"mode-decision:{runtime.turn_number}:{queue[0]}:"
+                    f"{resume_phase.value}:{boundary_token[:16]}"
                 ),
             ),
         )
@@ -16406,7 +16630,7 @@ class ProductionBasicCardBatch:
                     queue=pending.queue[1:],
                     window_id=(
                         f"mode-decision:{runtime.turn_number}:"
-                        f"{pending.queue[0]}"
+                        f"{pending.queue[0]}:{pending.resume_phase.value}"
                     ),
                 ),
             )
@@ -16427,6 +16651,13 @@ class ProductionBasicCardBatch:
         next_state, next_runtime = self._c7_advance_mode_decision(
             state, runtime
         )
+        if next_runtime.pending_mode_decision is None:
+            next_runtime = replace(
+                next_runtime,
+                c7_deferred_mode_decision_boundary=(
+                    self._c7_decision_boundary_token(next_state, next_runtime)
+                ),
+            )
         self._commit_runtime(runtime, next_runtime)
         return next_state
 
@@ -16932,6 +17163,9 @@ class ProductionBasicCardBatch:
         if outer is None:
             next_state, next_runtime = self._complete_root_resolution(
                 state, runtime
+            )
+            next_runtime = self._c7_maybe_open_mode_decision_checkpoint(
+                next_state, next_runtime, allow_parent_interrupt=True
             )
             self._commit_runtime(self._runtime, next_runtime)
             return next_state

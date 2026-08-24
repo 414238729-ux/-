@@ -860,6 +860,58 @@ def test_c7_canonical_strict_successful_succession_replay() -> None:
     assert result.verified is True
 
 
+def test_c7_async_spy_choice_in_non_turn_start_root_strict_replay() -> None:
+    record = _c7_strict_record()
+    _assert_c7_record(record)
+    assert record.header["fixture_applied"] is False
+    assert record.header["formal_result"] is True
+    assert record.header["initial_configuration"]["analysis_only"] is False
+    choice = next(
+        decision
+        for decision in record.decisions
+        if _decision_operation(decision) == "choose_spy_path"
+    )
+    context = choice["context"]
+    assert context["phase"] == ProductionPhase.MODE_DECISION.value
+    assert context["actor_id"] == C7_STRICT_SPY_ID
+    metadata = context["metadata"]
+    pending_mode = metadata.get("pending_mode_decision")
+    assert isinstance(pending_mode, Mapping)
+    resume_phase = pending_mode.get("resume_phase")
+    assert resume_phase != ProductionPhase.PREPARE.value
+    assert resume_phase in {phase.value for phase in ProductionPhase}
+    parent_present = any(
+        metadata.get(key) is not None
+        for key in (
+            "pending_group_trick",
+            "pending_slash",
+            "pending_trick",
+            "pending_chain",
+            "pending_judgment",
+            "pending_borrowed_sword",
+        )
+    )
+    resumed = None
+    for decision in record.decisions[int(choice["index"]) + 1 :]:
+        if decision["context"]["phase"] != ProductionPhase.MODE_DECISION.value:
+            resumed = decision
+            break
+    assert resumed is not None
+    assert resumed["context"]["phase"] == resume_phase
+    assert resumed["context"]["turn_player_id"] == context["turn_player_id"]
+    if parent_present:
+        resumed_meta = resumed["context"]["metadata"]
+        if metadata.get("pending_group_trick") is not None:
+            assert resumed_meta.get("pending_group_trick") is not None
+            assert (
+                resumed_meta["pending_group_trick"]["trick_instance_id"]
+                == metadata["pending_group_trick"]["trick_instance_id"]
+            )
+    result = reexecute_production_replay(record)
+    assert result.verified is True
+    assert record.header["formal_result"] is True
+
+
 def test_c7_canonical_strict_spy_path_conversion_replay() -> None:
     trace = _c7_strict_walk_trace()
     assert trace["old_lord_dead"] is True
