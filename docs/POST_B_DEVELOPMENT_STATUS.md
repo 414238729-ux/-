@@ -1,6 +1,7 @@
 # POST-B 开发状态（POST_B_DEVELOPMENT_STATUS）
 
-> 状态标签：`AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`、`C6_INDEPENDENT_AUDIT_PASSED`
+> 状态标签：`AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`、`AUDITED_PASSED`
+> （CURRENT：C7 frozen formal no-skill scope）
 >
 > 本文件是 POST-B 开发轨（deepseek-post-milestone-b-development）的新增状态文档，
 > 未登记进 `docs/CHECKPOINT_MANIFEST.json`，也不修改任何已登记文档
@@ -32,6 +33,15 @@
   `C6_INDEPENDENT_AUDIT_PASSED`。documentation closure commit 本轮尚未创建；
   未来 docs-only closure SHA 只记录状态，不得冒充被审计 implementation SHA。
   当前 C6 scope 进入 `AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`。）
+- `POST_B_C7_FORMAL_NO_SKILL_MOBILE_EIGHT_PLAYER_HEIR_AND_SPY_CHOICE_IDENTITY_MODE`
+  = `AUDITED_PASSED`（被独立审计的 implementation SHA =
+  `75f91dde8da61265645a00a8ebc153591e66ef8d`，parent remediation baseline =
+  `532d678d66342b620d6ed8e464df9fb601190a4d`，implementation identity =
+  `5b4a300fda38749b42a1754f5ec9e7814e6a5edabdaa804ab1509f83276df9d4`。
+  C7 frozen-scope final independent closure sweep = `PASSED`，confirmed defects =
+  `NONE OPEN`。三项 observation 保持 OPEN / non-blocking；本次 docs-only closure
+  commit 只登记状态，不得冒充被审计 implementation SHA。当前 C7 scope 进入
+  `AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`，见 §13。）
 - `F-003` = `CLOSED`
 - `F-004` = `CLOSED`
 - `F-005` = `CLOSED`
@@ -130,7 +140,7 @@ N≥2 多人权威基础；**不是**完成 2v2。C1 只落地项目 1–4，并
 | 2 | 多人回合循环（沿存活环座次递增继任、跳过死亡角色） | 已落地（`_apply_end_turn` 等） |
 | 3 | 群体锦囊目标顺序（服务器使用时快照，跳过死亡角色） | 已落地（`_group_target_sequence` 接入存活环） |
 | 4 | 死亡/座位遍历（死亡不重编号、非终局死亡继续结算边界） | 已落地（统一胜负出口 + 群体锦囊继续分支） |
-| 5 | 模式胜负规则（2v2/斗地主/五人身份/其它身份变体） | C3 已落地正式2v2；C4 已落地正式斗地主；C5 五人标准身份已 `AUDITED_PASSED`（见 §11）；C6 普通八人标准身份已 `AUDITED_PASSED`（见 §12）；限时八人、其它特殊身份变体及通用最后一人模式仍不在已审计范围 |
+| 5 | 模式胜负规则（2v2/斗地主/五人身份/其它身份变体） | C3 已落地正式2v2；C4 已落地正式斗地主；C5 五人标准身份已 `AUDITED_PASSED`（见 §11）；C6 普通八人标准身份已 `AUDITED_PASSED`（见 §12）；C7 移动版八人主公立储 / 内奸择途特殊身份已 `AUDITED_PASSED`（见 §13）；限时八人、其它特殊身份变体及通用最后一人模式仍不在已审计范围 |
 | 6 | 方天画戟多目标 | C2 已实现（7.9 用户整理解释；见 0.1 节） |
 | 7 | 2v2 模式规则 | C3 已实现（formal no-skill 2v2，见 §9） |
 
@@ -585,7 +595,7 @@ BLOCKER FOUND，与本轮 rem1 re-audit = PASSED 不得混写。
 **formal duel 防回归**：seed 0 → p2/388/43、seed 7 → p2/162/17
 （与 R5/R8 记录一致；全量套件覆盖）。
 
-**遗留**：斗地主（历史 C3 遗留；C4 阶段已完成，见 §10）/身份场（历史 C3 遗留；后续 C5 五人标准身份已完成，见 §11，C6 普通八人标准身份已完成，见 §12；限时八人及其它特殊身份变体仍未审计）/最后一人胜负策略（历史 C3 遗留；通用最后一人模式当前仍未审计）、武将技能、改判、AI、Web、
+**遗留**：斗地主（历史 C3 遗留；C4 阶段已完成，见 §10）/身份场（历史 C3 遗留；后续 C5 五人标准身份已完成，见 §11，C6 普通八人标准身份已完成，见 §12，C7 移动版八人主公立储 / 内奸择途特殊身份已完成，见 §13；限时八人及其它特殊身份变体仍未审计）/最后一人胜负策略（历史 C3 遗留；通用最后一人模式当前仍未审计）、武将技能、改判、AI、Web、
 正式胜率阶段仍不在本轨；`multi_player_production_proven` 保持 false。
 
 ## 10. 当前轨：POST_B_C4_FORMAL_NO_SKILL_DOUDIZHU_MODE
@@ -957,9 +967,10 @@ nonblocking observation 保留。
   继续保持。
 - 既有 Post-B roadmap 为 generic cards → duel → 2v2 → Doudizhu →
   5-player identity → normal 8-player → timed 8-player。C5 closure 当时的下一模式
-  候选为普通八人 formal identity；该候选现已由 C6 完成。CURRENT 下一候选可为
-  timed / special 8-player identity variant（Knowledge 第 5 章：主公立储、
-  内奸择途），但是否实际开始由用户决定；当前尚未启动。
+  候选为普通八人 formal identity；该候选现已由 C6 完成。随后移动版八人
+  主公立储 / 内奸择途 special identity variant 已由 C7 完成。CURRENT 仍未启动的
+  候选包括 timed 8-player 与其它 special 8-player identity variants；是否开始
+  由用户决定。
 
 ## 12. 当前轨：POST_B_C6_FORMAL_NO_SKILL_NORMAL_EIGHT_PLAYER_IDENTITY_MODE
 
@@ -1254,6 +1265,102 @@ nonblocking observation 保留。
   `multi_player_production_proven=false`、`authoritative_full_game_core=false`
   继续保持。
 - 既定 roadmap 为 generic cards → duel → 2v2 → Doudizhu → 5-player identity
-  → normal 8-player → timed 8-player。C6 closure 后下一候选为 timed / special
-  8-player identity variant（Knowledge 第 5 章：主公立储、内奸择途），但该阶段
-  尚未启动，是否开始由用户决定。
+  → normal 8-player → timed 8-player。C6 closure 后候选中的移动版八人主公立储 /
+  内奸择途 special identity variant 已由 C7 完成；CURRENT 仍未启动的候选包括
+  timed 8-player 与其它 special 8-player identity variants，是否开始由用户决定。
+
+## 13. 当前轨：POST_B_C7_FORMAL_NO_SKILL_MOBILE_EIGHT_PLAYER_HEIR_AND_SPY_CHOICE_IDENTITY_MODE
+
+**状态**：`AUDITED_PASSED`。C7 frozen formal no-skill scope final independent
+closure sweep = `PASSED`；新增 confirmed defect = **0**；C7 frozen-scope
+confirmed defects = `NONE OPEN`。这是当前冻结 scope 的质量门禁，不是整个游戏或
+release ready；是否进入下一开发阶段由用户决定。
+
+**冻结合同与关闭范围（FROZEN CONTRACT & CLOSURE SCOPE）**：
+
+- Contract：
+  `POST_B_C7_FORMAL_NO_SKILL_MOBILE_EIGHT_PLAYER_HEIR_AND_SPY_CHOICE_IDENTITY_MODE`。
+- 范围是基于 C6 普通八人身份 core 的移动版特殊八人 formal no-skill profile，
+  覆盖主公立储、储君继位、内奸择途、实际 spy → ambitionist 转换及相应胜负语义。
+- final closure sweep 只关闭 C7 frozen formal no-skill scope；本轮没有重审完整
+  三国杀引擎、全部模式、武将技能、AI、Web / UI 或 release packaging。
+
+**Implementation / remediation / audit provenance**：
+
+1. **Initial implementation**：
+   - implementation commit = `a1749459da63aa62b3a38c2026ab0ab581972912`
+     （`Implement Post-B C7 formal special eight-player identity mode`）。
+2. **Remediation baseline**：
+   - parent remediation baseline = `532d678d66342b620d6ed8e464df9fb601190a4d`
+     （`Fix C7 asynchronous heir and spy decision checkpoints`）。
+3. **Audited implementation**：
+   - audit target / final implementation HEAD =
+     `75f91dde8da61265645a00a8ebc153591e66ef8d`
+     （`Fix C7 nested lord death after heir loss`）。
+   - audited implementation identity =
+     `5b4a300fda38749b42a1754f5ec9e7814e6a5edabdaa804ab1509f83276df9d4`。
+4. **Closed defect / remediation records**：
+   - `A1-CONFIRMED-001` = `CLOSED`。
+   - `A2-CONFIRMED-001` = `CLOSED`。
+   - `A2-REMEDIATION-001` = `CLOSED`。
+   - final sweep 新增 confirmed defect = 0；C7 confirmed defects = `NONE OPEN`。
+5. **Documentation closure boundary**：
+   - 本次 docs-only closure commit 只登记状态，不是被审计 implementation SHA，
+     也不改写以上 implementation / remediation / audit provenance。
+
+**Final independent closure sweep evidence**：
+
+以下是已完成的 independent sweep 现场证据；本次 docs-only closure 只登记结果，
+不冒充新一轮 implementation、remediation 或 audit：
+
+- C7 专项 = **61 passed in 825.35s**。
+- C5 / C6 定向回归 = **152 passed in 1344.43s**。
+- implementation identity gate = **1 passed**。
+- final gate 合计 = **214 passed**，failed = 0。
+- compileall = `exit 0`。
+- final sweep 结束时 worktree、index、unmerged 均干净；`git diff --check`、
+  cached diff check 与 EOL gate 通过。
+- 本轮 final sweep 未重跑完整 **2815** 项全套测试；不得把 214 项 closure gate
+  表述成 full-suite evidence。
+
+**Readiness 与 strict canonical replay gate**：
+
+- `formal_heir_and_spy_choice_identity_no_skill_ready = true`。
+- `identity_8p_heir_ready = true`。
+- `unsupported_rules = 0`；`approximation_count = 0`；`blockers = ()`。
+- strict canonical evidence 使用 `fixture_applied=false`、`analysis_only=false`、
+  `formal_result=true`，覆盖成功继位、真实 spy → ambitionist 转换与
+  ambitionist victory。
+- strict reexecute = `verified=true`。
+
+**非阻塞观察（OPEN / NON-BLOCKING OBSERVATIONS）**：
+
+1. `C7_CANONICAL_DRAW_REACHABILITY_UNRESOLVED` 保持 `OPEN`。它是测试强制保留的
+   observation，不是 C7 frozen-scope closure blocker；不得升级为 canonical natural
+   deck exhaustion 已证明、不可达已证明或已有 canonical strict draw replay。
+2. `A1-OBS-001` 保持 `OPEN`：latent kill-credit model observation。当前没有建立
+   production-reachable divergent gameplay defect；该观察不是已解决 finding。
+3. `mode_identity_heir.py` readiness 对
+   `C6_CANONICAL_DRAW_REACHABILITY_STATUS ==
+   "C6_CANONICAL_DRAW_REACHABILITY_UNRESOLVED"` 的精确相等耦合保持 `OPEN` /
+   non-blocking。当前行为正确；如果未来 C6 status 改变，该耦合可能脆弱。本轮没有
+   为此修改代码，也不把它登记为已解决。
+
+**Draw reachability 边界**：
+
+- `identity_draw_deck_exhausted` 仍是允许的 production formal outcome；“允许”不等于
+  已实际覆盖 canonical natural exhaustion。
+- 当前没有 canonical initial state → natural `identity_draw_deck_exhausted` 的
+  strict replay，也没有覆盖全部 legal trajectories 的不可达证明。
+- 有限 search / sweep 不能据此宣称不可达；不得登记为 N/A、
+  `PROVEN_UNREACHABLE` 或 mathematically impossible。
+
+**就绪边界与下一阶段（READINESS BOUNDARY & NEXT STAGE）**：
+
+- C7 `AUDITED_PASSED` 只表示上述 frozen formal no-skill scope 已完成 implementation、
+  remediation 与 independent final closure sweep，且 confirmed defects = `NONE OPEN`。
+- 三项 observation 继续保持 OPEN / non-blocking；C7 closure 不将其改写为 resolved。
+- `multi_player_production_proven=false`、`authoritative_full_game_core=false` 继续保持。
+- 不得扩张为 `FULL_GAME_READY`、`PRODUCTION_RELEASE_READY`、`RELEASE_READY`、
+  `AUTHORITATIVE_FULL_GAME_READY`、`ALL_CARD_RULES_COMPLETE` 或完整游戏无缺陷证明。
+- 下一阶段是否为 timed 8-player、其它 special identity variant 或其它工作，由用户决定。
