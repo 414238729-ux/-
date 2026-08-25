@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from math import isfinite, prod
+from math import isfinite
 from types import MappingProxyType
 from typing import Iterable, Mapping, Sequence
 
@@ -147,23 +147,35 @@ GUO_NUWANG_AUDIT_FIELDS = (
 )
 
 SHEN_LUBU_AUDIT_FIELDS = (
-    "shen_lubu.rage_gained_from_dealing",
-    "shen_lubu.rage_gained_from_receiving",
-    "wumou.conversions",
-    "wumou.original_target_templates_used",
-    "wumou.slash_limit_consumed",
-    "wuqian.activations",
-    "wuqian.distinct_targets",
-    "wuqian.dynamic_x",
-    "wuqian.full_resets_on_zero_damage_card",
-    "wuqian.preserved_by_multi_target_hit",
-    "wuqian.damage_cards_gained_from_current_deck",
-    "shenfen.activations",
-    "shenfen.damage_round_targets",
-    "shenfen.equipment_round_targets",
-    "shenfen.hand_round_targets",
-    "shenfen.stopped_by_victory",
-    "shenfen.final_flips",
+    "shen_lubu.pool_scope",
+    "shen_lubu.evidence.screenshot_or_text_a_used",
+    "shen_lubu.evidence.client_observation_b_used",
+    "shen_lubu.evidence.conversation_confirmation_c_used",
+    "shen_lubu.rage.initial",
+    "shen_lubu.rage.gained_from_dealing",
+    "shen_lubu.rage.gained_from_receiving",
+    "shen_lubu.rage.current",
+    "wumou.converted_tricks",
+    "wumou.original_target_template_used",
+    "wuqian.rage_spent",
+    "wuqian.marked_target_count_x",
+    "wuqian.armor_invalid_target",
+    "wuqian.wushuang_variant_active",
+    "wuqian.slash_use_count_bonus_x",
+    "wuqian.damage_card_used_without_damage",
+    "wuqian.state_ended",
+    "wuqian.end_phase_had_damage_card",
+    "wuqian.end_phase_random_damage_card_gained",
+    "wuqian.lightning_used_triggered_end",
+    "wushuang_variant.slash_target_two_jink_required",
+    "wushuang_variant.duel_opponent_two_slash_required",
+    "wushuang_variant.one_response_card_insufficient",
+    "shenfen.uses_this_play_phase",
+    "shenfen.rage_spent",
+    "shenfen.other_players_damage",
+    "shenfen.all_equipment_discarded",
+    "shenfen.four_hand_cards_discarded",
+    "shenfen.final_flip",
 )
 
 
@@ -444,14 +456,18 @@ def should_guo_use_damage_while_enemy_is_bird(
 
 
 def wuqian_preservation_probability(no_damage_probabilities: Iterable[float]) -> float:
-    """估计多目标牌至少命中一个目标的概率；仅作估值，不声称事件独立。"""
+    """按各目标零伤害事件独立的分析假设，估计整次用牌造成任一伤害的概率。"""
 
     values = tuple(no_damage_probabilities)
+    if not values:
+        raise ValueError("无前保留概率至少需要一个目标的零伤害概率")
+    all_targets_take_no_damage = 1.0
     for value in values:
         probability = _finite(value, "零伤害概率")
         if not 0 <= probability <= 1:
             raise ValueError("零伤害概率必须在0到1之间")
-    return 1.0 - prod(values)
+        all_targets_take_no_damage *= probability
+    return 1.0 - all_targets_take_no_damage
 
 
 def shenfen_net_rage(actual_damage_recipient_count: int) -> int:
@@ -474,6 +490,8 @@ class ShenLubuRagePlan:
         if isinstance(self.rage_cost, bool) or not isinstance(self.rage_cost, int) or self.rage_cost < 0:
             raise ValueError("暴怒成本必须是非负整数")
         object.__setattr__(self, "expected_net_value", _finite(self.expected_net_value, "动作预期价值"))
+        if not isinstance(self.preserves_wuqian, bool):
+            raise TypeError("方案是否保留无前必须是布尔值")
 
 
 def choose_shen_lubu_rage_plan(
@@ -485,15 +503,27 @@ def choose_shen_lubu_rage_plan(
     legal = tuple(plan for plan in plans if plan.rage_cost <= current_rage)
     if not legal:
         raise ValueError("没有暴怒足够的合法方案")
-    chosen = max(legal, key=lambda plan: plan.expected_net_value)
+    chosen = max(
+        legal,
+        key=lambda plan: (plan.expected_net_value, plan.preserves_wuqian),
+    )
     scores = {plan.action: plan.expected_net_value for plan in legal}
+    metrics: dict[str, int | float | str | bool] = {
+        "shen_lubu.rage.current": current_rage,
+    }
+    rage_spent_key = {
+        "无前": "wuqian.rage_spent",
+        "神愤": "shenfen.rage_spent",
+    }.get(chosen.action)
+    if rage_spent_key is not None:
+        metrics[rage_spent_key] = chosen.rage_cost
     return chosen, V24DecisionAudit(
         general_name="神吕布重制原型",
         chosen_action=chosen.action,
         reason=f"选择{chosen.action}：在当前{current_rage}点暴怒预算下预期净收益最高。",
         legal_actions=tuple(plan.action for plan in legal),
         scores=scores,
-        metrics={"shen_lubu.rage_before": current_rage, "shen_lubu.rage_cost": chosen.rage_cost},
+        metrics=metrics,
     )
 
 

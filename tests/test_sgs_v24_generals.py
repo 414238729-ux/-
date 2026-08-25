@@ -1,4 +1,4 @@
-"""V2.4 四名增量武将的 56 项确定性规则测试。"""
+"""V2.4 四名增量武将的 65 项确定性规则测试。"""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from scripts.sgs_v24_generals import (
     ShenfenDamageOutcome,
     ShenfenParticipant,
     V24Card,
+    WuqianDamageCardAward,
     WumouAction,
     WumouTrick,
     activate_wuqian,
@@ -31,9 +32,11 @@ from scripts.sgs_v24_generals import (
     clear_bird_when_holder_leaves,
     convert_wumou_trick,
     gain_rage_from_damage,
+    is_shen_lubu_damage_card,
     jiejie_use_permission,
     legal_chengshi_targets,
     qingshi_trigger_count,
+    play_wushuang_response_card,
     remove_wuqian_target,
     resolve_bird_gain_event,
     resolve_jiejie,
@@ -48,6 +51,8 @@ from scripts.sgs_v24_generals import (
     resolve_yichong,
     start_nigu_play_phase,
     start_shen_lubu_play_phase,
+    start_wushuang_duel_response,
+    start_wushuang_slash_response,
 )
 
 
@@ -671,7 +676,7 @@ def test_guonuwang_15_wufei_after_damage_waits_for_rescue_and_deals_sourceless_n
 
 
 # ---------------------------------------------------------------------------
-# 未上线神吕布重制原型：19 项
+# 未上线神吕布重制原型：28 项
 
 
 def test_shenlubu_01_rework_state_starts_with_two_rage() -> None:
@@ -680,9 +685,9 @@ def test_shenlubu_01_rework_state_starts_with_two_rage() -> None:
     assert state.dynamic_x == 0
 
 
-def test_shenlubu_02_rage_gain_uses_actual_dealt_and_received_points_without_cap() -> None:
-    state = gain_rage_from_damage(ShenLubuReworkState(rage=999), damage_dealt=7, damage_received=5)
-    assert state.rage == 1011
+def test_shenlubu_02_rage_gain_adds_dealt_and_received_damage_points() -> None:
+    state = gain_rage_from_damage(ShenLubuReworkState(rage=2), damage_dealt=2, damage_received=1)
+    assert state.rage == 5
 
 
 def test_shenlubu_03_wumou_only_converts_normal_tricks() -> None:
@@ -691,27 +696,32 @@ def test_shenlubu_03_wumou_only_converts_normal_tricks() -> None:
         convert_wumou_trick(card, action="使用", owner_id="神吕布")
 
 
-def test_shenlubu_04_wumou_actual_name_is_slash_and_keeps_original_template_and_distance() -> None:
+def test_shenlubu_04_wumou_uses_externally_verified_original_targets() -> None:
     card = WumouTrick("snatch", "顺手牵羊", True, False, "one_other", "实际距离1")
     result = convert_wumou_trick(
         card,
         action="使用",
         owner_id="神吕布",
         original_legal_target_ids=("甲",),
+        all_player_ids=("神吕布", "甲"),
+        original_legality_verified=True,
+        uses_attack_range=True,
+        can_target_self=False,
     )
     assert result.legal is True
     assert result.actual_card_name == "杀"
-    assert result.target_template == "one_other"
-    assert result.distance_rule == "实际距离1"
-    assert result.uses_attack_range is False
+    assert result.target_ids == ("甲",)
+    assert result.legality_externally_verified is True
+    assert result.uses_attack_range is True
+    assert result.can_target_self is False
 
 
-def test_shenlubu_05_self_only_trick_cannot_be_actively_used_as_wumou_slash() -> None:
+def test_shenlubu_05_self_only_trick_stays_pending_without_external_legality() -> None:
     card = WumouTrick("draw", "无中生有", True, False, "self_only", "无距离")
     result = convert_wumou_trick(card, action="使用", owner_id="神吕布")
     assert result.legal is False
     assert result.target_ids == ()
-    assert "不能以自己为目标" in result.reason
+    assert "待外部核验" in result.reason
 
 
 def test_shenlubu_06_self_only_trick_can_be_played_in_a_slash_response_window() -> None:
@@ -727,7 +737,7 @@ def test_shenlubu_06_self_only_trick_can_be_played_in_a_slash_response_window() 
     assert result.consumes_slash_use_limit is False
 
 
-def test_shenlubu_07_all_character_trick_template_excludes_owner() -> None:
+def test_shenlubu_07_all_character_trick_is_not_auto_expanded_without_external_legality() -> None:
     for name in ("五谷丰登", "桃园结义"):
         result = convert_wumou_trick(
             WumouTrick(name, name, True, False, "all_characters", "全体"),
@@ -735,10 +745,12 @@ def test_shenlubu_07_all_character_trick_template_excludes_owner() -> None:
             owner_id="神吕布",
             all_player_ids=("神吕布", "甲", "乙"),
         )
-        assert result.target_ids == ("甲", "乙")
+        assert result.legal is False
+        assert result.target_ids == ()
+        assert "待外部核验" in result.reason
 
 
-def test_shenlubu_08_borrowed_sword_template_requires_its_weapon_relation() -> None:
+def test_shenlubu_08_borrowed_sword_requires_external_legality_confirmation() -> None:
     card = WumouTrick("borrow", "借刀杀人", True, False, "borrowed_sword_relation", "原关系")
     illegal = convert_wumou_trick(
         card,
@@ -746,6 +758,7 @@ def test_shenlubu_08_borrowed_sword_template_requires_its_weapon_relation() -> N
         owner_id="神吕布",
         original_legal_target_ids=("甲",),
         borrowed_sword_relation_exists=False,
+        original_legality_verified=True,
     )
     legal = convert_wumou_trick(
         card,
@@ -753,18 +766,43 @@ def test_shenlubu_08_borrowed_sword_template_requires_its_weapon_relation() -> N
         owner_id="神吕布",
         original_legal_target_ids=("甲",),
         borrowed_sword_relation_exists=True,
+        original_legality_verified=True,
     )
     assert illegal.legal is False
+    assert "不存在" in illegal.reason
     assert legal.legal is True
 
 
-def test_shenlubu_09_active_wumou_consumes_slash_limit_but_keeps_physical_static_classification() -> None:
+def test_shenlubu_09_wumou_rejects_verified_empty_or_nonplayer_targets() -> None:
+    card = WumouTrick("duel", "决斗", True, True, "one_other", "无限制")
+    empty = convert_wumou_trick(
+        card,
+        action="使用",
+        owner_id="神吕布",
+        original_legality_verified=True,
+    )
+    outsider = convert_wumou_trick(
+        card,
+        action="使用",
+        owner_id="神吕布",
+        original_legal_target_ids=("丙",),
+        all_player_ids=("神吕布", "甲", "乙"),
+        original_legality_verified=True,
+    )
+    assert empty.legal is False
+    assert empty.legality_externally_verified is False
+    assert outsider.legal is False
+    assert "当前玩家集合" in outsider.reason
+
+
+def test_shenlubu_10_active_wumou_consumes_slash_limit_but_keeps_physical_static_classification() -> None:
     card = WumouTrick("duel", "决斗", True, True, "one_other", "无限制")
     result = convert_wumou_trick(
         card,
         action="使用",
         owner_id="神吕布",
         original_legal_target_ids=("甲",),
+        original_legality_verified=True,
     )
     assert result.consumes_slash_use_limit is True
     assert result.actual_use_is_damage_card is True
@@ -774,34 +812,35 @@ def test_shenlubu_09_active_wumou_consumes_slash_limit_but_keeps_physical_static
         action="使用",
         owner_id="神吕布",
         original_legal_target_ids=("甲",),
+        original_legality_verified=True,
     )
     assert nondamage.actual_use_is_damage_card is True
     assert nondamage.physical_static_damage_card is False
 
 
-def test_shenlubu_10_wuqian_costs_two_rage_and_rejects_duplicate_active_target() -> None:
+def test_shenlubu_11_wuqian_costs_two_rage_and_does_not_invent_duplicate_legality() -> None:
     state = activate_wuqian(ShenLubuReworkState(rage=4), target_id="甲")
     assert state.rage == 2
     assert state.wushuang_active is True
-    with pytest.raises(ValueError, match="不能重复选择"):
+    with pytest.raises(ValueError, match="待核验"):
         activate_wuqian(state, target_id="甲")
 
 
-def test_shenlubu_11_wuqian_dynamic_x_decreases_when_target_leaves() -> None:
+def test_shenlubu_12_wuqian_target_departure_stays_pending() -> None:
     state = activate_wuqian(activate_wuqian(ShenLubuReworkState(rage=6), target_id="甲"), target_id="乙")
     assert state.dynamic_x == 2
     assert state.bonus_slash_limit == 2
-    after = remove_wuqian_target(state, target_id="甲")
-    assert after.wuqian_targets == frozenset({"乙"})
-    assert after.dynamic_x == after.bonus_slash_limit == 1
+    with pytest.raises(ValueError, match="待核验"):
+        remove_wuqian_target(state, target_id="甲")
+    assert state.wuqian_targets == frozenset({"甲", "乙"})
 
 
-def test_shenlubu_12_next_damage_card_with_zero_total_actual_damage_clears_all_wuqian_effects() -> None:
+def test_shenlubu_13_next_damage_card_with_zero_total_actual_damage_clears_all_wuqian_effects() -> None:
     state = activate_wuqian(activate_wuqian(ShenLubuReworkState(rage=6), target_id="甲"), target_id="乙")
     result = resolve_wuqian_damage_card_completion(
         state,
         is_damage_card_use=True,
-        actual_damage_by_target=(0, 0),
+        actual_damage_by_target=(0,),
     )
     assert result.cleared_all is True
     assert result.state_after.wuqian_targets == frozenset()
@@ -809,7 +848,7 @@ def test_shenlubu_12_next_damage_card_with_zero_total_actual_damage_clears_all_w
     assert result.state_after.bonus_slash_limit == 0
 
 
-def test_shenlubu_13_any_actual_damage_from_multi_target_damage_card_retains_all_wuqian_effects() -> None:
+def test_shenlubu_14_multi_target_damage_card_with_any_actual_damage_preserves_wuqian() -> None:
     state = activate_wuqian(activate_wuqian(ShenLubuReworkState(rage=6), target_id="甲"), target_id="乙")
     result = resolve_wuqian_damage_card_completion(
         state,
@@ -818,14 +857,43 @@ def test_shenlubu_13_any_actual_damage_from_multi_target_damage_card_retains_all
     )
     assert result.total_actual_damage == 1
     assert result.cleared_all is False
-    assert result.state_after == state
+    assert result.state_after is state
 
 
-def test_shenlubu_14_wuqian_end_phase_gains_static_damage_cards_from_current_draw_pile_until_x() -> None:
+def test_shenlubu_15_multi_target_damage_card_with_all_zero_damage_clears_wuqian() -> None:
+    state = activate_wuqian(activate_wuqian(ShenLubuReworkState(rage=6), target_id="甲"), target_id="乙")
+    result = resolve_wuqian_damage_card_completion(
+        state,
+        is_damage_card_use=True,
+        actual_damage_by_target=(0, 0, 0),
+    )
+    assert result.total_actual_damage == 0
+    assert result.cleared_all is True
+    assert result.state_after.wuqian_targets == frozenset()
+
+
+def test_shenlubu_16_damage_card_that_deals_damage_preserves_wuqian_and_empty_result_fails_closed() -> None:
+    state = activate_wuqian(ShenLubuReworkState(rage=4), target_id="甲")
+    dealt = resolve_wuqian_damage_card_completion(
+        state,
+        is_damage_card_use=True,
+        actual_damage_by_target=(2,),
+    )
+    assert dealt.cleared_all is False
+    assert dealt.state_after is state
+    with pytest.raises(ValueError, match="尚无实际伤害结果"):
+        resolve_wuqian_damage_card_completion(
+            state,
+            is_damage_card_use=True,
+            actual_damage_by_target=(),
+        )
+
+
+def test_shenlubu_17_wuqian_end_phase_does_not_award_when_hand_has_lightning() -> None:
     state = activate_wuqian(activate_wuqian(ShenLubuReworkState(rage=6), target_id="甲"), target_id="乙")
     result = resolve_wuqian_end_phase(
         state,
-        hand_cards=(_card("hand-damage", damage=True),),
+        hand_cards=(_card("hand-lightning", "闪电", damage=False),),
         draw_pile=(
             _card("normal", zone=CardZone.DRAW_PILE),
             _card("damage", zone=CardZone.DRAW_PILE, damage=True),
@@ -833,23 +901,129 @@ def test_shenlubu_14_wuqian_end_phase_gains_static_damage_cards_from_current_dra
         seed=3,
     )
     assert result.damage_cards_in_hand_before == 1
-    assert [card.card_id for card in result.gained_cards] == ["damage"]
-    assert result.gained_cards[0].zone is CardZone.HAND
-    assert [card.card_id for card in result.draw_pile_after] == ["normal"]
+    assert result.gained_cards == ()
+    assert result.pending_awards == ()
+    assert [card.card_id for card in result.draw_pile_after] == ["normal", "damage"]
 
 
-def test_shenlubu_15_wuqian_end_phase_stops_without_matching_current_pile_card() -> None:
+def test_shenlubu_18_wuqian_end_phase_returns_one_abstract_award_without_using_draw_pile() -> None:
     state = activate_wuqian(activate_wuqian(ShenLubuReworkState(rage=6), target_id="甲"), target_id="乙")
     result = resolve_wuqian_end_phase(
         state,
         hand_cards=(),
-        draw_pile=(_card("normal", zone=CardZone.DRAW_PILE, damage=False),),
+        draw_pile=(
+            _card("damage-1", zone=CardZone.DRAW_PILE, damage=True),
+            _card("damage-2", zone=CardZone.DRAW_PILE, damage=True),
+        ),
+        seed=7,
     )
+    assert result.damage_cards_in_hand_before == 0
     assert result.gained_cards == ()
-    assert len(result.draw_pile_after) == 1
+    assert result.pending_awards == (WuqianDamageCardAward(),)
+    assert result.pending_awards[0].requires_external_materialization is True
+    assert [card.card_id for card in result.draw_pile_after] == ["damage-1", "damage-2"]
 
 
-def test_shenlubu_16_shenfen_costs_six_rage_and_is_once_per_play_phase() -> None:
+def test_shenlubu_19_wuqian_end_phase_without_legacy_draw_pile_still_returns_pending_award() -> None:
+    state = activate_wuqian(ShenLubuReworkState(rage=4), target_id="甲")
+    result = resolve_wuqian_end_phase(state, hand_cards=())
+    assert result.pending_awards == (WuqianDamageCardAward(),)
+    assert result.draw_pile_after == ()
+
+
+def test_shenlubu_20_lightning_is_damage_card_and_its_zero_damage_use_ends_wuqian() -> None:
+    lightning = _card("lightning", "闪电", damage=False)
+    assert is_shen_lubu_damage_card(lightning) is True
+    state = activate_wuqian(ShenLubuReworkState(rage=4), target_id="甲")
+    result = resolve_wuqian_damage_card_completion(
+        state,
+        is_damage_card_use=False,
+        actual_damage_by_target=(0,),
+        damage_card_name="闪电",
+    )
+    assert result.cleared_all is True
+    assert result.state_after.wushuang_active is False
+
+
+def test_shenlubu_21_wushuang_slash_allows_first_jink_requires_second_and_rejects_third() -> None:
+    state = activate_wuqian(ShenLubuReworkState(rage=4), target_id="甲")
+    response = start_wushuang_slash_response(
+        state,
+        shen_lubu_id="神吕布",
+        slash_user_id="神吕布",
+        target_id="甲",
+    )
+    first = play_wushuang_response_card(response, card_name="闪")
+    assert first.provided_count == 1
+    assert first.remaining_count == 1
+    assert first.complete is False
+    second = play_wushuang_response_card(first, card_name="闪")
+    assert second.complete is True
+    with pytest.raises(ValueError, match="已经完成"):
+        play_wushuang_response_card(second, card_name="闪")
+
+
+def test_shenlubu_22_wushuang_duel_opponent_completes_on_second_slash_in_both_directions() -> None:
+    state = activate_wuqian(ShenLubuReworkState(rage=4), target_id="甲")
+    shen_used = start_wushuang_duel_response(
+        state,
+        shen_lubu_id="神吕布",
+        duel_user_id="神吕布",
+        duel_target_id="甲",
+        responder_id="甲",
+    )
+    other_used = start_wushuang_duel_response(
+        state,
+        shen_lubu_id="神吕布",
+        duel_user_id="甲",
+        duel_target_id="神吕布",
+        responder_id="甲",
+    )
+    shen_responds = start_wushuang_duel_response(
+        state,
+        shen_lubu_id="神吕布",
+        duel_user_id="甲",
+        duel_target_id="神吕布",
+        responder_id="神吕布",
+    )
+    for response in (shen_used, other_used):
+        first = play_wushuang_response_card(response, card_name="杀")
+        assert first.complete is False
+        assert first.remaining_count == 1
+        second = play_wushuang_response_card(first, card_name="火杀")
+        assert second.complete is True
+    assert shen_responds.required_count == 1
+
+
+def test_shenlubu_23_inactive_variant_does_not_change_ordinary_slash_or_duel_response_count() -> None:
+    state = ShenLubuReworkState()
+    slash = start_wushuang_slash_response(
+        state,
+        shen_lubu_id="神吕布",
+        slash_user_id="神吕布",
+        target_id="甲",
+    )
+    duel = start_wushuang_duel_response(
+        state,
+        shen_lubu_id="神吕布",
+        duel_user_id="神吕布",
+        duel_target_id="甲",
+        responder_id="甲",
+    )
+    assert slash.required_count == 1
+    assert duel.required_count == 1
+    assert play_wushuang_response_card(slash, card_name="闪").complete is True
+    assert play_wushuang_response_card(duel, card_name="杀").complete is True
+    with pytest.raises(ValueError, match="只适用于神吕布"):
+        start_wushuang_slash_response(
+            state,
+            shen_lubu_id="神吕布",
+            slash_user_id="乙",
+            target_id="甲",
+        )
+
+
+def test_shenlubu_24_shenfen_costs_six_rage_and_is_once_per_play_phase() -> None:
     result = resolve_shenfen(
         ShenLubuReworkState(rage=6),
         ordered_other_players=(),
@@ -861,12 +1035,12 @@ def test_shenlubu_16_shenfen_costs_six_rage_and_is_once_per_play_phase() -> None
     assert start_shen_lubu_play_phase(result.state_after).shenfen_used_this_play_phase is False
 
 
-def test_shenlubu_17_shenfen_uses_three_complete_rounds_then_flips() -> None:
+def test_shenlubu_25_shenfen_uses_confirmed_three_effect_stages_then_flips() -> None:
     result = resolve_shenfen(
         ShenLubuReworkState(rage=6),
         ordered_other_players=(
             ShenfenParticipant("甲", 3, ("甲装1",), ("甲1", "甲2", "甲3", "甲4", "甲5")),
-            ShenfenParticipant("乙", 3, ("乙装1", "乙装2"), ("乙1", "乙2")),
+            ShenfenParticipant("乙", 3, ("乙装1", "乙装2"), ("乙1", "乙2", "乙3", "乙4")),
         ),
     )
     assert [(event.round_name, event.player_id) for event in result.events] == [
@@ -885,40 +1059,58 @@ def test_shenlubu_17_shenfen_uses_three_complete_rounds_then_flips() -> None:
     assert result.state_after.rage == 2  # 两名目标各实际受到1点，暴怒各+1。
 
 
-def test_shenlubu_18_character_dead_in_damage_round_is_skipped_in_later_rounds() -> None:
-    def lethal(player: ShenfenParticipant) -> ShenfenDamageOutcome:
+def test_shenlubu_26_shenfen_accepts_nonlethal_prevention_from_external_resolver() -> None:
+    def prevented_for_first(player: ShenfenParticipant) -> ShenfenDamageOutcome:
         if player.player_id == "甲":
-            return ShenfenDamageOutcome(1, 0, False)
+            return ShenfenDamageOutcome(0, player.hp, True)
         return ShenfenDamageOutcome(1, player.hp - 1, True)
 
     result = resolve_shenfen(
         ShenLubuReworkState(rage=6),
         ordered_other_players=(
-            ShenfenParticipant("甲", 1, ("甲装",), ("甲手",)),
-            ShenfenParticipant("乙", 3, ("乙装",), ("乙手",)),
+            ShenfenParticipant("甲", 1, ("甲装",), ("甲1", "甲2", "甲3", "甲4")),
+            ShenfenParticipant("乙", 3, ("乙装",), ("乙1", "乙2", "乙3", "乙4")),
         ),
-        damage_resolver=lethal,
+        damage_resolver=prevented_for_first,
     )
-    later = [(event.round_name, event.player_id) for event in result.events if event.round_name != "伤害轮"]
-    assert ("装备轮", "甲") not in later
-    assert ("手牌轮", "甲") not in later
-    assert ("装备轮", "乙") in later
+    assert [player.hp for player in result.participants_after] == [1, 2]
+    assert [event.detail for event in result.events[:2]] == [
+        "实际受到0点伤害",
+        "实际受到1点伤害",
+    ]
+    assert result.state_after.rage == 1
+    assert result.game_over is False
+    assert result.flipped_at_end is True
 
 
-def test_shenlubu_19_game_over_during_shenfen_stops_unstarted_damage_and_no_final_flip() -> None:
+def test_shenlubu_27_shenfen_death_lifecycle_stays_pending() -> None:
+    def lethal(player: ShenfenParticipant) -> ShenfenDamageOutcome:
+        if player.player_id == "甲":
+            return ShenfenDamageOutcome(1, 0, False)
+        return ShenfenDamageOutcome(1, player.hp - 1, True)
+
+    with pytest.raises(ValueError, match="死亡处理待核验"):
+        resolve_shenfen(
+            ShenLubuReworkState(rage=6),
+            ordered_other_players=(
+                ShenfenParticipant("甲", 1, ("甲装",), ("甲1", "甲2", "甲3", "甲4")),
+                ShenfenParticipant("乙", 3, ("乙装",), ("乙1", "乙2", "乙3", "乙4")),
+            ),
+            damage_resolver=lethal,
+        )
+
+
+def test_shenlubu_28_shenfen_victory_interruption_stays_pending() -> None:
     def game_ending(player: ShenfenParticipant) -> ShenfenDamageOutcome:
-        return ShenfenDamageOutcome(1, player.hp - 1, False, game_over=True)
+        return ShenfenDamageOutcome(0, player.hp, True, game_over=True)
 
-    result = resolve_shenfen(
-        ShenLubuReworkState(rage=6),
-        ordered_other_players=(
-            ShenfenParticipant("甲", 1, ("甲装",), ("甲手",)),
-            ShenfenParticipant("乙", 3, ("乙装",), ("乙手",)),
-        ),
-        damage_resolver=game_ending,
-    )
-    assert result.game_over is True
-    assert [(event.round_name, event.player_id) for event in result.events] == [("伤害轮", "甲")]
-    assert result.flipped_at_end is False
-    assert result.state_after.face_up is True
+    with pytest.raises(ValueError, match="胜负中止时机待核验"):
+        resolve_shenfen(
+            ShenLubuReworkState(rage=6),
+            ordered_other_players=(
+                ShenfenParticipant("甲", 1, ("甲装",), ("甲1", "甲2", "甲3", "甲4")),
+                ShenfenParticipant("乙", 3, ("乙装",), ("乙1", "乙2", "乙3", "乙4")),
+            ),
+            damage_resolver=game_ending,
+        )
 

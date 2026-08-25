@@ -152,9 +152,12 @@ def test_guo_nuwang_can_suppress_damage_when_enemy_bird_benefits() -> None:
     ) is True
 
 
-def test_wuqian_multi_target_estimate_and_shenfen_scale() -> None:
-    assert wuqian_preservation_probability((1.0, 0.0)) == 1.0
+def test_wuqian_estimate_supports_multi_target_any_damage_under_independence_assumption() -> None:
+    assert wuqian_preservation_probability((0.5,)) == pytest.approx(0.5)
     assert wuqian_preservation_probability((0.5, 0.5)) == pytest.approx(0.75)
+    assert wuqian_preservation_probability((1.0, 1.0)) == pytest.approx(0.0)
+    with pytest.raises(ValueError, match="至少需要一个目标"):
+        wuqian_preservation_probability(())
     assert shenfen_net_rage(7) == 1
     assert shenfen_net_rage(3) == -3
 
@@ -168,7 +171,34 @@ def test_shen_lubu_rage_budget_filters_unaffordable_plans() -> None:
     chosen, audit = choose_shen_lubu_rage_plan(4, plans)
     assert chosen.action == "无前"
     assert "神愤" not in audit.legal_actions
-    assert audit.metrics["shen_lubu.rage_cost"] == 2
+    assert audit.metrics["shen_lubu.rage.current"] == 4
+    assert audit.metrics["wuqian.rage_spent"] == 2
+    assert set(audit.metrics) <= set(SHEN_LUBU_AUDIT_FIELDS)
+    assert "shen_lubu.rage_before" not in audit.metrics
+    assert "shen_lubu.rage_cost" not in audit.metrics
+
+
+def test_shen_lubu_rage_budget_uses_shenfen_audit_key_and_wuqian_tiebreak() -> None:
+    shenfen, audit = choose_shen_lubu_rage_plan(
+        6,
+        (
+            ShenLubuRagePlan("无前", 2, 4.0),
+            ShenLubuRagePlan("神愤", 6, 10.0),
+        ),
+    )
+    assert shenfen.action == "神愤"
+    assert audit.metrics == {
+        "shen_lubu.rage.current": 6,
+        "shenfen.rage_spent": 6,
+    }
+    preserved, _ = choose_shen_lubu_rage_plan(
+        2,
+        (
+            ShenLubuRagePlan("消耗状态", 0, 3.0, preserves_wuqian=False),
+            ShenLubuRagePlan("保留状态", 0, 3.0, preserves_wuqian=True),
+        ),
+    )
+    assert preserved.action == "保留状态"
 
 
 def test_shenfen_uses_team_net_value_not_player_count_alone() -> None:
@@ -190,5 +220,9 @@ def test_all_four_general_audit_schemas_include_required_boundaries() -> None:
     assert "nigu.prevented_damage_charges_consumed" in SUN_CHEN_AUDIT_FIELDS
     assert "qingshi.enemy_only_discard_due_self_empty" in XIN_XIANYING_AUDIT_FIELDS
     assert "wufei.same_user_source_effects_blocked" in GUO_NUWANG_AUDIT_FIELDS
-    assert "wuqian.full_resets_on_zero_damage_card" in SHEN_LUBU_AUDIT_FIELDS
+    assert "wuqian.end_phase_random_damage_card_gained" in SHEN_LUBU_AUDIT_FIELDS
+    assert "wuqian.lightning_used_triggered_end" in SHEN_LUBU_AUDIT_FIELDS
+    assert "wushuang_variant.one_response_card_insufficient" in SHEN_LUBU_AUDIT_FIELDS
+    assert "wuqian.damage_cards_gained_from_current_deck" not in SHEN_LUBU_AUDIT_FIELDS
+    assert "shenfen.stopped_by_victory" not in SHEN_LUBU_AUDIT_FIELDS
 

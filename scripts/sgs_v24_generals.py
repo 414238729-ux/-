@@ -920,11 +920,12 @@ class WumouConversionResult:
     target_ids: tuple[str, ...]
     target_template: str
     distance_rule: str
-    uses_attack_range: bool
-    can_target_self: bool
+    uses_attack_range: bool | None
+    can_target_self: bool | None
     consumes_slash_use_limit: bool
     actual_use_is_damage_card: bool
     physical_static_damage_card: bool
+    legality_externally_verified: bool = False
 
 
 def convert_wumou_trick(
@@ -935,7 +936,10 @@ def convert_wumou_trick(
     original_legal_target_ids: Sequence[str] = (),
     all_player_ids: Sequence[str] = (),
     response_requires_slash: bool = False,
-    borrowed_sword_relation_exists: bool = True,
+    borrowed_sword_relation_exists: bool | None = None,
+    original_legality_verified: bool = False,
+    uses_attack_range: bool | None = None,
+    can_target_self: bool | None = None,
 ) -> WumouConversionResult:
     if not isinstance(card, WumouTrick):
         raise TypeError("无谋转化牌必须使用 WumouTrick 表示")
@@ -951,7 +955,22 @@ def convert_wumou_trick(
     if len(targets) != len(set(targets)) or len(players) != len(set(players)):
         raise ValueError("无谋目标或当前玩家不能重复")
     response_ok = _bool(response_requires_slash, "当前响应窗口是否需要杀")
-    borrowed_ok = _bool(borrowed_sword_relation_exists, "借刀杀人武器关系是否合法")
+    borrowed_ok = (
+        None
+        if borrowed_sword_relation_exists is None
+        else _bool(borrowed_sword_relation_exists, "借刀杀人武器关系是否合法")
+    )
+    externally_verified = _bool(original_legality_verified, "原锦囊目标与合法性是否已由外部核验")
+    attack_range_fact = (
+        None
+        if uses_attack_range is None
+        else _bool(uses_attack_range, "无谋转化杀是否使用攻击范围")
+    )
+    self_target_fact = (
+        None
+        if can_target_self is None
+        else _bool(can_target_self, "无谋转化杀是否可以指定自己")
+    )
 
     legal = True
     reason = "沿用原普通锦囊的目标模板和距离规则"
@@ -961,22 +980,38 @@ def convert_wumou_trick(
         actual_targets = ()
         reason = "当前响应窗口需要打出杀" if legal else "当前没有需要打出杀的合法响应窗口"
     else:
-        if card.target_template == "self_only":
+        if externally_verified and not targets:
             legal = False
             actual_targets = ()
-            reason = "原目标只能是自己，但无谋转化杀不能以自己为目标"
-        elif card.target_template == "all_characters":
-            actual_targets = tuple(player for player in players if player != owner)
-            legal = bool(actual_targets)
-        elif card.target_template == "borrowed_sword_relation" and not borrowed_ok:
+            reason = "当前没有外部已核验的原锦囊目标"
+        elif players and owner not in players:
             legal = False
-            reason = "当前不存在装备武器牌的合法借刀目标关系"
-        elif owner in actual_targets:
+            actual_targets = ()
+            reason = "神吕布不在调用方提供的当前玩家集合中"
+        elif players and any(target not in players for target in targets):
             legal = False
-            reason = "无谋转化杀不能以神吕布自己为目标"
-        elif not actual_targets:
+            actual_targets = ()
+            reason = "原锦囊目标不在调用方提供的当前玩家集合中"
+        elif card.target_template == "borrowed_sword_relation" and borrowed_ok is not True:
             legal = False
-            reason = "当前没有符合原锦囊模板的合法目标"
+            actual_targets = ()
+            reason = (
+                "当前不存在装备武器牌的合法借刀目标关系"
+                if borrowed_ok is False
+                else "借刀杀人的目标关系尚未由外部核验"
+            )
+        elif self_target_fact is False and owner in targets:
+            legal = False
+            actual_targets = ()
+            reason = "调用方明确确认本次无谋转化杀不能指定自己"
+        elif not externally_verified:
+            legal = False
+            actual_targets = ()
+            reason = "攻击范围、自身目标和特殊锦囊逐牌合法性待外部核验"
+        else:
+            legal = True
+            actual_targets = targets
+            reason = "使用外部已核验的原普通锦囊目标"
     return WumouConversionResult(
         legal=legal,
         reason=reason,
@@ -986,11 +1021,16 @@ def convert_wumou_trick(
         target_ids=actual_targets,
         target_template=card.target_template,
         distance_rule=card.distance_rule,
-        uses_attack_range=False,
-        can_target_self=False,
+        uses_attack_range=attack_range_fact,
+        can_target_self=(
+            True if legal and owner in actual_targets else self_target_fact
+        ),
         consumes_slash_use_limit=legal and resolved_action is WumouAction.USE,
         actual_use_is_damage_card=legal,
         physical_static_damage_card=card.static_damage_card,
+        legality_externally_verified=legal and (
+            response_ok if resolved_action is WumouAction.PLAY else externally_verified
+        ),
     )
 
 
@@ -1005,7 +1045,7 @@ def activate_wuqian(
     if state.rage < 2:
         raise ValueError("发动【无前】需要移去两个暴怒")
     if target in state.wuqian_targets:
-        raise ValueError("同一名当前有效的无前目标不能重复选择")
+        raise ValueError("同一目标能否重复发动【无前】待核验，当前接口不作合法性推断")
     return replace(
         state,
         rage=state.rage - 2,
@@ -1021,8 +1061,16 @@ def remove_wuqian_target(
 ) -> ShenLubuReworkState:
     if not isinstance(state, ShenLubuReworkState):
         raise TypeError("神吕布状态必须使用 ShenLubuReworkState 表示")
-    target = _text(target_id, "离场无前目标")
-    return replace(state, wuqian_targets=state.wuqian_targets - {target})
+    _text(target_id, "离场无前目标")
+    raise ValueError("无前目标死亡或离场后的标记处理待核验，当前接口不作推断")
+
+
+def is_shen_lubu_damage_card(card: V24Card) -> bool:
+    """读取现有静态分类，并强制纳入 B 层实测确认的【闪电】。"""
+
+    if not isinstance(card, V24Card):
+        raise TypeError("神吕布伤害牌分类必须使用 V24Card 表示")
+    return card.static_damage_card or card.card_name == "闪电"
 
 
 @dataclass(frozen=True)
@@ -1037,14 +1085,20 @@ def resolve_wuqian_damage_card_completion(
     *,
     is_damage_card_use: bool,
     actual_damage_by_target: Sequence[int],
+    damage_card_name: str | None = None,
 ) -> WuqianDamageResult:
     if not isinstance(state, ShenLubuReworkState):
         raise TypeError("神吕布状态必须使用 ShenLubuReworkState 表示")
     damage_use = _bool(is_damage_card_use, "是否使用伤害牌")
+    if damage_card_name is not None:
+        name = _text(damage_card_name, "本次使用牌名")
+        damage_use = damage_use or name == "闪电"
     damages = tuple(
         ensure_int_at_least(value, "单个目标实际伤害", 0)
         for value in actual_damage_by_target
     )
+    if damage_use and not damages:
+        raise ValueError("伤害牌结算尚无实际伤害结果，不能判定【无前】是否结束")
     total = sum(damages)
     cleared = bool(state.wuqian_targets) and damage_use and total == 0
     after = (
@@ -1055,42 +1109,176 @@ def resolve_wuqian_damage_card_completion(
     return WuqianDamageResult(after, total, cleared)
 
 
+class WushuangResponseKind(str, Enum):
+    SLASH_JINK = "杀的闪响应"
+    DUEL_SLASH = "决斗的杀响应"
+
+
+@dataclass(frozen=True)
+class WushuangVariantResponse:
+    kind: WushuangResponseKind | str
+    responder_id: str
+    required_count: int
+    provided_count: int = 0
+
+    def __post_init__(self) -> None:
+        try:
+            kind = self.kind if isinstance(self.kind, WushuangResponseKind) else WushuangResponseKind(self.kind)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("无双※响应类型无效") from exc
+        object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "responder_id", _text(self.responder_id, "无双※响应角色"))
+        required = ensure_int_at_least(self.required_count, "无双※所需响应牌数", 1)
+        provided = ensure_int_at_least(self.provided_count, "无双※已提供响应牌数", 0)
+        if required not in (1, 2):
+            raise ValueError("无双※所需响应牌数只能是一张或两张")
+        if provided > required:
+            raise ValueError("无双※已提供响应牌数不能超过所需数量")
+
+    @property
+    def required_card_name(self) -> str:
+        return "闪" if self.kind is WushuangResponseKind.SLASH_JINK else "杀"
+
+    @property
+    def remaining_count(self) -> int:
+        return self.required_count - self.provided_count
+
+    @property
+    def complete(self) -> bool:
+        return self.remaining_count == 0
+
+
+def start_wushuang_slash_response(
+    state: ShenLubuReworkState,
+    *,
+    shen_lubu_id: str,
+    slash_user_id: str,
+    target_id: str,
+) -> WushuangVariantResponse:
+    if not isinstance(state, ShenLubuReworkState):
+        raise TypeError("神吕布状态必须使用 ShenLubuReworkState 表示")
+    shen = _text(shen_lubu_id, "神吕布角色标识")
+    user = _text(slash_user_id, "杀使用者")
+    target = _text(target_id, "杀目标")
+    if user != shen:
+        raise ValueError("无双※的两闪要求只适用于神吕布使用的杀")
+    return WushuangVariantResponse(
+        WushuangResponseKind.SLASH_JINK,
+        target,
+        2 if state.wushuang_active else 1,
+    )
+
+
+def start_wushuang_duel_response(
+    state: ShenLubuReworkState,
+    *,
+    shen_lubu_id: str,
+    duel_user_id: str,
+    duel_target_id: str,
+    responder_id: str,
+) -> WushuangVariantResponse:
+    if not isinstance(state, ShenLubuReworkState):
+        raise TypeError("神吕布状态必须使用 ShenLubuReworkState 表示")
+    shen = _text(shen_lubu_id, "神吕布角色标识")
+    user = _text(duel_user_id, "决斗使用者")
+    target = _text(duel_target_id, "决斗目标")
+    responder = _text(responder_id, "决斗当前响应者")
+    if user == target:
+        raise ValueError("决斗使用者与目标不能相同")
+    if shen not in (user, target):
+        raise ValueError("无双※决斗响应必须包含神吕布")
+    if responder not in (user, target):
+        raise ValueError("决斗当前响应者必须是决斗双方之一")
+    opponent = target if user == shen else user
+    return WushuangVariantResponse(
+        WushuangResponseKind.DUEL_SLASH,
+        responder,
+        2 if state.wushuang_active and responder == opponent else 1,
+    )
+
+
+def play_wushuang_response_card(
+    response: WushuangVariantResponse,
+    *,
+    card_name: str,
+) -> WushuangVariantResponse:
+    if not isinstance(response, WushuangVariantResponse):
+        raise TypeError("无双※响应必须使用 WushuangVariantResponse 表示")
+    if response.complete:
+        raise ValueError("无双※本次响应已经完成")
+    card = _text(card_name, "无双※响应牌名")
+    legal = (
+        card == "闪"
+        if response.kind is WushuangResponseKind.SLASH_JINK
+        else card in _SLASH_NAMES
+    )
+    if not legal:
+        raise ValueError(f"无双※本次响应需要打出【{response.required_card_name}】")
+    return replace(response, provided_count=response.provided_count + 1)
+
+
+@dataclass(frozen=True)
+class WuqianDamageCardAward:
+    """来源未知、等待外层随机具现的一张伤害牌奖励。"""
+
+    card_category_key: str = "damage_card"
+    count: int = 1
+    random_selection: bool = True
+    requires_external_materialization: bool = True
+
+    def __post_init__(self) -> None:
+        if self.card_category_key != "damage_card":
+            raise ValueError("无前结束阶段奖励只能使用抽象伤害牌类别")
+        if self.count != 1:
+            raise ValueError("无前结束阶段抽象奖励数量只能是一张")
+        if not _bool(self.random_selection, "无前结束阶段奖励是否随机"):
+            raise ValueError("无前结束阶段抽象奖励必须随机选择")
+        if not _bool(
+            self.requires_external_materialization,
+            "无前结束阶段奖励是否等待外层具现",
+        ):
+            raise ValueError("来源未知的无前结束阶段奖励必须等待外层具现")
+
+
 @dataclass(frozen=True)
 class WuqianEndPhaseResult:
     state_after: ShenLubuReworkState
     damage_cards_in_hand_before: int
     gained_cards: tuple[V24Card, ...]
     draw_pile_after: tuple[V24Card, ...]
+    pending_awards: tuple[WuqianDamageCardAward, ...] = ()
 
 
 def resolve_wuqian_end_phase(
     state: ShenLubuReworkState,
     *,
     hand_cards: Sequence[V24Card],
-    draw_pile: Sequence[V24Card],
+    draw_pile: Sequence[V24Card] = (),
     seed: object | None = None,
 ) -> WuqianEndPhaseResult:
+    """生成来源无关的随机伤害牌奖励；旧牌堆参数只作原样兼容回传。"""
+
     if not isinstance(state, ShenLubuReworkState):
         raise TypeError("神吕布状态必须使用 ShenLubuReworkState 表示")
     hand = tuple(hand_cards)
-    pile = list(draw_pile)
-    if any(not isinstance(card, V24Card) for card in hand + tuple(pile)):
+    legacy_pile = tuple(draw_pile)
+    if any(not isinstance(card, V24Card) for card in hand + legacy_pile):
         raise TypeError("无前手牌与牌堆必须使用 V24Card 表示")
     if any(card.zone is not CardZone.HAND for card in hand):
         raise ValueError("无前结束阶段手牌输入必须来自手牌区")
-    if any(card.zone is not CardZone.DRAW_PILE for card in pile):
-        raise ValueError("无前结束阶段只从当前牌堆获得伤害牌")
-    before = sum(card.static_damage_card for card in hand)
-    need = max(0, state.dynamic_x - before)
-    rng = make_rng(seed)
-    gained: list[V24Card] = []
-    for _ in range(need):
-        indices = [index for index, card in enumerate(pile) if card.static_damage_card]
-        if not indices:
-            break
-        selected = rng.choice(indices)
-        gained.append(replace(pile.pop(selected), zone=CardZone.HAND))
-    return WuqianEndPhaseResult(state, before, tuple(gained), tuple(pile))
+    if any(card.zone is not CardZone.DRAW_PILE for card in legacy_pile):
+        raise ValueError("兼容参数 draw_pile 中的牌必须来自牌堆区")
+    before = sum(is_shen_lubu_damage_card(card) for card in hand)
+    pending_awards = (WuqianDamageCardAward(),) if before == 0 else ()
+    # seed 与 draw_pile 保留为公开调用兼容参数；随机候选及来源必须由外层具现。
+    _ = seed
+    return WuqianEndPhaseResult(
+        state,
+        before,
+        (),
+        legacy_pile,
+        pending_awards,
+    )
 
 
 @dataclass(frozen=True)
@@ -1170,7 +1358,7 @@ def resolve_shenfen(
         ordered_other_players,
         Sequence,
     ):
-        raise TypeError("神愤其他角色必须按通用顺序给出")
+        raise TypeError("神愤其他角色必须按外部已确定的顺序给出")
     participants = list(ordered_other_players)
     if any(not isinstance(item, ShenfenParticipant) for item in participants):
         raise TypeError("神愤目标必须使用 ShenfenParticipant 表示")
@@ -1178,6 +1366,27 @@ def resolve_shenfen(
         raise ValueError("神愤目标不能重复")
     if damage_resolver is not None and not callable(damage_resolver):
         raise TypeError("神愤伤害处理器必须可调用")
+    if any(not item.alive or item.hp <= 0 for item in participants):
+        raise ValueError("神愤死亡或离场角色的参与方式待核验，当前接口不作推断")
+    if any(len(item.hand_card_ids) < 4 for item in participants):
+        raise ValueError("神愤目标手牌不足四张时的处理待核验，当前接口不作推断")
+
+    outcomes: list[ShenfenDamageOutcome] = []
+    for player in participants:
+        outcome = (
+            ShenfenDamageOutcome(1, player.hp - 1, player.hp - 1 >= 1)
+            if damage_resolver is None
+            else damage_resolver(player)
+        )
+        if not isinstance(outcome, ShenfenDamageOutcome):
+            raise TypeError("神愤伤害处理器必须返回 ShenfenDamageOutcome")
+        if outcome.game_over:
+            raise ValueError("神愤伤害后的胜负中止时机待核验，当前接口不作推断")
+        if not outcome.alive_after or outcome.hp_after <= 0:
+            raise ValueError("神愤伤害后的死亡处理待核验，当前接口不作推断")
+        if outcome.hp_after != player.hp - outcome.actual_damage:
+            raise ValueError("神愤实际伤害与伤害后体力必须是外部核验的一致事实")
+        outcomes.append(outcome)
 
     working = replace(
         state,
@@ -1185,16 +1394,7 @@ def resolve_shenfen(
         shenfen_used_this_play_phase=True,
     )
     events: list[ShenfenEvent] = []
-    game_over = False
-    for index, player in enumerate(participants):
-        if not player.alive:
-            continue
-        if damage_resolver is None:
-            outcome = ShenfenDamageOutcome(1, player.hp - 1, player.hp - 1 >= 1)
-        else:
-            outcome = damage_resolver(player)
-            if not isinstance(outcome, ShenfenDamageOutcome):
-                raise TypeError("神愤伤害处理器必须返回 ShenfenDamageOutcome")
+    for index, (player, outcome) in enumerate(zip(participants, outcomes, strict=True)):
         participants[index] = replace(
             player,
             hp=outcome.hp_after,
@@ -1202,11 +1402,6 @@ def resolve_shenfen(
         )
         working = gain_rage_from_damage(working, damage_dealt=outcome.actual_damage)
         events.append(ShenfenEvent("伤害轮", player.player_id, f"实际受到{outcome.actual_damage}点伤害"))
-        if outcome.game_over:
-            game_over = True
-            break
-    if game_over:
-        return ShenfenResult(working, tuple(participants), tuple(events), True, False)
 
     for index, player in enumerate(participants):
         if not player.alive:
