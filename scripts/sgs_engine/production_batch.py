@@ -302,6 +302,49 @@ class _PendingDuel:
 
 
 @dataclass(frozen=True, slots=True)
+class RequiredResponseProgress:
+    """一张真实响应牌提交后的计数结果。
+
+    生产核心只持有这个窄、无技能语义的进度值；某个扩展若需要保存完整
+    obligation，必须把它保存在自己的 session/runtime 中，而不能向
+    ``_PendingSlash``、``_PendingDuel`` 或 formal replay schema 添字段。
+    默认实现永远是 ``1/1``，故既有 formal/no-skill 路径的事件、快照和
+    动作行为保持不变。
+    """
+
+    response_kind: str
+    root_card_id: str
+    responder_id: str
+    required_response_count: int
+    provided_response_count: int
+    completed: bool
+    event_payload: Mapping[str, object] = MappingProxyType({})
+
+
+def advance_required_response_count(
+    required_response_count: int,
+    provided_response_count: int,
+) -> tuple[int, bool]:
+    """推进一次响应义务计数，并在任何非正/溢出值时失败关闭。"""
+
+    if (
+        isinstance(required_response_count, bool)
+        or not isinstance(required_response_count, int)
+        or required_response_count < 1
+    ):
+        raise ProductionBatchError("响应义务所需张数必须是正整数")
+    if (
+        isinstance(provided_response_count, bool)
+        or not isinstance(provided_response_count, int)
+        or provided_response_count < 0
+        or provided_response_count >= required_response_count
+    ):
+        raise ProductionBatchError("响应义务已提供张数无效或已经完成")
+    next_count = provided_response_count + 1
+    return next_count, next_count == required_response_count
+
+
+@dataclass(frozen=True, slots=True)
 class _PendingFireAttack:
     """【火攻】生效后的展示与同花色弃置结算状态。"""
 
@@ -3453,6 +3496,26 @@ class ProductionBasicCardBatch:
             self.state, self._context(), self.registry
         )
 
+    def _validate_session_action(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+    ) -> LegalAction:
+        """会话级动作校验钩子；默认严格沿用公共枚举器。"""
+
+        return validate_action(state, context, action, self.registry)
+
+    def _apply_session_action(
+        self,
+        state: GameState,
+        context: ActionContext,
+        action: LegalAction,
+    ) -> GameState:
+        """会话级动作提交钩子；默认严格沿用公共 apply_action。"""
+
+        return apply_action(state, context, action, self.registry)
+
     def step(
         self,
         controller: (
@@ -3465,15 +3528,15 @@ class ProductionBasicCardBatch:
         if self.is_finished:
             raise ProductionBatchFinishedError(
                 "胜利已经成立，对局不得继续执行动作"
-            )
+        )
         selected = controller or BatchReferenceController()
         context = self._context()
-        legal = enumerate_legal_actions(self.state, context, self.registry)
+        legal = self.legal_actions()
         chosen = selected.choose(legal, context)
-        validated = validate_action(self.state, context, chosen, self.registry)
+        validated = self._validate_session_action(self.state, context, chosen)
         try:
-            self._state = apply_action(
-                self.state, context, validated, self.registry
+            self._state = self._apply_session_action(
+                self.state, context, validated
             )
         except _DeckExhaustedDraw as exc:
             # no_reshuffle_draw：预检失败，state/events 为空，使用动作前状态。
@@ -5076,6 +5139,74 @@ class ProductionBasicCardBatch:
             allowed_event_types=(EventType.CARD_USED,),
         )
 
+    # ------------------------------------------------------------------
+    # 窄响应计数钩子
+    # ------------------------------------------------------------------
+
+    def _open_required_response_obligation(
+        self,
+        *,
+        response_kind: str,
+        root_card_id: str,
+        root_card_type: str,
+        responder_id: str,
+        response_card_type: str,
+        source_id: str,
+        duel_response_index: int | None,
+    ) -> None:
+        """通知 extension 建立义务；默认 no-op，formal 状态绝不扩字段。"""
+
+        del (
+            response_kind,
+            root_card_id,
+            root_card_type,
+            responder_id,
+            response_card_type,
+            source_id,
+            duel_response_index,
+        )
+
+    def _advance_required_response_progress(
+        self,
+        *,
+        response_kind: str,
+        root_card_id: str,
+        responder_id: str,
+        response_card_type: str,
+        duel_response_index: int | None,
+    ) -> RequiredResponseProgress:
+        """默认一张即完成；extension 可覆写而不修改 formal pending。"""
+
+        del response_card_type, duel_response_index
+        provided, completed = advance_required_response_count(1, 0)
+        return RequiredResponseProgress(
+            response_kind=response_kind,
+            root_card_id=root_card_id,
+            responder_id=responder_id,
+            required_response_count=1,
+            provided_response_count=provided,
+            completed=completed,
+        )
+
+    def _commit_required_response_progress(
+        self, progress: RequiredResponseProgress
+    ) -> None:
+        """提交 extension 自有的下一义务状态；默认 no-op。"""
+
+        del progress
+
+    def _clear_required_response_obligation(
+        self,
+        *,
+        response_kind: str,
+        root_card_id: str,
+        responder_id: str,
+        duel_response_index: int | None,
+    ) -> None:
+        """放弃或根结算结束时清理 extension 自有义务；默认 no-op。"""
+
+        del response_kind, root_card_id, responder_id, duel_response_index
+
     def _commit_runtime(
         self, previous: _BatchRuntime, next_runtime: _BatchRuntime
     ) -> None:
@@ -6433,6 +6564,15 @@ class ProductionBasicCardBatch:
             response_window_source_sequence=used_sequence,
             bagua_attempted=False,
         )
+        self._open_required_response_obligation(
+            response_kind="slash_dodge",
+            root_card_id=pending_slash.slash_instance_id,
+            root_card_type="slash",
+            responder_id=target,
+            response_card_type="dodge",
+            source_id=pending_slash.attacker_id,
+            duel_response_index=None,
+        )
         self._commit_runtime(runtime, next_runtime)
         return next_state
 
@@ -6840,7 +6980,7 @@ class ProductionBasicCardBatch:
             )
             self._events.extend((cancelled_event, *finish_events))
             return self._complete_root_resolution(next_state, runtime)
-        return state, replace(
+        next_runtime = replace(
             runtime,
             phase=ProductionPhase.SLASH_RESPONSE,
             response_window_id=(
@@ -6849,6 +6989,16 @@ class ProductionBasicCardBatch:
             response_window_order=(pending.target_id,),
             bagua_attempted=False,
         )
+        self._open_required_response_obligation(
+            response_kind="slash_dodge",
+            root_card_id=pending.slash_instance_id,
+            root_card_type="slash",
+            responder_id=pending.target_id,
+            response_card_type="dodge",
+            source_id=pending.attacker_id,
+            duel_response_index=None,
+        )
+        return state, next_runtime
 
     def apply_dodge(
         self,
@@ -6881,13 +7031,25 @@ class ProductionBasicCardBatch:
             target_id=runtime.pending_slash.target_id,
         )
 
+        progress = self._advance_required_response_progress(
+            response_kind="slash_dodge",
+            root_card_id=runtime.pending_slash.slash_instance_id,
+            responder_id=context.actor_id,
+            response_card_type="dodge",
+            duel_response_index=None,
+        )
         window = self._build_window(runtime)
+        dodge_payload: dict[str, object] = {
+            "response_to": runtime.pending_slash.slash_instance_id
+        }
+        if progress.event_payload:
+            dodge_payload.update(progress.event_payload)
         dodge_event = GameEvent(
             event_type=EventType.CARD_USED,
             card_instance_id=action.card_instance_id,
             card_key="sgs_basic_shan",
             card_user=context.actor_id,
-            payload={"response_to": runtime.pending_slash.slash_instance_id},
+            payload=dodge_payload,
         )
         record = window.respond(context.actor_id, dodge_event)
         assert record.response_event is not None
@@ -6898,12 +7060,23 @@ class ProductionBasicCardBatch:
             context.actor_id,
             "dodge_response_complete",
         )
+        if not progress.completed:
+            # required=2 等 extension 的首张实体【闪】已真实消耗，但根【杀】
+            # 留在 PROCESSING 且阶段不前进；ResponseWindow 不承载该计数。
+            self._events.extend((bound_event, *dodge_move_events))
+            self._commit_required_response_progress(progress)
+            self._commit_runtime(
+                runtime,
+                replace(runtime, bagua_attempted=False),
+            )
+            return next_state
         slash_id = runtime.pending_slash.slash_instance_id
         next_state, slash_runtime, slash_finish_events = (
             self._finish_slash_processing(
                 next_state, runtime, slash_id, "slash_cancelled_by_dodge"
             )
         )
+        self._commit_required_response_progress(progress)
         cancelled_event = GameEvent(
             event_type=EventType.CARD_EFFECT_CANCELLED,
             card_instance_id=slash_id,
@@ -7051,6 +7224,12 @@ class ProductionBasicCardBatch:
         )
 
         pending = runtime.pending_slash
+        self._clear_required_response_obligation(
+            response_kind="slash_dodge",
+            root_card_id=pending.slash_instance_id,
+            responder_id=context.actor_id,
+            duel_response_index=None,
+        )
         # CP-04P 寒冰剑（7.3）：使用【杀】将要造成伤害时，可以防止此伤害；
         # 若如此做，弃置目标2张牌（基础术语第12节：牌=手牌区+装备区）。
         # 目标可弃牌数不足1张时无法发动（7.3特殊说明），直接进入伤害结算。
@@ -9269,6 +9448,17 @@ class ProductionBasicCardBatch:
             response_window_order=(),
             response_window_source_sequence=None,
         )
+        opened_duel = next_runtime.pending_duel
+        assert opened_duel is not None
+        self._open_required_response_obligation(
+            response_kind="duel_slash",
+            root_card_id=opened_duel.trick_instance_id,
+            root_card_type="duel",
+            responder_id=opened_duel.responder_id,
+            response_card_type="slash",
+            source_id=opened_duel.opponent_id,
+            duel_response_index=opened_duel.response_index,
+        )
         return state, next_runtime
 
     def enumerate_duel_response_actions(
@@ -9473,6 +9663,13 @@ class ProductionBasicCardBatch:
                 actor_id=context.actor_id,
                 decision="play_slash",
             )
+            progress = self._advance_required_response_progress(
+                response_kind="duel_slash",
+                root_card_id=duel.trick_instance_id,
+                responder_id=context.actor_id,
+                response_card_type="slash",
+                duel_response_index=duel.response_index,
+            )
             next_state, material_events = (
                 self._move_zhangba_materials_to_processing(
                     state,
@@ -9485,30 +9682,33 @@ class ProductionBasicCardBatch:
                     purpose="duel_slash_response",
                 )
             )
+            played_payload: dict[str, object] = {
+                "response_to": duel.trick_instance_id,
+                "root_trick_instance_id": duel.trick_instance_id,
+                "response_action": "play",
+                "purpose": "duel_slash_response",
+                "creates_card_used_event": False,
+                "creates_card_played_event": True,
+                "counts_for_use_or_play_total": True,
+                "physical_or_virtual": "virtual",
+                "virtual_source": "sgs_weapon_zhangbashemao",
+                "material_card_instance_ids": list(material_ids),
+                "response_provider": context.actor_id,
+                "duel_user_id": duel.user_id,
+                "duel_target_id": duel.target_id,
+                "duel_response_index": duel.response_index,
+                "duel_round": duel.round_index,
+                "next_responder": duel.opponent_id,
+            }
+            if progress.event_payload:
+                played_payload.update(progress.event_payload)
             played_event = GameEvent(
                 event_type=EventType.CARD_PLAYED,
                 card_instance_id=virtual_id,
                 card_key="sgs_basic_sha",
                 card_user=context.actor_id,
                 target_ids=(duel.target_id,),
-                payload={
-                    "response_to": duel.trick_instance_id,
-                    "root_trick_instance_id": duel.trick_instance_id,
-                    "response_action": "play",
-                    "purpose": "duel_slash_response",
-                    "creates_card_used_event": False,
-                    "creates_card_played_event": True,
-                    "counts_for_use_or_play_total": True,
-                    "physical_or_virtual": "virtual",
-                    "virtual_source": "sgs_weapon_zhangbashemao",
-                    "material_card_instance_ids": list(material_ids),
-                    "response_provider": context.actor_id,
-                    "duel_user_id": duel.user_id,
-                    "duel_target_id": duel.target_id,
-                    "duel_response_index": duel.response_index,
-                    "duel_round": duel.round_index,
-                    "next_responder": duel.opponent_id,
-                },
+                payload=played_payload,
             )
             self._events.extend((played_event, *material_events))
             # USER_CONFIRMED_RULE（2026-08-09）：响应【决斗】的丈八
@@ -9525,6 +9725,12 @@ class ProductionBasicCardBatch:
                 reason="zhangba_material_finalize",
             )
             self._events.extend(finalize_events)
+            if not progress.completed:
+                # 第一张（可证明材料生命周期的）丈八虚拟【杀】已完整消耗，
+                # 但不能交换决斗响应者或推进 response_index。
+                self._commit_required_response_progress(progress)
+                self._commit_runtime(runtime, runtime)
+                return next_state
             next_round = (duel.response_index + 1) // 2
             next_duel = replace(
                 duel,
@@ -9534,6 +9740,7 @@ class ProductionBasicCardBatch:
                 response_index=duel.response_index + 1,
                 slash_sequence=(*duel.slash_sequence, virtual_id),
             )
+            self._commit_required_response_progress(progress)
             if not state.players_by_id[next_duel.responder_id].alive:
                 next_state, finish_event = self._finish_processing(
                     next_state,
@@ -9550,6 +9757,15 @@ class ProductionBasicCardBatch:
                 next_runtime = replace(
                     runtime,
                     pending_duel=next_duel,
+                )
+                self._open_required_response_obligation(
+                    response_kind="duel_slash",
+                    root_card_id=next_duel.trick_instance_id,
+                    root_card_type="duel",
+                    responder_id=next_duel.responder_id,
+                    response_card_type="slash",
+                    source_id=next_duel.opponent_id,
+                    duel_response_index=next_duel.response_index,
                 )
             self._commit_runtime(runtime, next_runtime)
             return next_state
@@ -9569,33 +9785,49 @@ class ProductionBasicCardBatch:
             decision="play_slash",
         )
 
+        progress = self._advance_required_response_progress(
+            response_kind="duel_slash",
+            root_card_id=duel.trick_instance_id,
+            responder_id=context.actor_id,
+            response_card_type="slash",
+            duel_response_index=duel.response_index,
+        )
+        played_payload: dict[str, object] = {
+            "response_to": duel.trick_instance_id,
+            "root_trick_instance_id": duel.trick_instance_id,
+            "response_action": "play",
+            "purpose": "duel_slash_response",
+            "creates_card_used_event": False,
+            "creates_card_played_event": True,
+            "counts_for_use_or_play_total": True,
+            "physical_or_virtual": "physical",
+            "response_provider": context.actor_id,
+            "duel_user_id": duel.user_id,
+            "duel_target_id": duel.target_id,
+            "duel_response_index": duel.response_index,
+            "duel_round": duel.round_index,
+            "next_responder": duel.opponent_id,
+        }
+        if progress.event_payload:
+            played_payload.update(progress.event_payload)
         played_event = GameEvent(
             event_type=EventType.CARD_PLAYED,
             card_instance_id=action.card_instance_id,
             card_key=card.card_key,
             card_user=context.actor_id,
             target_ids=(duel.target_id,),
-            payload={
-                "response_to": duel.trick_instance_id,
-                "root_trick_instance_id": duel.trick_instance_id,
-                "response_action": "play",
-                "purpose": "duel_slash_response",
-                "creates_card_used_event": False,
-                "creates_card_played_event": True,
-                "counts_for_use_or_play_total": True,
-                "physical_or_virtual": "physical",
-                "response_provider": context.actor_id,
-                "duel_user_id": duel.user_id,
-                "duel_target_id": duel.target_id,
-                "duel_response_index": duel.response_index,
-                "duel_round": duel.round_index,
-                "next_responder": duel.opponent_id,
-            },
+            payload=played_payload,
         )
         next_state, move_events = self._consume_immediately(
             state, action.card_instance_id, context.actor_id, "duel_slash_response"
         )
         self._events.extend((played_event, *move_events))
+        if not progress.completed:
+            # 第一张实体【杀】已真实进入弃牌堆，当前 responder 与 response_index
+            # 仍保持不变，等待同一人完成本义务或显式 pass。
+            self._commit_required_response_progress(progress)
+            self._commit_runtime(runtime, runtime)
+            return next_state
         next_round = (duel.response_index + 1) // 2
         next_duel = replace(
             duel,
@@ -9605,6 +9837,7 @@ class ProductionBasicCardBatch:
             response_index=duel.response_index + 1,
             slash_sequence=(*duel.slash_sequence, action.card_instance_id),
         )
+        self._commit_required_response_progress(progress)
         if not state.players_by_id[next_duel.responder_id].alive:
             # 死亡角色不能继续打出【杀】；轮到死亡角色继续响应时，
             # 后续【决斗】立即结束，不向死亡角色凭空补结算伤害。
@@ -9624,6 +9857,15 @@ class ProductionBasicCardBatch:
                 runtime,
                 pending_duel=next_duel,
             )
+            self._open_required_response_obligation(
+                response_kind="duel_slash",
+                root_card_id=next_duel.trick_instance_id,
+                root_card_type="duel",
+                responder_id=next_duel.responder_id,
+                response_card_type="slash",
+                source_id=next_duel.opponent_id,
+                duel_response_index=next_duel.response_index,
+            )
         self._commit_runtime(runtime, next_runtime)
         return next_state
 
@@ -9642,6 +9884,12 @@ class ProductionBasicCardBatch:
             raise InvalidActionError("当前没有进行中的【决斗】")
         if context.actor_id != duel.responder_id:
             raise InvalidActionError("只有当前响应者可以放弃响应")
+        self._clear_required_response_obligation(
+            response_kind="duel_slash",
+            root_card_id=duel.trick_instance_id,
+            responder_id=duel.responder_id,
+            duel_response_index=duel.response_index,
+        )
         if not state.players_by_id[duel.responder_id].alive:
             # 轮到死亡角色继续响应：后续【决斗】立即结束，
             # 不向死亡角色凭空补结算一次伤害。
@@ -17468,9 +17716,11 @@ __all__ = [
     "ProductionBatchResult",
     "ProductionBatchSafetyLimitError",
     "ProductionBasicCardBatch",
+    "RequiredResponseProgress",
     "DeathConfirmationContext",
     "ProductionPhase",
     "ScriptedBatchController",
     "cleanup_finished_transient_runtime",
+    "advance_required_response_count",
     "finished_transient_cleanup_values",
 ]

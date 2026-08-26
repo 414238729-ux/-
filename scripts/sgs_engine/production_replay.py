@@ -17,6 +17,11 @@ from typing import Any, Mapping, Sequence
 
 from .actions import ActionContext, LegalAction
 from .engine import ENGINE_VERSION, canonical_state_snapshot
+from .experimental_active_response import (
+    EXPERIMENTAL_ACTIVE_RESPONSE_MODE,
+    ExperimentalActiveResponseConfiguration,
+    ExperimentalActiveResponseSession,
+)
 from .mode_2v2 import FORMAL_NO_SKILL_2V2_MODE
 from .mode_doudizhu import FORMAL_NO_SKILL_DOUDIZHU_MODE
 from .mode_identity import (
@@ -2787,7 +2792,458 @@ def reexecute_production_replay(
     )
 
 
+EXPERIMENTAL_ACTIVE_RESPONSE_REEXECUTION_SCHEMA = (
+    "experimental-active-response-modifier-reexecution-v1"
+)
+_EXPERIMENTAL_ACTIVE_RESPONSE_PRIVATE_SCHEMA = (
+    "experimental-active-response-modifier-authoritative-private-v1"
+)
+_EXPERIMENTAL_ACTIVE_RESPONSE_ROOT_FIELDS = {
+    "header",
+    "decisions",
+    "random_consumptions",
+    "events",
+    "event_hash_chain",
+    "outcome",
+    "authoritative_private",
+    "record_sha256",
+}
+_EXPERIMENTAL_ACTIVE_RESPONSE_HEADER_FIELDS = {
+    "schema_version",
+    "engine_version",
+    "mode_id",
+    "experimental",
+    "formal_result",
+    "configuration",
+    "configuration_identity",
+    "deck_definition",
+    "deck_hash",
+    "seed",
+    "initial_rng_state",
+    "initial_rng_state_sha256",
+    "initial_rng_call_count",
+    "initial_event_count",
+    "initial_skill_state",
+    "initial_pending_response_obligation",
+    "initial_execution_hash",
+    "initial_game_state_hash",
+}
+_EXPERIMENTAL_ACTIVE_RESPONSE_DECISION_FIELDS = _DECISION_FIELDS | {
+    "pending_response_obligation_before",
+    "pending_response_obligation_after",
+}
+_EXPERIMENTAL_ACTIVE_RESPONSE_OUTCOME_FIELDS = _OUTCOME_FIELDS | {
+    "final_skill_state",
+    "final_pending_response_obligation",
+}
+
+
+def _experimental_obligation_value(
+    game: ExperimentalActiveResponseSession,
+) -> dict[str, object] | None:
+    obligation = game.pending_response_obligation
+    return None if obligation is None else obligation.to_dict()
+
+
+def _experimental_record_digest(value: Mapping[str, object]) -> str:
+    material = dict(value)
+    material.pop("record_sha256", None)
+    return sha256_value(material)
+
+
+def _validate_experimental_active_response_replay_value(
+    value: Mapping[str, object],
+) -> dict[str, object]:
+    """Strictly validate structure before any experimental session is rebuilt."""
+
+    material = _plain(_require_mapping(value, "实验响应修饰器回放"))
+    _require_exact_fields(
+        material,
+        _EXPERIMENTAL_ACTIVE_RESPONSE_ROOT_FIELDS,
+        "实验响应修饰器回放",
+    )
+    record_sha = material["record_sha256"]
+    if not isinstance(record_sha, str) or len(record_sha) != 64:
+        raise ProductionReplayFormatError("实验回放record_sha256必须是64位SHA-256")
+    if _experimental_record_digest(material) != record_sha:
+        raise ProductionReplayFormatError("实验回放record_sha256不匹配")
+    header = _plain(_require_mapping(material["header"], "实验回放header"))
+    _require_exact_fields(
+        header,
+        _EXPERIMENTAL_ACTIVE_RESPONSE_HEADER_FIELDS,
+        "实验回放header",
+    )
+    if header["schema_version"] != EXPERIMENTAL_ACTIVE_RESPONSE_REEXECUTION_SCHEMA:
+        raise ProductionReplayFormatError("实验回放schema不受支持")
+    if header["mode_id"] != EXPERIMENTAL_ACTIVE_RESPONSE_MODE:
+        raise ProductionReplayFormatError("实验回放mode_id不匹配")
+    if type(header["engine_version"]) is not str or not header["engine_version"]:
+        raise ProductionReplayFormatError("实验回放engine_version必须是非空字符串")
+    if header["experimental"] is not True or header["formal_result"] is not False:
+        raise ProductionReplayFormatError(
+            "实验回放必须声明experimental=true且formal_result=false"
+        )
+    configuration_value = _require_mapping(header["configuration"], "实验回放configuration")
+    try:
+        configuration = ExperimentalActiveResponseConfiguration.from_dict(
+            configuration_value
+        )
+    except (TypeError, ValueError) as exc:
+        raise ProductionReplayFormatError("实验回放configuration不合法") from exc
+    if header["configuration_identity"] != configuration.identity:
+        raise ProductionReplayFormatError("实验回放configuration identity不匹配")
+    if not isinstance(header["seed"], int) or isinstance(header["seed"], bool):
+        raise ProductionReplayFormatError("实验回放seed必须是整数")
+    for key in (
+        "initial_rng_call_count",
+        "initial_event_count",
+    ):
+        if (
+            not isinstance(header[key], int)
+            or isinstance(header[key], bool)
+            or header[key] < 0
+        ):
+            raise ProductionReplayFormatError(f"实验回放header.{key}必须是非负整数")
+    private = _plain(
+        _require_mapping(material["authoritative_private"], "实验回放私有材料")
+    )
+    _require_exact_fields(private, _PRIVATE_FIELDS, "实验回放私有材料")
+    if private["schema"] != _EXPERIMENTAL_ACTIVE_RESPONSE_PRIVATE_SCHEMA:
+        raise ProductionReplayFormatError("实验回放私有材料schema不受支持")
+    session_id = private["session_id"]
+    secret_hex = private["session_secret_hex"]
+    if not isinstance(session_id, str) or not session_id:
+        raise ProductionReplayFormatError("实验回放session_id必须是非空字符串")
+    if not isinstance(secret_hex, str) or len(secret_hex) != 64:
+        raise ProductionReplayFormatError("实验回放session_secret_hex必须是64位十六进制")
+    try:
+        bytes.fromhex(secret_hex)
+    except ValueError as exc:
+        raise ProductionReplayFormatError("实验回放session_secret_hex不是合法十六进制") from exc
+    decisions = _require_sequence(material["decisions"], "实验回放decisions")
+    for index, decision in enumerate(decisions):
+        item = _require_mapping(decision, f"实验回放decisions[{index}]")
+        _require_exact_fields(
+            item,
+            _EXPERIMENTAL_ACTIVE_RESPONSE_DECISION_FIELDS,
+            f"实验回放decisions[{index}]",
+        )
+        if type(item["index"]) is not int or item["index"] != index:
+            raise ProductionReplayFormatError("实验回放决策索引必须从0连续递增")
+        for key in ("rng_start", "rng_end", "event_start", "event_end"):
+            if type(item[key]) is not int or item[key] < 0:
+                raise ProductionReplayFormatError(
+                    f"实验回放decisions[{index}].{key}必须是非负整数"
+                )
+        for key in (
+            "context_sha256",
+            "legal_action_set_sha256",
+            "state_before_sha256",
+            "state_after_sha256",
+            "execution_before_sha256",
+            "execution_after_sha256",
+        ):
+            if not isinstance(item[key], str) or len(item[key]) != 64:
+                raise ProductionReplayFormatError(
+                    f"实验回放decisions[{index}].{key}必须是64位SHA-256"
+                )
+        if not isinstance(item["chosen_action_id"], str):
+            raise ProductionReplayFormatError(
+                f"实验回放decisions[{index}].chosen_action_id必须是字符串"
+            )
+    events = _require_sequence(material["events"], "实验回放events")
+    chain = _require_sequence(material["event_hash_chain"], "实验回放event_hash_chain")
+    if len(chain) != len(events) or any(
+        not isinstance(item, str) or len(item) != 64 for item in chain
+    ):
+        raise ProductionReplayFormatError("实验回放事件哈希链长度或格式不合法")
+    outcome = _require_mapping(material["outcome"], "实验回放outcome")
+    _require_exact_fields(
+        outcome,
+        _EXPERIMENTAL_ACTIVE_RESPONSE_OUTCOME_FIELDS,
+        "实验回放outcome",
+    )
+    return material
+
+
+@dataclass(frozen=True, slots=True)
+class ExperimentalActiveResponseReplay:
+    """Independent strict-reexecution record for the experimental mode only."""
+
+    value: Mapping[str, object]
+
+    def __post_init__(self) -> None:
+        normalized = _validate_experimental_active_response_replay_value(self.value)
+        object.__setattr__(self, "value", MappingProxyType(normalized))
+
+    def to_dict(self) -> dict[str, object]:
+        return _plain(self.value)
+
+    @classmethod
+    def from_dict(
+        cls, value: Mapping[str, object]
+    ) -> "ExperimentalActiveResponseReplay":
+        return cls(value=value)
+
+
+def record_experimental_active_response_replay(
+    seed: int,
+    *,
+    configuration: ExperimentalActiveResponseConfiguration,
+    controller: Any | None = None,
+    max_steps: int = 2000,
+) -> ExperimentalActiveResponseReplay:
+    """Record only a naturally initialized experimental session.
+
+    No fixture, provider, pre-mutated session, injected skill state, or external
+    configuration channel is accepted by this factory.
+    """
+
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise ValueError("实验回放seed必须是整数")
+    if isinstance(max_steps, bool) or not isinstance(max_steps, int) or max_steps < 1:
+        raise ValueError("实验回放max_steps必须是正整数")
+    if type(configuration) is not ExperimentalActiveResponseConfiguration:
+        raise TypeError("实验回放必须接收exact ExperimentalActiveResponseConfiguration")
+    game = ExperimentalActiveResponseSession(seed=seed, configuration=configuration)
+    initial_skill_state = game.experimental_skill_state.to_dict()
+    initial_obligation = _experimental_obligation_value(game)
+    deck_definition = _deck_definition(game.formal_registry.records)
+    header: dict[str, object] = {
+        "schema_version": EXPERIMENTAL_ACTIVE_RESPONSE_REEXECUTION_SCHEMA,
+        "engine_version": ENGINE_VERSION,
+        "mode_id": EXPERIMENTAL_ACTIVE_RESPONSE_MODE,
+        "experimental": True,
+        "formal_result": False,
+        "configuration": configuration.to_dict(),
+        "configuration_identity": configuration.identity,
+        "deck_definition": deck_definition,
+        "deck_hash": sha256_value(deck_definition),
+        "seed": seed,
+        "initial_rng_state": game._rng.export_initial_state(),
+        "initial_rng_state_sha256": game._rng.initial_state_sha256,
+        "initial_rng_call_count": len(game.rng_calls),
+        "initial_event_count": len(game.events),
+        "initial_skill_state": initial_skill_state,
+        "initial_pending_response_obligation": initial_obligation,
+        "initial_execution_hash": _execution_hash(game),
+        "initial_game_state_hash": _game_state_hash(game),
+    }
+    selected = controller or BatchReferenceController()
+    decisions: list[dict[str, object]] = []
+    while not game.is_finished:
+        if len(decisions) >= max_steps:
+            raise ProductionBatchSafetyLimitError(
+                f"实验回放在{max_steps}个动作后仍未结束；禁止截断"
+            )
+        context = game._context()
+        legal = game.legal_actions()
+        chosen = selected.choose(legal, context)
+        if chosen.action_id is None:
+            raise ProductionReplayFormatError("实验回放控制器返回了无action_id动作")
+        before_obligation = _experimental_obligation_value(game)
+        rng_start = len(game.rng_calls)
+        event_start = len(game.events)
+        before_state = _game_state_hash(game)
+        before_execution = _execution_hash(game)
+        executed = game.step(BatchActionIdController(chosen.action_id))
+        if executed.action_id != chosen.action_id:
+            raise ProductionReplayFormatError("实验回放真实step提交了不同动作")
+        context_value = _context_value(context)
+        legal_values = [_action_value(action) for action in legal]
+        decisions.append(
+            {
+                "index": len(decisions),
+                "context": context_value,
+                "context_sha256": sha256_value(context_value),
+                "legal_actions": legal_values,
+                "legal_action_set_sha256": sha256_value(legal_values),
+                "chosen_action_id": chosen.action_id,
+                "chosen_action": _action_value(chosen),
+                "state_before_sha256": before_state,
+                "state_after_sha256": _game_state_hash(game),
+                "execution_before_sha256": before_execution,
+                "execution_after_sha256": _execution_hash(game),
+                "rng_start": rng_start,
+                "rng_end": len(game.rng_calls),
+                "event_start": event_start,
+                "event_end": len(game.events),
+                "pending_response_obligation_before": before_obligation,
+                "pending_response_obligation_after": _experimental_obligation_value(game),
+            }
+        )
+    game.assert_finished_state_invariants()
+    events = tuple(_event_values(game))
+    event_chain = _build_event_hash_chain(events)
+    outcome: dict[str, object] = {
+        "winner_id": game.winner_id,
+        "finish_reason": game._resolve_public_finish_reason(),
+        "step_count": game.step_count,
+        "turn_count": game.runtime.turn_number,
+        "decision_count": len(decisions),
+        "random_consumption_count": len(game.rng_calls),
+        "event_count": len(game.events),
+        "event_chain_tip": event_chain[-1] if event_chain else _EVENT_CHAIN_ANCHOR,
+        "final_execution_hash": _execution_hash(game),
+        "final_game_state_hash": _game_state_hash(game),
+        "final_skill_state": game.experimental_skill_state.to_dict(),
+        "final_pending_response_obligation": _experimental_obligation_value(game),
+    }
+    value: dict[str, object] = {
+        "header": header,
+        "decisions": decisions,
+        "random_consumptions": _rng_values(game),
+        "events": events,
+        "event_hash_chain": event_chain,
+        "outcome": outcome,
+        "authoritative_private": {
+            "schema": _EXPERIMENTAL_ACTIVE_RESPONSE_PRIVATE_SCHEMA,
+            "session_id": game.session_id,
+            "session_secret_hex": game.session_secret_hex,
+        },
+    }
+    value["record_sha256"] = _experimental_record_digest(value)
+    return ExperimentalActiveResponseReplay(value)
+
+
+def reexecute_experimental_active_response_replay(
+    record: ExperimentalActiveResponseReplay | Mapping[str, object],
+) -> ProductionReplayVerificationResult:
+    """Strictly rebuild and reexecute the isolated experimental mode.
+
+    The record has no fixture or external-state parameters.  Every action is
+    submitted by action_id through the experimental session's own legal-action
+    binding, including root/obligation/count/duel-index checks.
+    """
+
+    replay = (
+        record
+        if isinstance(record, ExperimentalActiveResponseReplay)
+        else ExperimentalActiveResponseReplay.from_dict(record)
+    )
+    value = _validate_experimental_active_response_replay_value(replay.value)
+    header = _require_mapping(value["header"], "实验回放header")
+    private = _require_mapping(value["authoritative_private"], "实验回放私有材料")
+    raw_configuration = _require_mapping(header["configuration"], "实验回放configuration")
+    try:
+        configuration = ExperimentalActiveResponseConfiguration.from_dict(
+            raw_configuration
+        )
+    except (TypeError, ValueError) as exc:
+        raise ProductionReplayFormatError("实验回放configuration无法严格重建") from exc
+    game = ExperimentalActiveResponseSession(
+        seed=int(header["seed"]),
+        configuration=configuration,
+        session_id=str(private["session_id"]),
+        session_secret=bytes.fromhex(str(private["session_secret_hex"])),
+    )
+    _expect_equal("mode", None, EXPERIMENTAL_ACTIVE_RESPONSE_MODE, game.mode_id, "模式不一致")
+    _expect_equal("header", None, ENGINE_VERSION, header["engine_version"], "引擎版本不一致")
+    _expect_equal("header", None, True, game.experimental, "实验标记不一致")
+    _expect_equal("header", None, False, game.formal_result_eligible, "formal_result泄漏")
+    _expect_equal(
+        "configuration",
+        None,
+        header["configuration_identity"],
+        game.configuration.identity,
+        "配置identity不一致",
+    )
+    _expect_equal(
+        "configuration", None, header["configuration"], game.configuration.to_dict(), "配置不一致"
+    )
+    live_deck = _deck_definition(game.formal_registry.records)
+    _expect_equal("deck", None, header["deck_definition"], live_deck, "牌堆定义不一致")
+    _expect_equal("deck", None, header["deck_hash"], sha256_value(live_deck), "牌堆哈希不一致")
+    _expect_equal("rng", None, header["initial_rng_state"], game._rng.export_initial_state(), "初始RNG不一致")
+    _expect_equal(
+        "rng", None, header["initial_rng_state_sha256"], game._rng.initial_state_sha256, "初始RNG哈希不一致"
+    )
+    _expect_equal(
+        "rng", None, header["initial_rng_call_count"], len(game.rng_calls), "初始RNG索引不一致"
+    )
+    _expect_equal(
+        "event", None, header["initial_event_count"], len(game.events), "初始事件索引不一致"
+    )
+    _expect_equal(
+        "skill_state", None, header["initial_skill_state"], game.experimental_skill_state.to_dict(), "初始技能状态不一致"
+    )
+    _expect_equal(
+        "obligation", None, header["initial_pending_response_obligation"], _experimental_obligation_value(game), "初始义务不一致"
+    )
+    _expect_equal("state", None, header["initial_execution_hash"], _execution_hash(game), "初始执行哈希不一致")
+    _expect_equal("state", None, header["initial_game_state_hash"], _game_state_hash(game), "初始状态哈希不一致")
+    decisions = _require_sequence(value["decisions"], "实验回放decisions")
+    for index, raw_decision in enumerate(decisions):
+        if game.is_finished:
+            raise ProductionReplayDivergenceError("decision", index, "终局后仍存在决策")
+        decision = _require_mapping(raw_decision, f"实验回放decisions[{index}]")
+        context = game._context()
+        context_value = _context_value(context)
+        legal = game.legal_actions()
+        legal_values = [_action_value(action) for action in legal]
+        _expect_equal("context", index, decision["context"], context_value, "行动上下文不一致")
+        _expect_equal("context", index, decision["context_sha256"], sha256_value(context_value), "行动上下文哈希不一致")
+        _expect_equal("legal_actions", index, decision["legal_actions"], legal_values, "合法动作集合不一致")
+        _expect_equal("legal_actions", index, decision["legal_action_set_sha256"], sha256_value(legal_values), "合法动作哈希不一致")
+        _expect_equal("obligation", index, decision["pending_response_obligation_before"], _experimental_obligation_value(game), "动作前义务不一致")
+        _expect_equal("state", index, decision["state_before_sha256"], _game_state_hash(game), "动作前状态不一致")
+        _expect_equal("state", index, decision["execution_before_sha256"], _execution_hash(game), "动作前执行快照不一致")
+        _expect_equal("rng", index, decision["rng_start"], len(game.rng_calls), "动作前RNG索引不一致")
+        _expect_equal("event", index, decision["event_start"], len(game.events), "动作前事件索引不一致")
+        chosen_id = decision["chosen_action_id"]
+        if not isinstance(chosen_id, str):
+            raise ProductionReplayFormatError("实验回放chosen_action_id必须是字符串")
+        chosen = next((item for item in legal if item.action_id == chosen_id), None)
+        if chosen is None:
+            raise ProductionReplayDivergenceError("decision", index, "记录动作不在当前合法集合中")
+        _expect_equal("decision", index, decision["chosen_action"], _action_value(chosen), "选择动作不一致")
+        executed = game.step(BatchActionIdController(chosen_id))
+        _expect_equal("decision", index, chosen_id, executed.action_id, "真实step提交了不同动作")
+        rng_end = decision["rng_end"]
+        event_end = decision["event_end"]
+        if not isinstance(rng_end, int) or not isinstance(event_end, int):
+            raise ProductionReplayFormatError("实验回放动作后索引必须是整数")
+        _compare_sequence("rng", int(decision["rng_start"]), list(value["random_consumptions"])[int(decision["rng_start"]):rng_end], _rng_values(game)[int(decision["rng_start"]):])
+        _compare_sequence("event", int(decision["event_start"]), list(value["events"])[int(decision["event_start"]):event_end], _event_values(game)[int(decision["event_start"]):])
+        _expect_equal("rng", index, rng_end, len(game.rng_calls), "动作后RNG索引不一致")
+        _expect_equal("event", index, event_end, len(game.events), "动作后事件索引不一致")
+        _expect_equal("obligation", index, decision["pending_response_obligation_after"], _experimental_obligation_value(game), "动作后义务不一致")
+        _expect_equal("state", index, decision["state_after_sha256"], _game_state_hash(game), "动作后状态不一致")
+        _expect_equal("state", index, decision["execution_after_sha256"], _execution_hash(game), "动作后执行快照不一致")
+    if not game.is_finished:
+        raise ProductionReplayDivergenceError("decision", len(decisions), "记录结束但对局尚未终局")
+    events = _event_values(game)
+    _compare_sequence("rng", 0, list(value["random_consumptions"]), _rng_values(game))
+    _compare_sequence("event", 0, list(value["events"]), events)
+    chain = _build_event_hash_chain(events)
+    _compare_sequence("event_hash_chain", 0, list(value["event_hash_chain"]), list(chain))
+    outcome = _require_mapping(value["outcome"], "实验回放outcome")
+    _expect_equal("outcome", None, outcome["winner_id"], game.winner_id, "胜者不一致")
+    _expect_equal("outcome", None, outcome["finish_reason"], game._resolve_public_finish_reason(), "终局原因不一致")
+    _expect_equal("outcome", None, outcome["step_count"], game.step_count, "动作数不一致")
+    _expect_equal("outcome", None, outcome["turn_count"], game.runtime.turn_number, "回合数不一致")
+    _expect_equal("outcome", None, outcome["decision_count"], len(decisions), "决策数不一致")
+    _expect_equal("outcome", None, outcome["random_consumption_count"], len(game.rng_calls), "RNG数不一致")
+    _expect_equal("outcome", None, outcome["event_count"], len(game.events), "事件数不一致")
+    _expect_equal("outcome", None, outcome["event_chain_tip"], chain[-1] if chain else _EVENT_CHAIN_ANCHOR, "事件链尖端不一致")
+    _expect_equal("outcome", None, outcome["final_execution_hash"], _execution_hash(game), "最终执行哈希不一致")
+    _expect_equal("outcome", None, outcome["final_game_state_hash"], _game_state_hash(game), "最终状态哈希不一致")
+    _expect_equal("outcome", None, outcome["final_skill_state"], game.experimental_skill_state.to_dict(), "最终技能状态不一致")
+    _expect_equal("outcome", None, outcome["final_pending_response_obligation"], _experimental_obligation_value(game), "最终义务不一致")
+    return ProductionReplayVerificationResult(
+        verified=True,
+        winner_id=game.winner_id,
+        decision_count=len(decisions),
+        random_consumption_count=len(game.rng_calls),
+        event_count=len(game.events),
+        final_execution_hash=_execution_hash(game),
+        final_game_state_hash=_game_state_hash(game),
+    )
+
+
 __all__ = [
+    "EXPERIMENTAL_ACTIVE_RESPONSE_REEXECUTION_SCHEMA",
+    "ExperimentalActiveResponseReplay",
     "ProductionReexecutionReplay",
     "ProductionReplayDivergenceError",
     "ProductionReplayFormatError",
@@ -2800,6 +3256,8 @@ __all__ = [
     "record_reference_formal_heir_and_spy_choice_identity",
     "record_reference_formal_identity",
     "record_reference_formal_duel",
+    "record_experimental_active_response_replay",
     "record_reference_production_batch",
+    "reexecute_experimental_active_response_replay",
     "reexecute_production_replay",
 ]
