@@ -1364,3 +1364,95 @@ release ready；是否进入下一开发阶段由用户决定。
 - 不得扩张为 `FULL_GAME_READY`、`PRODUCTION_RELEASE_READY`、`RELEASE_READY`、
   `AUTHORITATIVE_FULL_GAME_READY`、`ALL_CARD_RULES_COMPLETE` 或完整游戏无缺陷证明。
 - 下一阶段是否为 timed 8-player、其它 special identity variant 或其它工作，由用户决定。
+
+## NEXT_STAGE_C7_ACTIVE_MODE_DECISION_FULL_GAME_ACCEPTANCE_V1
+
+状态：`IMPLEMENTED / AUDITED`
+
+本批在不修改 C7 规则语义与旧 full-game/replay 合同的前提下，新增独立的
+C7 主动模式决策完整整局动态验收。冻结场景矩阵恰好三行：
+
+- `HEIR_SUCCESSION`：seed `1`，实际选择 `select_heir(p3)`；
+- `SPY_TO_LOYALIST`：seed `1`，实际选择 `choose_spy_path(path="loyalist")`；
+- `SPY_TO_AMBITIONIST`：seed `2`，实际选择 `choose_spy_path(path="ambitionist")`。
+
+控制器身份为
+`c7-active-mode-decision-acceptance-controller-v1` / version `1`，场景配置
+schema 为 `sgs-c7-active-mode-decision-scenario-v1`。控制器输入仅限当前签发
+的 `legal_actions`、公开的 mode/phase/actor/turn-player/response-window/revision
+投影及冻结场景配置；不读取 session、state、私有手牌、RNG、deck、身份映射
+或 `ActionContext.metadata`。场景配置与控制器中不存在 frozen-seed 私密身份
+actor、protected-player 或 pre/post-transition target table；主公、实际择途者与
+保护对象只能从此前公开签发的合法动作窗口学习，战斗目标只从当前公开合法
+动作确定。
+
+独立 replay schema 为
+`sgs-c7-active-mode-decision-full-game-replay-v1`。它绑定场景、seed、控制器与
+配置 hash、implementation/ruleset/mode-profile/deck identity 及 production
+replay-v1 hash；production replay hash 与 outer replay hash 都是包含随机
+session authentication material 的 per-record hash，不是同 seed 的 canonical
+deterministic hash。反序列化时先核 schema/hash/identity，再 strict reexecute
+production replay-v1，并以全新控制器沿 live legal actions 重算动作与动态
+proof。serialized proof 与 derived gate 均不是可信真相源。
+
+全部 exact schema、contract/mode/scenario/seed/controller/configuration、内外层
+hash 与 implementation/ruleset/mode-profile/deck identity preflight 均在任何
+C7 session 构造之前完成；current ruleset identity 由静态正式注册 profile
+派生。active proof 绑定 chosen action 的 actor/revision/state hash、live state
+revision、response-window/pending-window、对应 decision event slice、真实
+event type/target/card-user/payload、角色/继位 transition 与 downstream 状态/
+终局。忠臣转化公告没有 `target_ids`，因此不写入 verifier 自填 target；actor
+由真实 chooser、pending/locked、role transition 与自然回合推进共同绑定。
+野心家标记必须存在 conversion 后的非空真实 mark-use event indices，不接受
+自填布尔值替代。
+
+独立 matrix schema 为
+`sgs-c7-active-mode-decision-full-game-matrix-v1`。唯一新增 derived gate 是
+`c7_active_mode_decision_full_game_v1_proven`；它只表示上述三行主动决策整局
+轨迹均经严格重执行与场景 proof 重新派生通过。
+
+本状态登记不提升或改写：
+
+- `authoritative_no_skill_full_game_v1_ready`；
+- `FULL_GAME_READY`；
+- `RELEASE_READY`；
+- `ALL_CARD_RULES_COMPLETE`；
+- 原 Stage3 126-cell contract、runner、tests 或 artifacts；
+- C5/C6/C7 正式模式构造器或 C8/manifest/tag 状态。
+
+本轮 production remediation 后的 current implementation identity 为
+`d059061e0345e5ed89e86600a7dcd8bd68b49af1db9030259cc72656c94a5355`。
+第一次与第二次独立 closure audit 的历史结论均为 `FAILED`，不得改写。
+第三次独立 closure audit 结论为
+`C7_ACTIVE_MODE_DECISION_FULL_GAME_V1_THIRD_CLOSURE_AUDIT` = `PASSED`，
+因此本节登记 `IMPLEMENTED / AUDITED`。本节仍不登记 `COMPLETE`、
+`FULL_GAME_READY`、`RELEASE_READY` 或 C8。
+
+第二次审计前记录的第一次 full pytest 与第二次本机 full pytest（旧
+`2877 passed` 记录）只属于当时的 implementation identity
+`801d60edbc2d1508b33ee34442fa8159d2a4885785ad0e254180bc1c57461236`。
+那些旧结果不得作为当前 identity 的最终 full-suite gate。
+
+当前 identity 的最终 full pytest 已经完成并 PASS：
+`2887 passed in 5887.85s (1:38:07)`；`0 failed`；`0 errors`；
+exit code = `0`。Python 为
+`D:\MyGPT\game-analysis-grok-eval\.venv\Scripts\python.exe`；
+basetemp 为
+`D:\MyGPT\basetemp\c7-active-mode-decision-final-full-20260827T185415`。
+
+当前 identity 在最终 full pytest 之前的定向证据（不是 full pytest）：
+新 acceptance/adversarial tests 为 `32 passed in 599.13s`；identity
+closure 为 `6 passed in 33.31s`；authoritative V1 与必要旧 C7
+regressions 为 `73 passed in 1240.55s`；compileall 与
+`git diff --check` 均为 exit `0`。
+
+第三次独立 closure audit 已审计以下仓库外固定 artifact，不得只引用
+replay hash：
+
+- path：`D:\MyGPT\basetemp\c7-active-mode-decision-full-game-v1-final\20260827T181631+0800`；
+- `matrix.json` SHA-256：
+  `a925e77848678342558ecfe0db21e417812c9fc28fb50931a2b2d351f8eb5e78`；
+- seeds：`HEIR_SUCCESSION=1`、`SPY_TO_LOYALIST=1`、
+  `SPY_TO_AMBITIONIST=2`；
+- 磁盘冷加载后，正式 `Matrix.from_dict()`、三行 strict reexecute 与重新计算
+  `c7_active_mode_decision_full_game_v1_proven=true` 全部通过。
