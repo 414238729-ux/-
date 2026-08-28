@@ -42,6 +42,15 @@
   `NONE OPEN`。三项 observation 保持 OPEN / non-blocking；本次 docs-only closure
   commit 只登记状态，不得冒充被审计 implementation SHA。当前 C7 scope 进入
   `AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`，见 §13。）
+- `AUTHORITATIVE_SKILL_RUNTIME_V1` =
+  `IMPLEMENTED / FINAL CLOSURE REAUDIT PASSED /
+  2988/2988 FULL PYTEST PASSED / AUDITED_PASSED`
+  （当前分支 = `codex/authoritative-skill-runtime-v1`，基线 HEAD =
+  `e31c186a3833b0bfaa59969cbca65202e779cfc0`，当前
+  `POST_B_CURRENT_IMPLEMENTATION_IDENTITY` =
+  `2460d3ac6998746a4aa5c13cf84321d652b965d9a462d325b41519625116c949`。
+  不等于 all generals / full skill roster / FULL_GAME_READY / RELEASE_READY /
+  formal win-rate ready / AI ready。见 §15。）
 - `F-003` = `CLOSED`
 - `F-004` = `CLOSED`
 - `F-005` = `CLOSED`
@@ -1456,3 +1465,101 @@ replay hash：
   `SPY_TO_AMBITIONIST=2`；
 - 磁盘冷加载后，正式 `Matrix.from_dict()`、三行 strict reexecute 与重新计算
   `c7_active_mode_decision_full_game_v1_proven=true` 全部通过。
+
+## 15. AUTHORITATIVE_SKILL_RUNTIME_V1
+
+- **状态**：`IMPLEMENTED / FINAL CLOSURE REAUDIT PASSED /
+  2988/2988 FULL PYTEST PASSED / AUDITED_PASSED`
+- **开发分支**：`codex/authoritative-skill-runtime-v1`
+- **基线 Commit**：`e31c186a3833b0bfaa59969cbca65202e779cfc0`（tag: `c7-active-mode-decision-full-game-v1-audited`）
+- **Implementation Identity（POST_B_CURRENT）**：
+  `2460d3ac6998746a4aa5c13cf84321d652b965d9a462d325b41519625116c949`
+- **不等于**：all generals、full skill roster、`FULL_GAME_READY`、
+  `RELEASE_READY`、formal win-rate ready、AI ready。
+- Skill Runtime V1 的 foundation、opt-in production integration 与 strict
+  replay 可以独立于 proof skill 的完整度成立；这些基础设施结论不把任一
+  proof skill 提升为完整武将语义，也不扩大到全武将表或整局技能模式。
+
+### 15.1 审计与修复历史链（不得改写）
+
+- `FIRST ADVERSARIAL AUDIT = FAILED`：当时 production integration、生产
+  replay 与 proof skill 声明不满足冻结合同。
+- 第一轮 remediation：targeted gates passed；【募讨】从 mandatory proof
+  移除，改用【破降】；production opt-in、trigger 与 replay 接线完成。
+- `SECOND ADVERSARIAL AUDIT = PASSED`：同一 implementation identity
+  `50c676f7d7e8f1d8a149f72654aaf83b8fb08c029f93806bbab760bc85f24b22`；
+  随后 full pytest 为 `2956 passed in 6052.68s (1:40:52)`、exit 0。
+- 第一次 `FINAL CLOSURE AUDIT = FAILED`：F-01 exact cold-load/identity、
+  F-02 no-skill/C7 真实 replay、F-03 proof skill production boundary、
+  F-04 文档边界均未达到最终冻结合同；这不是前述 full pytest 的失败。
+- `FINAL CLOSURE REMEDIATION = PASSED`
+  （`AUTHORITATIVE_SKILL_RUNTIME_V1_FINAL_CLOSURE_REMEDIATION`）：
+  production / test / replay remediation gates passed；新 identity 的 final
+  full pytest 为 `2988 passed in 4577.58s (1:16:17)`、exit code 0，failed = 0、
+  errors = 0、skipped = 0、xfailed = 0、xpassed = 0。
+- `FINAL CLOSURE REAUDIT = PASSED`：F-01 exact replay schema 与 identity、
+  F-02 no-skill/C7 真实 strict replay、F-03 proof skill production boundary、
+  F-04 文档状态与边界均通过独立只读复核。因此当前冻结 scope 登记为
+  `AUDITED_PASSED`；该结论不等于 release readiness，也不扩大 proof skill
+  已证明范围。
+
+### 15.2 当前基础设施与 replay 合同
+
+1. `skill_registry=None` 仍是唯一 opt-in seam；旧 no-skill/C7 构造器与
+   replay schema 不新增 skill 字段，真实 fixed-seed replay 已执行
+   `to_dict → JSON → from_dict → strict reexecute`。
+2. `SkillProductionReplayEnvelope` 现在是 exact cold JSON schema：required
+   fields 精确、extra/missing 拒绝、`bool` 不得冒充 `int`、嵌套 action/event
+   unknown fields 拒绝、空/重复 ID 拒绝。
+3. 新增并绑定 `contract_identity` 与 `implementation_identity`；内层步骤材料
+   由 `records_identity` 认证，outer envelope 由 `execution_identity` 认证。
+   静态 schema/contract/implementation/registry/profile/assignment/hash
+   preflight 全部通过后才允许构造 fresh `ProductionBasicCardBatch`。
+4. serialized `verified` / `scenario_proven` 不是输入字段，出现即按 unknown
+   field 拒绝；PASS 只来自 fresh live `legal_actions → action_id → step`。
+5. 多 trigger 无正式排序仍 `UnsupportedRuleError`；`VIEW_AS` 仍失败关闭。
+
+### 15.3 Proof skill 当前声明边界
+
+- **【破降】=`PARTIAL / NOT FULL GENERAL SEMANTICS`**：当前证明交一张
+  手牌/装备、摸三、流失 1 体力、阶段限一次，以及所摸实体牌在本正常回合
+  弃牌阶段不计入 excess；下一正常换回合豁免清除。完整“绝”机制未实现，
+  因此“移除所有绝”只在当前无“绝”的证明切片中是 no-op；技能导致濒死
+  仍 fail closed / `NOT_PROVEN`；extra turn 豁免语义 `NOT_PROVEN`。
+- **【帷幕】=已证明范围有限**：红色普通锦囊与基本牌不会被误过滤；黑色
+  单体普通锦囊过滤、失效/失去/死亡后的恢复，以及一个黑色群体锦囊
+  【南蛮入侵】边界有 production proof。AoE 的更广组合与延时锦囊适用范围
+  不提升为完整语义；黑色延时锦囊当前显式 `NOT_PROVEN` 并失败关闭。
+- **【明哲】=CURRENT CONFIRMED 已证明范围**：只声明真实 production
+  `CARD_USED` / `CARD_PLAYED` / `CARD_DISCARDED` 触发、消费防重复、PASS
+  无效果与 production draw；不外推到未测试事件/技能组合。
+
+### 15.4 Final-closure checkpoints
+
+- F-01 = TARGETED PASSED：exact schema/types/nested fields、contract +
+  implementation identity、inner/outer hash、cold load、constructor sentinel
+  0-call 与重算 hash 后的 deep tamper matrix。
+- F-02 = TARGETED PASSED：真实 authoritative no-skill duel seed 0 与 C7
+  `HEIR_SUCCESSION` seed 1 均完成 JSON cold load + `from_dict` + strict
+  reexecute；skill-disabled path 无技能动作、技能事件或 runtime 配置。
+- F-03 = TARGETED PASSED：【破降】真实 DISCARD excess 修复；【帷幕】红色/
+  基本牌/lost/invalidated/death/黑色群体/延时 gap 边界。
+- F-04 = PASSED：本节同步完整历史链、proof skill 限制、targeted 与 final
+  full pytest 结果，并在独立 final closure reaudit 通过后准确登记
+  `AUDITED_PASSED`；不提升为任何 release readiness。
+
+### 15.5 Targeted evidence（final-closure remediation）
+
+- Skill V1 八文件最终 targeted：`96 passed in 101.69s (0:01:41)`。
+- 旧 replay 子集（no-skill duel + 单个 C7 `HEIR_SUCCESSION`）：
+  `2 passed in 95.27s (0:01:35)`。
+- `python -m compileall -q scripts tests`：exit 0；`git diff --check`：exit 0。
+- final full pytest：`2988 passed in 4577.58s (1:16:17)`，exit code 0；
+  failed = 0、errors = 0、skipped = 0、xfailed = 0、xpassed = 0。
+- 当前 computed implementation identity 与唯一
+  `POST_B_CURRENT_IMPLEMENTATION_IDENTITY` 均为
+  `2460d3ac6998746a4aa5c13cf84321d652b965d9a462d325b41519625116c949`；
+  `FROZEN_R8_IMPLEMENTATION_IDENTITY` 未改变。
+- 本轮 finalization 未创建 PR，未进入 Stage3 / C8，未重跑 full pytest。
+- `FINAL CLOSURE REAUDIT = PASSED`；当前冻结 scope 进入
+  `AUDITED_PASSED`，但不提升为 §15 开头列出的任何更宽 readiness。

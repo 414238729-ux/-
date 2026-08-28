@@ -37,6 +37,7 @@ from .engine import DEFAULT_DECK_PATH, AuthoritativeCoreSession
 from .multiplayer import PlayerTopology
 from .model import (
     EQUIPMENT_SLOTS,
+    CardInstance,
     CharacterGender,
     CharacterMetadata,
     GameState,
@@ -704,6 +705,20 @@ def target_zone_refs(player_id: str) -> tuple[ZoneRef, ...]:
     return tuple(zones)
 
 
+def _filter_skill_targets(
+    session: "ProductionBasicCardBatch | None",
+    user_id: str,
+    card: CardInstance,
+    candidates: Sequence[str],
+) -> tuple[str, ...]:
+    if session is None:
+        return tuple(candidates)
+    method = getattr(session, "filter_targets_for_card", None)
+    if not callable(method):
+        return tuple(candidates)
+    return method(user_id, card, card.card_key, candidates)
+
+
 def has_target_zone_cards(state: GameState, player_id: str) -> bool:
     """目标角色的手牌区、装备区与判定区合计至少存在一张实体牌。"""
 
@@ -856,8 +871,13 @@ class SlashAdapter(BasicCardAdapter):
             # POST-B C1：【杀】目标候选不再固定为唯一对手，而是按存活角色环
             # 枚举全部其他存活角色（距离合法性由 is_valid_slash_target 统一
             # 过滤）。两人局候选恰为对手一人，行为不变。
-            for target in PlayerTopology.from_state(state).all_other_alive_ids(
-                context.actor_id
+            for target in _filter_skill_targets(
+                session,
+                context.actor_id,
+                card,
+                PlayerTopology.from_state(state).all_other_alive_ids(
+                    context.actor_id
+                ),
             ):
                 if not is_valid_slash_target(state, context.actor_id, target):
                     continue
@@ -1494,11 +1514,17 @@ class GuoheChaiqiaoAdapter(TrickCardAdapter):
                 card = state.cards_by_id[instance_id]
                 if card.card_key != self.card_key:
                     continue
-                for target_id in state.players_by_id:
-                    if target_id == context.actor_id:
-                        continue
-                    if not has_target_zone_cards(state, target_id):
-                        continue
+                for target_id in _filter_skill_targets(
+                    session,
+                    context.actor_id,
+                    card,
+                    tuple(
+                        pid
+                        for pid in state.players_by_id
+                        if pid != context.actor_id
+                        and has_target_zone_cards(state, pid)
+                    ),
+                ):
                     actions.append(
                         LegalAction(
                             action_type=ActionType.USE_CARD,
@@ -1600,11 +1626,17 @@ class ShunshouQianyangAdapter(TrickCardAdapter):
                 card = state.cards_by_id[instance_id]
                 if card.card_key != self.card_key:
                     continue
-                for target_id in state.players_by_id:
-                    if target_id == context.actor_id:
-                        continue
-                    if not has_target_zone_cards(state, target_id):
-                        continue
+                for target_id in _filter_skill_targets(
+                    session,
+                    context.actor_id,
+                    card,
+                    tuple(
+                        pid
+                        for pid in state.players_by_id
+                        if pid != context.actor_id
+                        and has_target_zone_cards(state, pid)
+                    ),
+                ):
                     try:
                         if not is_valid_shunshou_target(
                             state, context.actor_id, target_id
@@ -1720,11 +1752,17 @@ class JuedouAdapter(TrickCardAdapter):
                 card = state.cards_by_id[instance_id]
                 if card.card_key != self.card_key:
                     continue
-                for target_id in state.players_by_id:
-                    if target_id == context.actor_id:
-                        continue
-                    if not state.players_by_id[target_id].alive:
-                        continue
+                for target_id in _filter_skill_targets(
+                    session,
+                    context.actor_id,
+                    card,
+                    tuple(
+                        pid
+                        for pid in state.players_by_id
+                        if pid != context.actor_id
+                        and state.players_by_id[pid].alive
+                    ),
+                ):
                     actions.append(
                         LegalAction(
                             action_type=ActionType.USE_CARD,
@@ -1832,11 +1870,17 @@ class HuogongAdapter(TrickCardAdapter):
                 card = state.cards_by_id[instance_id]
                 if card.card_key != self.card_key:
                     continue
-                for target_id in state.players_by_id:
-                    if not state.players_by_id[target_id].alive:
-                        continue
-                    if not state.card_ids_in(ZoneRef.hand(target_id)):
-                        continue
+                for target_id in _filter_skill_targets(
+                    session,
+                    context.actor_id,
+                    card,
+                    tuple(
+                        pid
+                        for pid in state.players_by_id
+                        if state.players_by_id[pid].alive
+                        and state.card_ids_in(ZoneRef.hand(pid))
+                    ),
+                ):
                     actions.append(
                         LegalAction(
                             action_type=ActionType.USE_CARD,
@@ -2358,7 +2402,12 @@ class DelayedTrickAdapter(TrickCardAdapter):
             card = state.cards_by_id[instance_id]
             if card.card_key != self.card_key:
                 continue
-            for target_id in self._legal_targets(state, context.actor_id):
+            for target_id in _filter_skill_targets(
+                session,
+                context.actor_id,
+                card,
+                self._legal_targets(state, context.actor_id),
+            ):
                 actions.append(
                     LegalAction(
                         action_type=ActionType.USE_CARD,

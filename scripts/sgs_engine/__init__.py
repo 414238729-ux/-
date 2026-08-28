@@ -324,6 +324,46 @@ from .c7_active_mode_decision_full_game import (
     record_c7_active_mode_decision_full_game_v1,
     reexecute_c7_active_mode_decision_full_game_replay_v1,
 )
+from .skills import (
+    AuthoritativeSkillKind,
+    AuthoritativeSkillTag,
+    SkillDecisionWindow,
+    SkillDefinition,
+    SkillHandler,
+    SkillRuntimeState,
+    SkillTimingWindow,
+    SkillTriggerContext,
+)
+from .skill_registry import (
+    AuthoritativeSkillRegistry,
+    EMPTY_SKILL_REGISTRY,
+    SkillRegistryError,
+    create_skill_registry,
+)
+from .skill_runtime import AuthoritativeSkillRuntime
+from .skill_impl_v1 import (
+    MingzheSkillHandler,
+    MutaoSkillHandler,
+    PojiangSkillHandler,
+    WeimuSkillHandler,
+    create_proof_slice_v1_handlers,
+    create_proof_slice_v1_registry,
+)
+from .skill_replay import (
+    SKILL_PRODUCTION_REPLAY_CONTRACT_IDENTITY_V1,
+    SKILL_PRODUCTION_REPLAY_SCHEMA_V1,
+    SKILL_REPLAY_SCHEMA_V1,
+    SkillActionReplayRecord,
+    SkillProductionReplayEnvelope,
+    SkillReplayDivergenceError,
+    SkillReplayEnvelope,
+    SkillReplayVerificationResult,
+    compute_state_hash,
+    reexecute_component_skill_replay,
+    reexecute_skill_production_replay,
+    reexecute_skill_replay,
+    skill_production_replay_contract_identity,
+)
 
 
 __all__ = [
@@ -581,4 +621,36 @@ __all__ = [
     "c7_active_mode_decision_scenario_v1",
     "record_c7_active_mode_decision_full_game_v1",
     "reexecute_c7_active_mode_decision_full_game_replay_v1",
+    "AuthoritativeSkillKind",
+    "AuthoritativeSkillTag",
+    "SkillDecisionWindow",
+    "SkillDefinition",
+    "SkillHandler",
+    "SkillRuntimeState",
+    "SkillTimingWindow",
+    "SkillTriggerContext",
+    "AuthoritativeSkillRegistry",
+    "EMPTY_SKILL_REGISTRY",
+    "SkillRegistryError",
+    "create_skill_registry",
+    "AuthoritativeSkillRuntime",
+    "MingzheSkillHandler",
+    "MutaoSkillHandler",
+    "PojiangSkillHandler",
+    "WeimuSkillHandler",
+    "create_proof_slice_v1_handlers",
+    "create_proof_slice_v1_registry",
+    "SKILL_PRODUCTION_REPLAY_CONTRACT_IDENTITY_V1",
+    "SKILL_PRODUCTION_REPLAY_SCHEMA_V1",
+    "SKILL_REPLAY_SCHEMA_V1",
+    "SkillActionReplayRecord",
+    "SkillProductionReplayEnvelope",
+    "SkillReplayDivergenceError",
+    "SkillReplayEnvelope",
+    "SkillReplayVerificationResult",
+    "compute_state_hash",
+    "reexecute_component_skill_replay",
+    "reexecute_skill_production_replay",
+    "reexecute_skill_replay",
+    "skill_production_replay_contract_identity",
 ]

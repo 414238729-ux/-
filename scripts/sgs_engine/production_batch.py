@@ -103,6 +103,9 @@ from .production_cards import (
 )
 from .replay import canonical_json, sha256_value, state_sha256
 from .rng import DeterministicRNG, RNGCall
+from .skill_registry import AuthoritativeSkillRegistry
+from .skill_runtime import AuthoritativeSkillRuntime
+from .skills import SkillTimingWindow
 
 
 PRODUCTION_BASIC_CARDS_MODE = "production_basic_cards_batch"
@@ -196,6 +199,24 @@ class ProductionBatchSafetyLimitError(ProductionBatchError):
 
 class ProductionBatchDeckExhaustedError(ProductionBatchError):
     """牌堆与可重洗弃牌堆合计不足时失败关闭。"""
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingSkillDecision:
+    """Nested optional-skill window; not a BATCH_PHASES registration.
+
+    Kept off ``_BatchRuntime`` so no-skill ``audit_value()`` keys stay identical.
+    """
+
+    decision_window_id: str
+    skill_id: str
+    actor_id: str
+    trigger_event_sequence: int
+    trigger_index: int
+    trigger_event_type: str
+    card_instance_id: str | None
+    window_revision: int
+    consumption_key: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -2721,7 +2742,13 @@ class _BatchRuleAdapter(RuleAdapter):
         return "production-basic-cards-batch-rules.v2"
 
     def audit_state(self) -> Mapping[str, object]:
-        return MappingProxyType(self._session.runtime.audit_value())
+        base = self._session.runtime.audit_value()
+        skill_audit = self._session._skill_audit_value()
+        if skill_audit is None:
+            return MappingProxyType(base)
+        merged = dict(base)
+        merged["skill_authority"] = skill_audit
+        return MappingProxyType(merged)
 
     def enumerate_legal_actions(
         self, state: GameState, context: ActionContext
@@ -2901,6 +2928,11 @@ class ProductionBasicCardBatch:
         shuffle: bool = True,
         session_id: str | None = None,
         session_secret: bytes | None = None,
+        # Opt-in skill authority. Default None: no SkillRuntime is constructed
+        # and no-skill legal-action binding stays unchanged. Do not pass
+        # EMPTY_SKILL_REGISTRY into old no-skill constructors.
+        skill_registry: AuthoritativeSkillRegistry | None = None,
+        skill_assignments: Mapping[str, Sequence[str]] | None = None,
         # POST-B C5：仅供正式身份会话在完成身份牌 shuffle 后注入同一
         # DeterministicRNG。不是公开 RNG 注入口；传入对象不能授予
         # formal authority。C1-C4 不传此参数，RNG 消费顺序保持不变。
@@ -2969,6 +3001,13 @@ class ProductionBasicCardBatch:
                 raise ValueError("first_player_id必须是已注册的玩家ID")
         if not isinstance(shuffle, bool):
             raise TypeError("shuffle必须是布尔值")
+        # Skill runtime must exist before RuleRegistry.register, because
+        # adapter.audit_state() is snapshotted at registration time.
+        self._skill_runtime = None
+        self._skill_pending = None
+        self._skill_trigger_queue: list[_PendingSkillDecision] = []
+        self._skill_consumed_triggers: frozenset[tuple[str, ...]] = frozenset()
+        self._skill_hand_limit_exempt_ids: frozenset[str] = frozenset()
 
         if session_id is None:
             session_id = secrets.token_hex(16)
@@ -3093,6 +3132,7 @@ class ProductionBasicCardBatch:
             self._registry.register(
                 self.mode_id, f"card:{key}", adapter
             )
+        self._init_skill_authority(skill_registry, skill_assignments)
 
     @property
     def state(self) -> GameState:
@@ -3101,6 +3141,144 @@ class ProductionBasicCardBatch:
     @property
     def registry(self) -> RuleRegistry:
         return self._registry
+
+    @property
+    def skill_runtime(self) -> AuthoritativeSkillRuntime | None:
+        return self._skill_runtime
+
+    def _init_skill_authority(
+        self,
+        skill_registry: AuthoritativeSkillRegistry | None,
+        skill_assignments: Mapping[str, Sequence[str]] | None,
+    ) -> None:
+        if skill_registry is None:
+            if skill_assignments:
+                raise ValueError("未提供skill_registry时不能指定skill_assignments")
+            return
+        if not isinstance(skill_registry, AuthoritativeSkillRegistry):
+            raise TypeError("skill_registry必须是AuthoritativeSkillRegistry或None")
+        if not skill_registry.is_frozen:
+            raise ValueError("传入的技能注册表必须已冻结")
+        runtime = AuthoritativeSkillRuntime(skill_registry)
+        assignments = skill_assignments or {}
+        if not isinstance(assignments, Mapping):
+            raise TypeError("skill_assignments必须是映射或None")
+        known_players = set(self._player_ids)
+        for player_id, skill_ids in assignments.items():
+            if player_id not in known_players:
+                raise ValueError(f"技能分配引用了未知角色{player_id!r}")
+            if isinstance(skill_ids, str) or not isinstance(skill_ids, Sequence):
+                raise TypeError(f"角色{player_id}的技能列表必须是序列")
+            for skill_id in skill_ids:
+                runtime = runtime.assign_skill(player_id, skill_id)
+        self._skill_runtime = runtime
+
+    def filter_targets_for_card(
+        self,
+        user_id: str,
+        card_instance: CardInstance,
+        card_key: str,
+        candidate_targets: Sequence[str],
+    ) -> tuple[str, ...]:
+        """Optional static-modifier filter. Identity when skills are disabled."""
+        if self._skill_runtime is None:
+            return tuple(candidate_targets)
+        return self._skill_runtime.filter_legal_targets(
+            user_id=user_id,
+            card_instance=card_instance,
+            card_key=card_key,
+            candidate_targets=candidate_targets,
+            state=self.state,
+        )
+
+    def _timing_window_for_event(self, event: GameEvent) -> SkillTimingWindow | None:
+        if event.event_type is EventType.CARD_USED:
+            return SkillTimingWindow.ON_CARD_USED
+        if event.event_type is EventType.CARD_PLAYED:
+            return SkillTimingWindow.ON_CARD_PLAYED
+        if event.event_type is EventType.CARD_DISCARDED:
+            return SkillTimingWindow.ON_CARD_DISCARDED
+        return None
+
+    def _discover_production_skill_triggers(self, start_sequence: int) -> None:
+        skill_runtime = self._skill_runtime
+        if skill_runtime is None:
+            return
+        hits: list[_PendingSkillDecision] = []
+        for event in self._events.snapshot():
+            if event.sequence is None or event.sequence < start_sequence:
+                continue
+            window = self._timing_window_for_event(event)
+            if window is None:
+                continue
+            found = skill_runtime.evaluate_triggers_for_event(
+                event,
+                self.state,
+                self._runtime.current_player_id,
+                self.phase.value,
+                window,
+            )
+            for owner_id, skill_id, _handler, _ctx in found:
+                player = self.state.players_by_id.get(owner_id)
+                if player is None or not player.alive:
+                    continue
+                consumption_key = (
+                    str(event.sequence),
+                    owner_id,
+                    skill_id,
+                    "0",
+                )
+                if consumption_key in self._skill_consumed_triggers:
+                    continue
+                hits.append(
+                    _PendingSkillDecision(
+                        decision_window_id=(
+                            f"skill:{skill_id}:{event.sequence}:0"
+                        ),
+                        skill_id=skill_id,
+                        actor_id=owner_id,
+                        trigger_event_sequence=event.sequence,
+                        trigger_index=0,
+                        trigger_event_type=event.event_type.value,
+                        card_instance_id=event.card_instance_id,
+                        window_revision=self.state.revision,
+                        consumption_key=consumption_key,
+                    )
+                )
+        if not hits:
+            return
+        owners_skills = {(item.actor_id, item.skill_id) for item in hits}
+        if len(owners_skills) > 1:
+            raise UnsupportedRuleError(
+                f"发现多个技能同时触发（{sorted(f'{a}:{s}' for a, s in owners_skills)}），"
+                "当前 Knowledge 未确认该组合排序规则，失败关闭"
+            )
+        self._skill_pending = hits[0]
+        self._skill_trigger_queue = hits[1:]
+
+    def _skill_audit_value(self) -> dict[str, object] | None:
+        if self._skill_runtime is None:
+            return None
+        pending = None
+        if self._skill_pending is not None:
+            pending = {
+                "decision_window_id": self._skill_pending.decision_window_id,
+                "skill_id": self._skill_pending.skill_id,
+                "actor_id": self._skill_pending.actor_id,
+                "trigger_event_sequence": (
+                    self._skill_pending.trigger_event_sequence
+                ),
+                "trigger_index": self._skill_pending.trigger_index,
+                "trigger_event_type": self._skill_pending.trigger_event_type,
+                "card_instance_id": self._skill_pending.card_instance_id,
+                "window_revision": self._skill_pending.window_revision,
+                "consumption_key": list(self._skill_pending.consumption_key),
+            }
+        return {
+            "runtime": self._skill_runtime.audit_fingerprint(),
+            "pending_skill_decision": pending,
+            "consumed_triggers": [list(key) for key in sorted(self._skill_consumed_triggers)],
+        }
 
     @property
     def session_id(self) -> str:
@@ -3176,6 +3354,8 @@ class ProductionBasicCardBatch:
 
     @property
     def current_actor_id(self) -> str:
+        if self._skill_pending is not None:
+            return self._skill_pending.actor_id
         runtime = self._runtime
         if runtime.phase in (
             ProductionPhase.CIXIONG_ACTIVATE,
@@ -3534,6 +3714,8 @@ class ProductionBasicCardBatch:
         legal = self.legal_actions()
         chosen = selected.choose(legal, context)
         validated = self._validate_session_action(self.state, context, chosen)
+        event_seq_before = self._events.next_sequence
+        had_pending_skill = self._skill_pending is not None
         try:
             self._state = self._apply_session_action(
                 self.state, context, validated
@@ -3552,6 +3734,13 @@ class ProductionBasicCardBatch:
         self._step_count += 1
         self._state.assert_card_conservation()
         self.assert_resolution_invariants()
+        if (
+            self._skill_runtime is not None
+            and not self.is_finished
+            and not had_pending_skill
+            and self._skill_pending is None
+        ):
+            self._discover_production_skill_triggers(event_seq_before)
         if self.is_finished:
             self.assert_finished_state_invariants()
         return validated
@@ -3848,6 +4037,8 @@ class ProductionBasicCardBatch:
                 "行动上下文与生产批处理会话当前阶段不一致"
             )
         actor = context.actor_id
+        if self._skill_pending is not None:
+            return self._enumerate_pending_skill_decision(state, context)
         actions: list[LegalAction] = []
         if self.phase is ProductionPhase.PREPARE:
             actions.append(
@@ -4026,6 +4217,7 @@ class ProductionBasicCardBatch:
                                     },
                                 )
                             )
+            actions.extend(self._enumerate_production_skill_actions(state, context))
             actions.append(
                 LegalAction(
                     action_type=ActionType.PASS,
@@ -4051,7 +4243,7 @@ class ProductionBasicCardBatch:
         elif self.phase is ProductionPhase.DISCARD:
             runtime = self._runtime
             hand_ids = state.card_ids_in(ZoneRef.hand(actor))
-            hand_limit = hand_limit_of(state, actor)
+            hand_limit = self._skill_adjusted_hand_limit(state, actor)
             excess = len(hand_ids) - hand_limit
             if excess > 0:
                 if (
@@ -4716,6 +4908,15 @@ class ProductionBasicCardBatch:
                 "行动上下文与生产批处理会话当前阶段不一致"
             )
         operation = str(action.payload.get("operation", ""))
+        if self._skill_pending is not None:
+            if (
+                action.action_type is ActionType.ACTIVATE_SKILL
+                or operation == "activate_skill"
+            ):
+                return self._apply_production_skill_action(state, context, action)
+            if action.action_type is ActionType.PASS and operation == "pass_skill":
+                return self._apply_production_skill_pass(state, context, action)
+            raise InvalidActionError("技能决策窗口只接受发动或放弃")
 
         if self.phase is ProductionPhase.PREPARE:
             if action.action_type is ActionType.PASS and operation == (
@@ -4895,6 +5096,16 @@ class ProductionBasicCardBatch:
                 "end_play_phase"
             ):
                 return self._apply_end_play_phase(state, context, action)
+            if (
+                action.action_type is ActionType.ACTIVATE_SKILL
+                or operation == "activate_skill"
+            ):
+                return self._apply_production_skill_action(state, context, action)
+            if (
+                action.action_type is ActionType.PASS
+                and operation == "pass_skill"
+            ):
+                return self._apply_production_skill_pass(state, context, action)
             raise InvalidActionError(
                 "出牌阶段不支持当前动作；动作未经过合法枚举或已过期"
             )
@@ -5210,6 +5421,8 @@ class ProductionBasicCardBatch:
     def _commit_runtime(
         self, previous: _BatchRuntime, next_runtime: _BatchRuntime
     ) -> None:
+        if self._skill_runtime is not None:
+            self._sync_skill_lifecycle(previous, next_runtime)
         previous_entry = (
             previous.turn_number,
             previous.current_player_id,
@@ -5229,6 +5442,412 @@ class ProductionBasicCardBatch:
                     next_runtime.phase,
                 )
             )
+
+    def _sync_skill_lifecycle(
+        self, previous: _BatchRuntime, next_runtime: _BatchRuntime
+    ) -> None:
+        runtime = self._skill_runtime
+        if runtime is None:
+            return
+        if next_runtime.turn_number != previous.turn_number:
+            runtime = runtime.on_turn_change(
+                next_runtime.current_player_id,
+                is_extra_turn=False,
+            )
+            self._skill_hand_limit_exempt_ids = frozenset()
+        entering_new_play = (
+            next_runtime.phase is ProductionPhase.PLAY
+            and previous.phase
+            in (
+                ProductionPhase.DRAW,
+                ProductionPhase.JUDGMENT,
+                ProductionPhase.PREPARE,
+                ProductionPhase.END,
+            )
+        )
+        leaving_play = previous.phase is ProductionPhase.PLAY and next_runtime.phase in (
+            ProductionPhase.DISCARD,
+            ProductionPhase.END,
+        )
+        if entering_new_play or leaving_play:
+            if next_runtime.turn_number == previous.turn_number:
+                runtime = runtime.on_phase_change(next_runtime.phase.value)
+        self._skill_runtime = runtime
+
+    def _enumerate_production_skill_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        skill_runtime = self._skill_runtime
+        if skill_runtime is None:
+            return ()
+        actor = context.actor_id
+        player = state.players_by_id.get(actor)
+        if player is None or not player.alive:
+            return ()
+        if self.phase is not ProductionPhase.PLAY:
+            return ()
+        proposals = skill_runtime.enumerate_active_skill_actions(
+            actor, context, state
+        )
+        bound: list[LegalAction] = []
+        for action in proposals:
+            if action.action_type is not ActionType.ACTIVATE_SKILL:
+                raise ProductionBatchError("主动技能枚举只能提出 ACTIVATE_SKILL")
+            if action.action_id is not None:
+                raise InvalidActionError("规则处理器不得自行签发action_id")
+            if not action.skill_id:
+                raise InvalidActionError("ACTIVATE_SKILL 缺少 skill_id")
+            definition = skill_runtime.registry.get_skill(action.skill_id)
+            skill_state = skill_runtime.get_skill_state(actor, action.skill_id)
+            if not skill_state.effective:
+                continue
+            payload = dict(action.payload)
+            payload.update(
+                {
+                    "operation": "activate_skill",
+                    "skill_id": action.skill_id,
+                    "skill_version": definition.version,
+                    "skill_profile_identity": definition.profile_identity,
+                    "owner_id": skill_state.owner_id,
+                    "expected_revision": state.revision,
+                }
+            )
+            bound.append(replace(action, payload=payload, actor_id=actor))
+        return tuple(bound)
+
+    def _enumerate_pending_skill_decision(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        pending = self._skill_pending
+        skill_runtime = self._skill_runtime
+        if pending is None or skill_runtime is None:
+            raise ProductionBatchError("技能决策窗口状态不一致")
+        if context.actor_id != pending.actor_id:
+            return ()
+        player = state.players_by_id.get(pending.actor_id)
+        if player is None or not player.alive:
+            raise UnsupportedRuleError("技能决策窗口打开后所有者已死亡，失败关闭")
+        skill_state = skill_runtime.get_skill_state(pending.actor_id, pending.skill_id)
+        if not skill_state.effective:
+            raise UnsupportedRuleError("技能决策窗口打开后技能已失效或失去，失败关闭")
+        if pending.window_revision != state.revision:
+            raise UnsupportedRuleError("技能决策窗口状态版本已过期，失败关闭")
+        definition = skill_runtime.registry.get_skill(pending.skill_id)
+        base_payload = {
+            "skill_id": pending.skill_id,
+            "skill_version": definition.version,
+            "skill_profile_identity": definition.profile_identity,
+            "owner_id": pending.actor_id,
+            "expected_revision": state.revision,
+            "decision_window_id": pending.decision_window_id,
+            "trigger_event_sequence": pending.trigger_event_sequence,
+            "trigger_index": pending.trigger_index,
+            "trigger_event_type": pending.trigger_event_type,
+            "consumption_key": list(pending.consumption_key),
+        }
+        activate = LegalAction(
+            action_type=ActionType.ACTIVATE_SKILL,
+            actor_id=pending.actor_id,
+            skill_id=pending.skill_id,
+            card_instance_id=pending.card_instance_id,
+            payload={**base_payload, "operation": "activate_skill", "decision": "activate"},
+        )
+        decline = LegalAction(
+            action_type=ActionType.PASS,
+            actor_id=pending.actor_id,
+            skill_id=pending.skill_id,
+            payload={**base_payload, "operation": "pass_skill", "decision": "pass"},
+        )
+        return (activate, decline)
+
+    def _apply_production_skill_action(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        skill_runtime = self._skill_runtime
+        if skill_runtime is None:
+            raise InvalidActionError("当前会话未启用技能")
+        if action.action_type is not ActionType.ACTIVATE_SKILL:
+            raise InvalidActionError("生产技能发动必须是 ACTIVATE_SKILL")
+        skill_id = action.skill_id or str(action.payload.get("skill_id") or "")
+        if not skill_id:
+            raise InvalidActionError("ACTIVATE_SKILL 缺少 skill_id")
+        actor_id = action.actor_id
+        if actor_id != context.actor_id:
+            raise InvalidActionError("动作角色与当前行动上下文不一致")
+        player = state.players_by_id.get(actor_id)
+        if player is None or not player.alive:
+            raise InvalidActionError(f"角色 {actor_id} 不存在或已死亡，不能发动技能")
+        skill_state = skill_runtime.get_skill_state(actor_id, skill_id)
+        if not skill_state.effective:
+            raise InvalidActionError(f"角色 {actor_id} 的技能 {skill_id} 已失效或失去")
+        if skill_state.owner_id != actor_id:
+            raise InvalidActionError("技能发动者必须是技能所有者")
+        definition = skill_runtime.registry.get_skill(skill_id)
+        if action.payload.get("skill_version") != definition.version:
+            raise InvalidActionError("技能版本与注册表不一致")
+        if action.payload.get("skill_profile_identity") != definition.profile_identity:
+            raise InvalidActionError("技能 profile identity 与注册表不一致")
+        if action.payload.get("owner_id") != actor_id:
+            raise InvalidActionError("技能所有者字段被篡改")
+        if action.payload.get("expected_revision") != state.revision:
+            raise InvalidActionError("技能动作绑定的状态版本已过期")
+        if (
+            definition.max_uses_per_phase is not None
+            and skill_state.uses_this_phase >= definition.max_uses_per_phase
+        ):
+            raise InvalidActionError(f"技能 {skill_id} 已达阶段发动上限")
+        if (
+            definition.max_uses_per_turn is not None
+            and skill_state.uses_this_turn >= definition.max_uses_per_turn
+        ):
+            raise InvalidActionError(f"技能 {skill_id} 已达回合发动上限")
+        if (
+            definition.max_uses_per_game is not None
+            and skill_state.uses_this_game >= definition.max_uses_per_game
+        ):
+            raise InvalidActionError(f"技能 {skill_id} 已达整局发动上限")
+        pending = self._skill_pending
+        if pending is not None:
+            if pending.skill_id != skill_id or pending.actor_id != actor_id:
+                raise InvalidActionError("当前技能决策窗口与提交动作不一致")
+            if pending.window_revision != state.revision:
+                raise UnsupportedRuleError("技能决策窗口状态版本已过期，失败关闭")
+            consumption = tuple(action.payload.get("consumption_key") or ())
+            if consumption != pending.consumption_key:
+                raise InvalidActionError("触发消费身份与当前窗口不一致")
+            if consumption in self._skill_consumed_triggers:
+                raise InvalidActionError("同一生产事件不能重复消费技能触发")
+        handler = skill_runtime.registry.get_handler(skill_id)
+        next_state = handler.apply_in_production(
+            self, action, context, state, skill_state
+        )
+        if pending is not None:
+            self._skill_consumed_triggers = self._skill_consumed_triggers | {
+                pending.consumption_key
+            }
+            self._skill_pending = None
+            self._open_next_queued_skill_decision(next_state)
+        self._skill_runtime = skill_runtime.increment_usage(actor_id, skill_id)
+        next_state.assert_card_conservation()
+        return next_state
+
+    def _apply_production_skill_pass(
+        self, state: GameState, context: ActionContext, action: LegalAction
+    ) -> GameState:
+        pending = self._skill_pending
+        skill_runtime = self._skill_runtime
+        if pending is None or skill_runtime is None:
+            raise InvalidActionError("当前没有可放弃的技能决策窗口")
+        if action.actor_id != pending.actor_id or context.actor_id != pending.actor_id:
+            raise InvalidActionError("只有技能窗口所有者可以放弃")
+        if action.skill_id != pending.skill_id:
+            raise InvalidActionError("放弃动作的技能ID与窗口不一致")
+        if action.payload.get("decision") != "pass":
+            raise InvalidActionError("技能放弃动作的 decision 必须为 pass")
+        if pending.window_revision != state.revision:
+            raise UnsupportedRuleError("技能决策窗口状态版本已过期，失败关闭")
+        consumption = tuple(action.payload.get("consumption_key") or ())
+        if consumption != pending.consumption_key:
+            raise InvalidActionError("触发消费身份与当前窗口不一致")
+        self._skill_consumed_triggers = self._skill_consumed_triggers | {
+            pending.consumption_key
+        }
+        self._skill_pending = None
+        self._open_next_queued_skill_decision(state)
+        return state
+
+    def _open_next_queued_skill_decision(self, state: GameState) -> None:
+        if not self._skill_trigger_queue:
+            return
+        nxt = self._skill_trigger_queue[0]
+        self._skill_trigger_queue = self._skill_trigger_queue[1:]
+        self._skill_pending = replace(nxt, window_revision=state.revision)
+
+    def draw_cards_for_skill(
+        self,
+        state: GameState,
+        player_id: str,
+        count: int,
+        *,
+        reason: str,
+        skill_owner: str,
+    ) -> GameState:
+        """Production draw transaction for skills.
+
+        WHY_REQUIRED: skill draws must reuse deck exhaustion / reshuffle / RNG
+        / CARD_MOVED+CARD_GAINED / EventQueue. Direct DRAW_PILE[0] move_card
+        is not a production draw.
+        OLD_BEHAVIOR: Mingzhe handler called GameState.move_card on pile top.
+        NEW_BEHAVIOR: this method calls ``_draw_cards`` then enqueues events.
+        NO_SKILL_IMPACT: raises if the session has no skill runtime.
+        """
+        if self._skill_runtime is None:
+            raise ProductionBatchError("未启用技能的会话不能执行技能摸牌")
+        next_state, events = self._draw_cards(
+            state, player_id, count, reason=reason
+        )
+        attributed = []
+        for event in events:
+            payload = dict(event.payload)
+            payload.setdefault("skill_owner", skill_owner)
+            attributed.append(
+                replace(event, skill_owner=skill_owner, payload=payload)
+            )
+        self._events.extend(tuple(attributed))
+        next_state, draw_check = self._check_2v2_draw_after_consumption(
+            next_state, self._runtime
+        )
+        if draw_check.game_over_reason is not None:
+            self._commit_runtime(self._runtime, draw_check)
+        return next_state
+
+    def transfer_card_for_skill(
+        self,
+        state: GameState,
+        instance_id: str,
+        destination: ZoneRef,
+        *,
+        from_player_id: str,
+        to_player_id: str,
+        reason: str,
+        skill_owner: str,
+    ) -> GameState:
+        """Production give/move transaction: CARD_MOVED + CARD_LOST + CARD_GAINED."""
+        if self._skill_runtime is None:
+            raise ProductionBatchError("未启用技能的会话不能执行技能移牌")
+        source = state.location_of(instance_id)
+        card_key = _card_key(state, instance_id)
+        next_state = state.move_card(instance_id, destination)
+        self._events.extend(
+            (
+                GameEvent(
+                    event_type=EventType.CARD_MOVED,
+                    card_instance_id=instance_id,
+                    card_key=card_key,
+                    card_user=from_player_id,
+                    skill_owner=skill_owner,
+                    target_ids=(to_player_id,),
+                    payload={
+                        "source": _zone_payload(source),
+                        "destination": _zone_payload(destination),
+                        "reason": reason,
+                    },
+                ),
+                GameEvent(
+                    event_type=EventType.CARD_LOST,
+                    card_instance_id=instance_id,
+                    card_key=card_key,
+                    skill_owner=skill_owner,
+                    target_ids=(from_player_id,),
+                    payload={
+                        "reason": reason,
+                        "source_zone": _zone_id(source),
+                    },
+                ),
+                GameEvent(
+                    event_type=EventType.CARD_GAINED,
+                    card_instance_id=instance_id,
+                    card_key=card_key,
+                    skill_owner=skill_owner,
+                    target_ids=(to_player_id,),
+                    payload={"reason": reason},
+                ),
+            )
+        )
+        return next_state
+
+    def discard_cards_for_skill(
+        self,
+        state: GameState,
+        instance_ids: Sequence[str],
+        *,
+        owner_id: str,
+        reason: str,
+        skill_owner: str,
+    ) -> GameState:
+        """Production discard transaction emitting CARD_MOVED + CARD_DISCARDED + CARD_LOST."""
+        if self._skill_runtime is None:
+            raise ProductionBatchError("未启用技能的会话不能执行技能弃牌")
+        next_state = state
+        events: list[GameEvent] = []
+        for instance_id in instance_ids:
+            source = next_state.location_of(instance_id)
+            card_key = _card_key(next_state, instance_id)
+            next_state = next_state.move_card(instance_id, DISCARD_PILE)
+            events.extend(
+                (
+                    GameEvent(
+                        event_type=EventType.CARD_MOVED,
+                        card_instance_id=instance_id,
+                        card_key=card_key,
+                        card_user=owner_id,
+                        skill_owner=skill_owner,
+                        payload={
+                            "source": _zone_payload(source),
+                            "destination": _zone_payload(DISCARD_PILE),
+                            "reason": reason,
+                        },
+                    ),
+                    GameEvent(
+                        event_type=EventType.CARD_LOST,
+                        card_instance_id=instance_id,
+                        card_key=card_key,
+                        skill_owner=skill_owner,
+                        target_ids=(owner_id,),
+                        payload={"reason": reason, "source_zone": _zone_id(source)},
+                    ),
+                    GameEvent(
+                        event_type=EventType.CARD_DISCARDED,
+                        card_instance_id=instance_id,
+                        card_key=card_key,
+                        card_user=owner_id,
+                        skill_owner=skill_owner,
+                        target_ids=(owner_id,),
+                        payload={"reason": reason},
+                    ),
+                )
+            )
+        self._events.extend(tuple(events))
+        return next_state
+
+    def note_hand_limit_exempt_cards(self, instance_ids: Sequence[str]) -> None:
+        self._skill_hand_limit_exempt_ids = self._skill_hand_limit_exempt_ids | frozenset(
+            instance_id for instance_id in instance_ids if instance_id
+        )
+
+    def _skill_adjusted_hand_limit(self, state: GameState, player_id: str) -> int:
+        """Return the live hand limit including current-turn skill exemptions."""
+
+        hand_limit = hand_limit_of(state, player_id)
+        if self._skill_hand_limit_exempt_ids:
+            in_hand = set(state.card_ids_in(ZoneRef.hand(player_id)))
+            hand_limit += len(in_hand & set(self._skill_hand_limit_exempt_ids))
+        return hand_limit
+
+    def lose_hp_for_skill(
+        self,
+        state: GameState,
+        player_id: str,
+        amount: int,
+        *,
+        reason: str,
+    ) -> GameState:
+        if self._skill_runtime is None:
+            raise ProductionBatchError("未启用技能的会话不能执行技能流失体力")
+        player = state.players_by_id[player_id]
+        if player.hp - amount < 1:
+            raise UnsupportedRuleError("V1 技能流失体力后进入濒死时失败关闭")
+        next_state = _replace_player(state, player_id, hp=player.hp - amount)
+        self._events.extend(
+            (
+                GameEvent(
+                    event_type=EventType.LOSE_HP,
+                    target_ids=(player_id,),
+                    payload={"amount": amount, "reason": reason},
+                ),
+            )
+        )
+        return next_state
 
     def _return_to_play(self, runtime: _BatchRuntime) -> _BatchRuntime:
         """根结算结束后回到出牌阶段。
@@ -11825,7 +12444,16 @@ class ProductionBasicCardBatch:
             ordered = [
                 player for player in ordered if player.hp < player.max_hp
             ]
-        return tuple(player.player_id for player in ordered)
+        raw_ids = tuple(player.player_id for player in ordered)
+        sample = next(
+            (card for card in state.cards if card.card_key == adapter.card_key),
+            None,
+        )
+        if sample is None:
+            return raw_ids
+        return self.filter_targets_for_card(
+            user_id, sample, adapter.card_key, raw_ids
+        )
 
     def _group_resolved_event(
         self,
@@ -15811,7 +16439,7 @@ class ProductionBasicCardBatch:
 
         player_id = runtime.current_player_id
         hand_count = len(state.card_ids_in(ZoneRef.hand(player_id)))
-        hand_limit = hand_limit_of(state, player_id)
+        hand_limit = self._skill_adjusted_hand_limit(state, player_id)
         if hand_count <= hand_limit:
             return state, replace(runtime, phase=ProductionPhase.END)
         window_id = f"discard-phase:{runtime.turn_number}:{player_id}"
@@ -15982,7 +16610,7 @@ class ProductionBasicCardBatch:
                 "弃牌选择窗口打开后手牌已变化，旧提交失败关闭"
             )
         hand_ids = state.card_ids_in(ZoneRef.hand(context.actor_id))
-        hand_limit = hand_limit_of(state, context.actor_id)
+        hand_limit = self._skill_adjusted_hand_limit(state, context.actor_id)
         excess = len(hand_ids) - hand_limit
         if excess <= 0:
             raise InvalidActionError("手牌数未超过手牌上限，不需要弃牌")
