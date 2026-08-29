@@ -1,7 +1,8 @@
 # POST-B 开发状态（POST_B_DEVELOPMENT_STATUS）
 
 > 状态标签：`AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`、`AUDITED_PASSED`
-> （CURRENT：C7 frozen formal no-skill scope）
+> （CURRENT：`AUTHORITATIVE_GENERAL_BATCH_V1` 的 G1 / `shamoke` 已完成；
+> Batch V1 仍为 `IN_PROGRESS`）
 >
 > 本文件是 POST-B 开发轨（deepseek-post-milestone-b-development）的新增状态文档，
 > 未登记进 `docs/CHECKPOINT_MANIFEST.json`，也不修改任何已登记文档
@@ -51,6 +52,14 @@
   `2460d3ac6998746a4aa5c13cf84321d652b965d9a462d325b41519625116c949`。
   不等于 all generals / full skill roster / FULL_GAME_READY / RELEASE_READY /
   formal win-rate ready / AI ready。见 §15。）
+- `AUTHORITATIVE_GENERAL_BATCH_V1` = `IN_PROGRESS`
+  （G1 / `shamoke` = `GENERAL_COMPLETE`；
+  `G1_SHAMOKE_SIXTH_CLOSURE_AUDIT = PASSED`；
+  `G1_SHAMOKE_FINAL_FULL_PYTEST = PASSED`；
+  G2 / 诸葛瞻与 G3 / 王元姬尚未开始，因此 Batch V1 不得登记为
+  `COMPLETE`、`AUDITED_PASSED` 或 frozen complete。当前 implementation identity / pin =
+  `af66c568eb0c4b166139e24349f6e46e2a4735949125a326dde0490b8ade434e`，
+  见 §16。）
 - `F-003` = `CLOSED`
 - `F-004` = `CLOSED`
 - `F-005` = `CLOSED`
@@ -1563,3 +1572,152 @@ replay hash：
 - 本轮 finalization 未创建 PR，未进入 Stage3 / C8，未重跑 full pytest。
 - `FINAL CLOSURE REAUDIT = PASSED`；当前冻结 scope 进入
   `AUDITED_PASSED`，但不提升为 §15 开头列出的任何更宽 readiness。
+
+## 16. AUTHORITATIVE_GENERAL_BATCH_V1 — G1 SHAMOKE
+
+### 16.1 当前裁定与 Batch 边界
+
+- `G1_SHAMOKE_DOCUMENTATION_FINALIZATION = PASSED`
+- `G1_SHAMOKE_SIXTH_CLOSURE_AUDIT = PASSED`
+- `G1_SHAMOKE_FINAL_FULL_PYTEST = PASSED`
+- `SHAMOKE = GENERAL_COMPLETE`
+- `G1_FREEZE_READY = YES`
+- `READY_FOR_G2_IMPLEMENTATION = NO`
+- `AUTHORITATIVE_GENERAL_BATCH_V1 = IN_PROGRESS`
+- `AUTHORITATIVE_GENERAL_BATCH_V1 != COMPLETE`
+
+G1 的 canonical general key 为 `shamoke`，HP / max HP 为 `4 / 4`，
+authoritative skill 为 `sgs_skill_jili`。当前 G1 已满足 `GENERAL_COMPLETE`；
+但 Batch V1 还计划 G2 / 诸葛瞻与 G3 / 王元姬，二者均未开始。因此本节不把
+Batch V1 登记为 implemented complete、audited complete 或 frozen complete，也不授权开始 G2。
+
+### 16.2 Snapshot、identity 与冻结来源
+
+- 开发分支：`codex/authoritative-general-batch-v1-prep`
+- HEAD baseline：`5e1c05ddc777a3b8d13d394acd3e4d7158e0ecad`
+- computed implementation identity：
+  `af66c568eb0c4b166139e24349f6e46e2a4735949125a326dde0490b8ade434e`
+- `POST_B_CURRENT_IMPLEMENTATION_IDENTITY`：
+  `af66c568eb0c4b166139e24349f6e46e2a4735949125a326dde0490b8ade434e`
+- computed identity 与 current pin 精确一致。
+- G1 final full pytest 的 PRE / POST branch、HEAD、identity、pin、exact
+  changed-path set、staged、unmerged 与 `git diff --check` 均无漂移。
+- 既有 frozen historical identities、commits 与 tags 均未改写；当前开发 pin
+  不反向覆盖任何历史冻结 identity。
+
+### 16.3 审计与修复历史链（必须完整保留）
+
+1. `G1_SHAMOKE_FIRST_ADVERSARIAL_AUDIT = FAILED`
+2. `G1_SHAMOKE_REMEDIATION = PASSED`
+3. `G1_SHAMOKE_SECOND_ADVERSARIAL_AUDIT = FAILED`
+4. `G1_SHAMOKE_SECOND_AUDIT_REMEDIATION = PASSED`
+5. `G1_SHAMOKE_THIRD_ADVERSARIAL_AUDIT = FAILED`
+6. `G1_SHAMOKE_THIRD_AUDIT_REMEDIATION = PASSED`
+7. `G1_SHAMOKE_FOURTH_ADVERSARIAL_AUDIT = FAILED`
+8. `G1_SHAMOKE_FOURTH_AUDIT_REMEDIATION = PASSED`
+9. `G1_SHAMOKE_FIFTH_ADVERSARIAL_AUDIT = FAILED`
+10. `G1_SHAMOKE_FIFTH_AUDIT_REMEDIATION = PASSED`
+11. `G1_SHAMOKE_SIXTH_CLOSURE_AUDIT = PASSED`
+12. `G1_SHAMOKE_FINAL_FULL_PYTEST = PASSED`
+
+前五次敌对审计的 `FAILED` 是永久历史事实；后续 remediation 与第六轮 closure
+通过不把这些历史结果改写为 `PASSED`。
+
+### 16.4 GENERAL_COMPLETE 12 gates
+
+| Gate | 最终裁定 |
+| --- | --- |
+| 1. Knowledge / rule source | `PROVEN` |
+| 2. Canonical `GeneralDefinition` | `PROVEN` |
+| 3. Assignment → derived skills | `PROVEN` |
+| 4. Jili count / range / semantics | `PROVEN` |
+| 5. Generic pre-effect checkpoint | `PROVEN` |
+| 6. Signed continuation authority | `PROVEN` |
+| 7. Draw transaction | `PROVEN` |
+| 8. Normal turn lifecycle | `PROVEN` |
+| 9. Extra-turn | `NOT_APPLICABLE_TO_CURRENT_MODES` |
+| 10. Replay / deep tamper | `PROVEN` |
+| 11. No-skill / legacy transparency | `PROVEN` |
+| 12. Test and claim quality | `PROVEN` |
+
+全部适用 gate 均为 `PROVEN`；extra-turn 在当前模式中没有可适用的 production
+capability，因此准确状态为 `NOT_APPLICABLE_TO_CURRENT_MODES`，不得伪造成已实现能力。
+
+Closure findings：
+
+- `F-THIRD-001 = CLOSED`
+- `F-THIRD-002 = CLOSED`
+- `F-THIRD-003 = CLOSED`
+- `F-FOURTH-001 = CLOSED`
+- `F-FOURTH-002 = CLOSED`
+- `F-FIFTH-001 = CLOSED`
+
+### 16.5 最终证明的 production properties
+
+1. `GeneralDefinition` 是 canonical HP 与 skill authority；registry、assignment 与
+   replay 均以 live canonical definition 派生并认证 `shamoke` 的 `4 / 4` 与
+   `sgs_skill_jili`。
+2. 所有适用的正式 `CARD_USED` / `CARD_PLAYED` emitter 均进入 generic
+   pre-effect `POST_CARD_USED_OR_PLAYED_TRIGGER_CHECKPOINT`；遗漏 checkpoint 的路径
+   fail closed。
+3. Jili 只统计真实 use / play，按触发前攻击范围比较本回合计数，并覆盖正式
+   attack-range、回合累计与自然 turn reset 语义。
+4. 技能选择通过 signed `legal_actions → action_id → step`；ACTIVATE / PASS 与
+   single-use continuation 绑定 source event、actor、card、target、phase、revision
+   及 continuation identity。
+5. `step()` 与 continuation resume 具有事务原子性；异常时 GameState、events、
+   sequence、RNG、SkillRuntime、batch runtime、continuation、card locations 与
+   已应用外层效果恢复到调用前状态。
+6. mode-policy 使用 authoritative snapshot / restore；失败事务恢复原 mode policy，
+   C7 variant 身份、mark、胜负语义与相关可变容器能够回滚。
+7. `GeneralProductionReplayEnvelope` 覆盖 exact cold-load、fresh strict reexecute、
+   canonical general / assignment / derived skill / semantic payload、trigger、usage、
+   marks、continuation、state、event 与 RNG 认证；重算 envelope identities 后的
+   deep tamper 仍被拒绝。
+8. no-skill / legacy 路径保持透明，不注入技能动作、技能事件或空 skill registry，
+   既有模式与 replay schema 未发生技能语义漂移。
+
+### 16.6 Knowledge 边界
+
+- 【帷幕】对黑色延时锦囊的 target-legality completion 是当前开发分支内容；
+  §15.3 的较早 `AUTHORITATIVE_SKILL_RUNTIME_V1` proof-slice 边界属于其冻结历史
+  scope，不得用来撤销当前分支的 completion，也不得反写历史 Skill Runtime V1
+  identity / tag。
+- `POST_CARD_RESOLUTION_DURING_DYING = USER_CONFIRMED_CURRENT` 仅是 Knowledge
+  future boundary；它不声称孙綝、【戮连】或 nested dying production 已实现。
+- 2v2 teammate hand visibility 仅登记为 Knowledge 边界；本轮不声称已实现完整
+  hand-visibility engine。
+
+### 16.7 Final full pytest evidence
+
+实际执行的完整无过滤命令为：
+
+```powershell
+D:\MyGPT\game-analysis-grok-eval\.venv\Scripts\python.exe -B -m pytest -q -p no:cacheprovider --basetemp=D:\MyGPT\basetemp\general-batch-v1-g1-full-20260829T1647
+```
+
+- exact summary：`3111 passed in 4657.65s (1:17:37)`
+- exit code：`0`
+- failed = `0`；errors = `0`；skipped = `0`；xfailed = `0`；xpassed = `0`
+- stderr：empty
+- PRE / POST exact changed-path set：`22` paths（`15` tracked modified + `7`
+  untracked），完全一致；staged = `0`；unmerged = `0`；`git diff --check` = exit `0`
+
+该 full pytest 只绑定 §16.2 的当前 identity / pin，不替代或重写任何历史 identity
+上的测试记录。
+
+### 16.8 Documentation finalization / freeze-readiness
+
+本轮只更新本权威状态文档并执行文档、Knowledge、compileall、diff-check 与 identity
+定向 sanity checks；没有重跑 full pytest。完成后状态为：
+
+```text
+G1_SHAMOKE_DOCUMENTATION_FINALIZATION = PASSED
+SHAMOKE = GENERAL_COMPLETE
+G1_FREEZE_READY = YES
+READY_FOR_G2_IMPLEMENTATION = NO
+```
+
+本轮未执行 commit、push、tag 或 PR，未开始 G2 / G3，也未进入 Stage3 / C8。
+后续生命周期由用户另行决定：可以单独冻结 G1，或保留当前工作树进入 G2 后再按
+Batch V1 一起冻结；本节本身不授权其中任一路径。

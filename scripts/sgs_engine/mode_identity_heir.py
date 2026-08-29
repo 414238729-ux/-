@@ -389,6 +389,32 @@ def _parse_heir_role(value: object, player_id: str) -> HeirAndSpyChoiceRole:
         ) from exc
 
 
+@dataclass(frozen=True, slots=True)
+class HeirAndSpyChoiceVariantSnapshot:
+    """C7 可变变体状态的权威事务快照。"""
+
+    original_lord_player_id: str
+    current_lord_player_id: str
+    role_original: Mapping[str, str]
+    role_current: Mapping[str, str]
+    heir_player_id: str | None
+    heir_selection_used: bool
+    heir_window_open: bool
+    spy_path_choice: str | None
+    spy_path_pending: bool
+    spy_path_locked: bool
+    spy_path_chooser_id: str | None
+    lord_or_loyalist_confirmed_dead: bool
+    ambitionist_mark_available: Mapping[str, bool]
+    spy_became_loyalist_announced: bool
+    converted_loyalist_ids: tuple[str, ...]
+    round_number: int
+    normal_turn_cycle: int
+    is_extra_turn: bool
+    players_had_normal_turn_this_round: tuple[str, ...]
+    successor_cannot_select_heir: bool
+
+
 @dataclass
 class HeirAndSpyChoiceVariantState:
     """C7 可变变体状态。不进入 C6 配置，也不作为公开 header 字段。"""
@@ -413,6 +439,67 @@ class HeirAndSpyChoiceVariantState:
     is_extra_turn: bool = False
     players_had_normal_turn_this_round: tuple[str, ...] = ()
     successor_cannot_select_heir: bool = False
+
+    def snapshot(self) -> HeirAndSpyChoiceVariantSnapshot:
+        return HeirAndSpyChoiceVariantSnapshot(
+            original_lord_player_id=self.original_lord_player_id,
+            current_lord_player_id=self.current_lord_player_id,
+            role_original=dict(self.role_original),
+            role_current=dict(self.role_current),
+            heir_player_id=self.heir_player_id,
+            heir_selection_used=self.heir_selection_used,
+            heir_window_open=self.heir_window_open,
+            spy_path_choice=self.spy_path_choice,
+            spy_path_pending=self.spy_path_pending,
+            spy_path_locked=self.spy_path_locked,
+            spy_path_chooser_id=self.spy_path_chooser_id,
+            lord_or_loyalist_confirmed_dead=self.lord_or_loyalist_confirmed_dead,
+            ambitionist_mark_available=dict(self.ambitionist_mark_available),
+            spy_became_loyalist_announced=self.spy_became_loyalist_announced,
+            converted_loyalist_ids=tuple(self.converted_loyalist_ids),
+            round_number=self.round_number,
+            normal_turn_cycle=self.normal_turn_cycle,
+            is_extra_turn=self.is_extra_turn,
+            players_had_normal_turn_this_round=tuple(
+                self.players_had_normal_turn_this_round
+            ),
+            successor_cannot_select_heir=self.successor_cannot_select_heir,
+        )
+
+    def restore(self, snapshot: HeirAndSpyChoiceVariantSnapshot) -> None:
+        self.original_lord_player_id = snapshot.original_lord_player_id
+        self.current_lord_player_id = snapshot.current_lord_player_id
+        self.role_original.clear()
+        self.role_original.update(snapshot.role_original)
+        self.role_current.clear()
+        self.role_current.update(snapshot.role_current)
+        self.heir_player_id = snapshot.heir_player_id
+        self.heir_selection_used = snapshot.heir_selection_used
+        self.heir_window_open = snapshot.heir_window_open
+        self.spy_path_choice = snapshot.spy_path_choice
+        self.spy_path_pending = snapshot.spy_path_pending
+        self.spy_path_locked = snapshot.spy_path_locked
+        self.spy_path_chooser_id = snapshot.spy_path_chooser_id
+        self.lord_or_loyalist_confirmed_dead = (
+            snapshot.lord_or_loyalist_confirmed_dead
+        )
+        self.ambitionist_mark_available.clear()
+        self.ambitionist_mark_available.update(
+            snapshot.ambitionist_mark_available
+        )
+        self.spy_became_loyalist_announced = (
+            snapshot.spy_became_loyalist_announced
+        )
+        self.converted_loyalist_ids = tuple(snapshot.converted_loyalist_ids)
+        self.round_number = snapshot.round_number
+        self.normal_turn_cycle = snapshot.normal_turn_cycle
+        self.is_extra_turn = snapshot.is_extra_turn
+        self.players_had_normal_turn_this_round = tuple(
+            snapshot.players_had_normal_turn_this_round
+        )
+        self.successor_cannot_select_heir = (
+            snapshot.successor_cannot_select_heir
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -652,6 +739,21 @@ class HeirAndSpyChoiceModePolicy:
 
     def bind_session(self, session: object) -> None:
         object.__setattr__(self, "_session_ref", session)
+
+    def snapshot_authoritative_state(
+        self,
+    ) -> HeirAndSpyChoiceVariantSnapshot | None:
+        if self._variant is not None and hasattr(self._variant, "snapshot"):
+            return self._variant.snapshot()
+        return None
+
+    def restore_authoritative_state(self, snapshot: object) -> None:
+        if (
+            isinstance(snapshot, HeirAndSpyChoiceVariantSnapshot)
+            and self._variant is not None
+            and hasattr(self._variant, "restore")
+        ):
+            self._variant.restore(snapshot)
 
     def identity_reveal_on_confirmed_death(
         self, dying_id: str
@@ -1600,6 +1702,8 @@ __all__ = [
     "HeirAndSpyChoiceModePolicy",
     "HeirAndSpyChoiceOutcomePolicy",
     "HeirAndSpyChoiceRole",
+    "HeirAndSpyChoiceVariantSnapshot",
+    "HeirAndSpyChoiceVariantState",
     "TrustedFormalHeirAndSpyChoiceIdentityConfiguration",
     "assert_trusted_formal_heir_and_spy_choice_identity_configuration",
     "inspect_formal_heir_and_spy_choice_identity_readiness",

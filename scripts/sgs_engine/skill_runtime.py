@@ -309,6 +309,7 @@ class AuthoritativeSkillRuntime:
         turn_player_id: str,
         current_phase: str,
         timing_window: SkillTimingWindow,
+        context_payload: Mapping[str, Any] | None = None,
     ) -> tuple[tuple[str, str, SkillHandler, SkillTriggerContext], ...]:
         """Discover and evaluate all matching skill triggers for a given GameEvent."""
         candidates: list[tuple[str, str, SkillHandler, SkillTriggerContext]] = []
@@ -350,6 +351,7 @@ class AuthoritativeSkillRuntime:
                     turn_player_id=turn_player_id,
                     phase=current_phase,
                     event=event,
+                    payload=context_payload or {},
                 )
                 handler = self._registry.get_handler(skill_id)
                 if handler.evaluate_trigger(ctx, state, skill_state):

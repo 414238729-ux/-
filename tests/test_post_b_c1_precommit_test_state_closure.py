@@ -22,6 +22,7 @@ from pathlib import Path
 
 import scripts.sgs_engine.formal_duel as formal_duel_module
 import scripts.sgs_formal_runner as formal_runner
+from scripts.current_implementation_pin import POST_B_CURRENT_IMPLEMENTATION_IDENTITY
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _ACCEPTANCE_ARTIFACT_PATH = (
@@ -30,10 +31,6 @@ _ACCEPTANCE_ARTIFACT_PATH = (
 
 FROZEN_R8_IMPLEMENTATION_IDENTITY = (
     "06c8b2d3ead9adb52a18252e398eae137eb8fb51f657909051500893672b0e33"
-)
-# 当前 post-B 实现身份：随 post-B 轨道（C1→C7）更新；冻结 R8 值永不变。
-POST_B_CURRENT_IMPLEMENTATION_IDENTITY = (
-    "2460d3ac6998746a4aa5c13cf84321d652b965d9a462d325b41519625116c949"
 )
 FROZEN_R8_RULES_PROFILE_IDENTITY = (
     "9a7b0e9f45c05292a207c500e5b024a77d97b4a6c9446230d81d357c7b514283"

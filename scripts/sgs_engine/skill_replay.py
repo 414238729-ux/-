@@ -1003,3 +1003,623 @@ def reexecute_skill_production_replay(
         state_hashes_matched=True,
         details=f"生产技能回放验证通过，共 {steps_verified} 步",
     )
+
+
+GENERAL_PRODUCTION_REPLAY_SCHEMA_V1 = "sgs-authoritative-general-production-replay-v1"
+
+_GENERAL_PRODUCTION_REPLAY_FIELDS = frozenset(
+    {
+        "schema",
+        "contract_identity",
+        "implementation_identity",
+        "seed",
+        "session_id",
+        "session_secret_hex",
+        "general_registry_identity",
+        "general_profile_identities",
+        "general_semantic_payloads",
+        "general_assignments",
+        "skill_registry_identity",
+        "skill_profile_identities",
+        "derived_skill_assignments",
+        "primary_general_key",
+        "owner_id",
+        "trigger_event_sequence",
+        "trigger_event_type",
+        "usage_before",
+        "usage_after",
+        "marks_before",
+        "marks_after",
+        "continuation_identity",
+        "action_ids",
+        "legal_set_hashes",
+        "chosen_action_semantics",
+        "event_slice",
+        "state_hash_before",
+        "state_hash_after",
+        "rng_hash",
+        "records_identity",
+        "execution_identity",
+    }
+)
+
+_GENERAL_PRODUCTION_REPLAY_CONTRACT_DESCRIPTOR_V1: Mapping[str, object] = {
+    "authentication_order": [
+        "exact_schema",
+        "contract_identity",
+        "implementation_identity",
+        "general_registry_identity",
+        "general_profile_identities",
+        "general_semantic_payloads",
+        "general_assignments",
+        "derived_skill_assignments",
+        "skill_registry_identity",
+        "skill_profile_identities",
+        "trigger_event_binding",
+        "usage_and_marks_transition",
+        "continuation_identity",
+        "records_identity",
+        "execution_identity",
+        "fresh_session",
+        "live_legal_actions",
+        "step",
+    ],
+    "envelope_fields": sorted(_GENERAL_PRODUCTION_REPLAY_FIELDS),
+    "nested_action_fields": sorted(_ACTION_SEMANTICS_FIELDS),
+    "nested_event_base_fields": sorted(_EVENT_BASE_FIELDS),
+    "nested_event_damage_fields": sorted(_EVENT_DAMAGE_FIELDS),
+    "schema": GENERAL_PRODUCTION_REPLAY_SCHEMA_V1,
+    "strict_json_types": True,
+}
+
+
+def general_production_replay_contract_identity() -> str:
+    """Return the stable identity of the V1 production-general replay contract."""
+    return sha256_value(_GENERAL_PRODUCTION_REPLAY_CONTRACT_DESCRIPTOR_V1)
+
+
+GENERAL_PRODUCTION_REPLAY_CONTRACT_IDENTITY_V1 = (
+    general_production_replay_contract_identity()
+)
+
+
+def _exact_general_assignments(value: object) -> dict[str, str]:
+    data = _exact_dict(value, "general_assignments")
+    if not data:
+        raise _replay_format_error("general_assignments", "不得为空")
+    result: dict[str, str] = {}
+    for key, item in data.items():
+        player_id = _exact_string(key, "general_assignments.<player_id>")
+        assert isinstance(player_id, str)
+        gen_key = _exact_string(item, f"general_assignments.{player_id}")
+        assert isinstance(gen_key, str)
+        result[player_id] = gen_key
+    return result
+
+
+def _exact_general_semantic_payloads(
+    value: object,
+) -> dict[str, Mapping[str, Any]]:
+    from .generals import GeneralDefinition
+
+    data = _exact_dict(value, "general_semantic_payloads")
+    if not data:
+        raise _replay_format_error("general_semantic_payloads", "不得为空")
+    result: dict[str, Mapping[str, Any]] = {}
+    for raw_key, raw_payload in data.items():
+        general_key = _exact_string(
+            raw_key, "general_semantic_payloads.<general_key>"
+        )
+        assert isinstance(general_key, str)
+        payload = _exact_dict(
+            raw_payload, f"general_semantic_payloads.{general_key}"
+        )
+        try:
+            definition = GeneralDefinition.from_dict(payload)
+        except (TypeError, ValueError) as exc:
+            raise _replay_format_error(
+                f"general_semantic_payloads.{general_key}", str(exc)
+            ) from exc
+        if definition.general_key != general_key:
+            raise _replay_format_error(
+                f"general_semantic_payloads.{general_key}",
+                "映射键与 payload.general_key 不一致",
+            )
+        result[general_key] = MappingProxyType(definition.to_dict())
+    return result
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GeneralProductionReplayEnvelope:
+    """Production general replay envelope binding general authority and skill derivation."""
+
+    schema: str = GENERAL_PRODUCTION_REPLAY_SCHEMA_V1
+    seed: int
+    session_id: str
+    session_secret_hex: str
+    general_registry_identity: str
+    general_profile_identities: Mapping[str, str]
+    general_semantic_payloads: Mapping[str, Mapping[str, Any]]
+    general_assignments: Mapping[str, str]
+    skill_registry_identity: str
+    skill_profile_identities: Mapping[str, str]
+    derived_skill_assignments: Mapping[str, tuple[str, ...]]
+    primary_general_key: str
+    owner_id: str
+    trigger_event_sequence: int
+    trigger_event_type: str
+    usage_before: Mapping[str, int]
+    usage_after: Mapping[str, int]
+    marks_before: Mapping[str, int]
+    marks_after: Mapping[str, int]
+    continuation_identity: str
+    action_ids: tuple[str, ...]
+    legal_set_hashes: tuple[str, ...]
+    chosen_action_semantics: tuple[Mapping[str, Any], ...]
+    event_slice: tuple[Mapping[str, Any], ...]
+    state_hash_before: str
+    state_hash_after: str
+    rng_hash: str
+    contract_identity: str = GENERAL_PRODUCTION_REPLAY_CONTRACT_IDENTITY_V1
+    implementation_identity: str = field(default_factory=_current_implementation_identity)
+    records_identity: str = ""
+    execution_identity: str = ""
+
+    def __post_init__(self) -> None:
+        if self.schema != GENERAL_PRODUCTION_REPLAY_SCHEMA_V1:
+            raise ValueError(f"不受支持的生产武将回放 schema: {self.schema}")
+        object.__setattr__(
+            self,
+            "general_profile_identities",
+            MappingProxyType(dict(self.general_profile_identities)),
+        )
+        object.__setattr__(
+            self,
+            "general_assignments",
+            MappingProxyType(dict(self.general_assignments)),
+        )
+        object.__setattr__(
+            self,
+            "general_semantic_payloads",
+            MappingProxyType(
+                {
+                    key: MappingProxyType(dict(value))
+                    for key, value in self.general_semantic_payloads.items()
+                }
+            ),
+        )
+        object.__setattr__(
+            self,
+            "skill_profile_identities",
+            MappingProxyType(dict(self.skill_profile_identities)),
+        )
+        object.__setattr__(
+            self,
+            "derived_skill_assignments",
+            MappingProxyType({k: tuple(v) for k, v in self.derived_skill_assignments.items()}),
+        )
+        object.__setattr__(self, "usage_before", MappingProxyType(dict(self.usage_before)))
+        object.__setattr__(self, "usage_after", MappingProxyType(dict(self.usage_after)))
+        object.__setattr__(self, "marks_before", MappingProxyType(dict(self.marks_before)))
+        object.__setattr__(self, "marks_after", MappingProxyType(dict(self.marks_after)))
+        if not self.records_identity:
+            object.__setattr__(self, "records_identity", self._compute_records_identity())
+        if not self.execution_identity:
+            object.__setattr__(self, "execution_identity", self._compute_execution_identity())
+
+    def _compute_records_identity(self) -> str:
+        return sha256_value(
+            {
+                "action_ids": list(self.action_ids),
+                "chosen_action_semantics": [
+                    _json_frozen(item) for item in self.chosen_action_semantics
+                ],
+                "event_slice": [_json_frozen(item) for item in self.event_slice],
+                "legal_set_hashes": list(self.legal_set_hashes),
+                "owner_id": self.owner_id,
+                "primary_general_key": self.primary_general_key,
+                "trigger_event_sequence": self.trigger_event_sequence,
+                "trigger_event_type": self.trigger_event_type,
+                "usage_before": dict(self.usage_before),
+                "usage_after": dict(self.usage_after),
+                "marks_before": dict(self.marks_before),
+                "marks_after": dict(self.marks_after),
+                "continuation_identity": self.continuation_identity,
+                "rng_hash": self.rng_hash,
+                "state_hash_after": self.state_hash_after,
+                "state_hash_before": self.state_hash_before,
+            }
+        )
+
+    def _compute_execution_identity(self) -> str:
+        payload = self.to_dict()
+        payload.pop("execution_identity", None)
+        return hashlib.sha256(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "contract_identity": self.contract_identity,
+            "implementation_identity": self.implementation_identity,
+            "seed": self.seed,
+            "session_id": self.session_id,
+            "session_secret_hex": self.session_secret_hex,
+            "general_registry_identity": self.general_registry_identity,
+            "general_profile_identities": dict(sorted(self.general_profile_identities.items())),
+            "general_semantic_payloads": {
+                key: _json_frozen(value)
+                for key, value in sorted(self.general_semantic_payloads.items())
+            },
+            "general_assignments": dict(sorted(self.general_assignments.items())),
+            "skill_registry_identity": self.skill_registry_identity,
+            "skill_profile_identities": dict(sorted(self.skill_profile_identities.items())),
+            "derived_skill_assignments": {k: list(v) for k, v in sorted(self.derived_skill_assignments.items())},
+            "primary_general_key": self.primary_general_key,
+            "owner_id": self.owner_id,
+            "trigger_event_sequence": self.trigger_event_sequence,
+            "trigger_event_type": self.trigger_event_type,
+            "usage_before": dict(self.usage_before),
+            "usage_after": dict(self.usage_after),
+            "marks_before": dict(self.marks_before),
+            "marks_after": dict(self.marks_after),
+            "continuation_identity": self.continuation_identity,
+            "action_ids": list(self.action_ids),
+            "legal_set_hashes": list(self.legal_set_hashes),
+            "chosen_action_semantics": [_json_frozen(item) for item in self.chosen_action_semantics],
+            "event_slice": [_json_frozen(item) for item in self.event_slice],
+            "state_hash_before": self.state_hash_before,
+            "state_hash_after": self.state_hash_after,
+            "rng_hash": self.rng_hash,
+            "records_identity": self.records_identity,
+            "execution_identity": self.execution_identity,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "GeneralProductionReplayEnvelope":
+        data = _exact_dict(payload, "<root>")
+        _exact_fields(data, _GENERAL_PRODUCTION_REPLAY_FIELDS, "<root>")
+        schema = _exact_string(data["schema"], "schema")
+        if schema != GENERAL_PRODUCTION_REPLAY_SCHEMA_V1:
+            raise SkillReplayDivergenceError(f"不受支持的生产武将回放 schema: {schema}")
+        contract_identity = _exact_sha256(data["contract_identity"], "contract_identity")
+        implementation_identity = _exact_sha256(
+            data["implementation_identity"], "implementation_identity"
+        )
+        seed = _exact_int(data["seed"], "seed")
+        session_id = _exact_string(data["session_id"], "session_id")
+        session_secret_hex = _exact_string(
+            data["session_secret_hex"], "session_secret_hex"
+        )
+        assert isinstance(session_secret_hex, str)
+        if len(session_secret_hex) != 64 or _SHA256_RE.fullmatch(session_secret_hex) is None:
+            raise _replay_format_error(
+                "session_secret_hex", "必须是精确 32 字节的小写十六进制字符串"
+            )
+        general_registry_identity = _exact_sha256(
+            data["general_registry_identity"], "general_registry_identity"
+        )
+        general_profiles = _exact_profile_identities(data["general_profile_identities"])
+        general_semantic_payloads = _exact_general_semantic_payloads(
+            data["general_semantic_payloads"]
+        )
+        general_assignments = _exact_general_assignments(data["general_assignments"])
+        skill_registry_identity = _exact_sha256(
+            data["skill_registry_identity"], "skill_registry_identity"
+        )
+        skill_profiles = _exact_profile_identities(data["skill_profile_identities"])
+        derived_assignments = _exact_assignments(data["derived_skill_assignments"])
+        primary_general_key = _exact_string(data["primary_general_key"], "primary_general_key")
+        owner_id = _exact_string(data["owner_id"], "owner_id")
+        trigger_event_sequence = _exact_int(
+            data["trigger_event_sequence"], "trigger_event_sequence", minimum=0
+        )
+        trigger_event_type = _exact_string(
+            data["trigger_event_type"], "trigger_event_type"
+        )
+        continuation_identity = _exact_sha256(
+            data["continuation_identity"], "continuation_identity"
+        )
+
+        action_ids = _exact_string_list(
+            data["action_ids"], "action_ids", allow_empty=False, unique=True
+        )
+        for index, action_id in enumerate(action_ids):
+            if _ACTION_ID_RE.fullmatch(action_id) is None:
+                raise _replay_format_error(
+                    f"action_ids[{index}]", "必须是 act_ 加 64 位小写 SHA-256"
+                )
+        legal_set_hashes = _exact_string_list(
+            data["legal_set_hashes"], "legal_set_hashes", allow_empty=False
+        )
+        for index, item in enumerate(legal_set_hashes):
+            _exact_sha256(item, f"legal_set_hashes[{index}]")
+        raw_semantics = data["chosen_action_semantics"]
+        if type(raw_semantics) is not list:
+            raise _replay_format_error("chosen_action_semantics", "必须是 JSON array")
+        semantics = tuple(
+            _exact_action_semantics(item, index)
+            for index, item in enumerate(raw_semantics)
+        )
+        if not (
+            len(action_ids) == len(legal_set_hashes) == len(semantics)
+        ):
+            raise _replay_format_error(
+                "action_ids/legal_set_hashes/chosen_action_semantics",
+                "长度必须完全一致",
+            )
+        raw_events = data["event_slice"]
+        if type(raw_events) is not list:
+            raise _replay_format_error("event_slice", "必须是 JSON array")
+        events = tuple(_exact_event(item, index) for index, item in enumerate(raw_events))
+        sequences = tuple(event["sequence"] for event in events)
+        if len(sequences) != len(set(sequences)) or sequences != tuple(sorted(sequences)):
+            raise _replay_format_error("event_slice.sequence", "必须严格递增且不得重复")
+        loaded = cls(
+            schema=schema,
+            contract_identity=contract_identity,
+            implementation_identity=implementation_identity,
+            seed=int(seed),
+            session_id=session_id,
+            session_secret_hex=session_secret_hex,
+            general_registry_identity=general_registry_identity,
+            general_profile_identities=general_profiles,
+            general_semantic_payloads=general_semantic_payloads,
+            general_assignments=general_assignments,
+            skill_registry_identity=skill_registry_identity,
+            skill_profile_identities=skill_profiles,
+            derived_skill_assignments=derived_assignments,
+            primary_general_key=primary_general_key,
+            owner_id=owner_id,
+            trigger_event_sequence=int(trigger_event_sequence),
+            trigger_event_type=trigger_event_type,
+            usage_before=_exact_usage(data["usage_before"], "usage_before"),
+            usage_after=_exact_usage(data["usage_after"], "usage_after"),
+            marks_before=_exact_marks(data["marks_before"], "marks_before"),
+            marks_after=_exact_marks(data["marks_after"], "marks_after"),
+            continuation_identity=continuation_identity,
+            action_ids=action_ids,
+            legal_set_hashes=legal_set_hashes,
+            chosen_action_semantics=semantics,
+            event_slice=events,
+            state_hash_before=_exact_sha256(data["state_hash_before"], "state_hash_before"),
+            state_hash_after=_exact_sha256(data["state_hash_after"], "state_hash_after"),
+            rng_hash=_exact_sha256(data["rng_hash"], "rng_hash"),
+            records_identity=_exact_sha256(data["records_identity"], "records_identity"),
+            execution_identity=_exact_sha256(data["execution_identity"], "execution_identity"),
+        )
+        loaded._authenticate_static_fields()
+        return loaded
+
+    def _authenticate_static_fields(self) -> None:
+        if self.schema != GENERAL_PRODUCTION_REPLAY_SCHEMA_V1:
+            raise SkillReplayDivergenceError("生产武将回放 schema 不匹配")
+        if self.contract_identity != GENERAL_PRODUCTION_REPLAY_CONTRACT_IDENTITY_V1:
+            raise SkillReplayDivergenceError("contract_identity 与当前生产回放合同不匹配")
+        current_implementation = _current_implementation_identity()
+        if self.implementation_identity != current_implementation:
+            raise SkillReplayDivergenceError(
+                "implementation_identity 与当前生产实现不匹配"
+            )
+        if self.records_identity != self._compute_records_identity():
+            raise SkillReplayDivergenceError("records_identity 与内层回放记录不一致")
+        if self.execution_identity != self._compute_execution_identity():
+            raise SkillReplayDivergenceError("execution_identity 与信封内容不一致")
+
+
+def _construct_general_production_replay_session(
+    envelope: GeneralProductionReplayEnvelope,
+    general_registry: object,
+    skill_registry: AuthoritativeSkillRegistry,
+) -> object:
+    from .production_batch import ProductionBasicCardBatch
+
+    return ProductionBasicCardBatch(
+        seed=envelope.seed,
+        session_id=envelope.session_id,
+        session_secret=bytes.fromhex(envelope.session_secret_hex),
+        general_registry=general_registry,
+        general_assignments=envelope.general_assignments,
+        skill_registry=skill_registry,
+    )
+
+
+def reexecute_general_production_replay(
+    envelope: GeneralProductionReplayEnvelope,
+    general_registry: object,
+    skill_registry: AuthoritativeSkillRegistry,
+) -> SkillReplayVerificationResult:
+    if type(envelope) is not GeneralProductionReplayEnvelope:
+        raise SkillReplayDivergenceError(
+            "生产武将回放必须是 exact GeneralProductionReplayEnvelope"
+        )
+    envelope = GeneralProductionReplayEnvelope.from_dict(envelope.to_dict())
+
+    from .generals import AuthoritativeGeneralRegistry
+
+    if type(general_registry) is not AuthoritativeGeneralRegistry:
+        raise SkillReplayDivergenceError(
+            "武将注册表必须是 exact AuthoritativeGeneralRegistry"
+        )
+    if not general_registry.is_frozen:
+        raise SkillReplayDivergenceError("武将注册表必须已冻结")
+    try:
+        general_registry.assert_canonical_integrity()
+        live_general_registry_identity = general_registry.canonical_registry_identity()
+    except (TypeError, ValueError, UnsupportedRuleError) as exc:
+        raise SkillReplayDivergenceError(
+            f"武将注册表 live canonical payload 校验失败：{exc}"
+        ) from exc
+    if live_general_registry_identity != envelope.general_registry_identity:
+        raise SkillReplayDivergenceError("武将注册表身份不匹配")
+
+    if type(skill_registry) is not AuthoritativeSkillRegistry:
+        raise SkillReplayDivergenceError(
+            "技能注册表必须是 exact AuthoritativeSkillRegistry"
+        )
+    if not skill_registry.is_frozen:
+        raise SkillReplayDivergenceError("技能注册表必须已冻结")
+    if skill_registry.registry_identity != envelope.skill_registry_identity:
+        raise SkillReplayDivergenceError("技能注册表身份不匹配")
+
+    assigned_general_keys = set(envelope.general_assignments.values())
+    if set(envelope.general_profile_identities) != assigned_general_keys:
+        raise SkillReplayDivergenceError("武将 profile 集合与 live assignment 不精确一致")
+    if set(envelope.general_semantic_payloads) != assigned_general_keys:
+        raise SkillReplayDivergenceError("武将 semantic payload 集合与 live assignment 不精确一致")
+    if set(envelope.derived_skill_assignments) != set(envelope.general_assignments):
+        raise SkillReplayDivergenceError("派生技能归属与武将归属角色集合不精确一致")
+    if envelope.owner_id not in envelope.general_assignments:
+        raise SkillReplayDivergenceError("owner_id 不在武将分配中")
+    if envelope.general_assignments[envelope.owner_id] != envelope.primary_general_key:
+        raise SkillReplayDivergenceError("primary_general_key 与 owner_id 的 live assignment 不匹配")
+
+    live_generals: dict[str, object] = {}
+    for gen_key, expected_profile in envelope.general_profile_identities.items():
+        try:
+            gen_def = general_registry.get_general(gen_key)
+        except (TypeError, ValueError, UnsupportedRuleError) as exc:
+            raise SkillReplayDivergenceError(str(exc)) from exc
+        live_generals[gen_key] = gen_def
+        if gen_def.canonical_profile_identity() != expected_profile:
+            raise SkillReplayDivergenceError(f"武将 {gen_key} profile identity 不匹配")
+        if gen_def.to_dict() != dict(envelope.general_semantic_payloads[gen_key]):
+            raise SkillReplayDivergenceError(f"武将 {gen_key} canonical semantic payload 不匹配")
+
+    for player_id, gen_key in envelope.general_assignments.items():
+        gen_def = live_generals[gen_key]
+        expected_derived = envelope.derived_skill_assignments.get(player_id)
+        if expected_derived != gen_def.skill_ids:
+            raise SkillReplayDivergenceError(
+                f"角色 {player_id} 从武将 {gen_key} 派生的技能集合不匹配"
+            )
+        for s_id in gen_def.skill_ids:
+            if not skill_registry.has_skill(s_id):
+                raise SkillReplayDivergenceError(f"技能注册表缺少派生技能 {s_id!r}")
+            s_def = skill_registry.get_skill(s_id)
+            if envelope.skill_profile_identities.get(s_id) != s_def.profile_identity:
+                raise SkillReplayDivergenceError(f"派生技能 {s_id} profile identity 不匹配")
+
+    all_derived_skills = {
+        skill_id
+        for skill_ids in envelope.derived_skill_assignments.values()
+        for skill_id in skill_ids
+    }
+    if set(envelope.skill_profile_identities) != all_derived_skills:
+        raise SkillReplayDivergenceError("技能 profile 集合与武将派生技能集合不精确一致")
+    primary_general = live_generals[envelope.primary_general_key]
+    if "sgs_skill_jili" not in primary_general.skill_ids:
+        raise SkillReplayDivergenceError("primary general 未派生 Jili")
+    if "sgs_skill_jili" not in envelope.derived_skill_assignments[envelope.owner_id]:
+        raise SkillReplayDivergenceError("owner_id 未从 primary general 派生 Jili")
+
+    from .production_batch import BatchActionIdController
+
+    game = _construct_general_production_replay_session(
+        envelope, general_registry, skill_registry
+    )
+
+    steps_verified = 0
+    jili_step_seen = False
+    for index, action_id in enumerate(envelope.action_ids):
+        legal = game.legal_actions()
+        legal_hash = legal_actions_semantic_hash(legal)
+        if legal_hash != envelope.legal_set_hashes[index]:
+            raise SkillReplayDivergenceError(f"第 {index} 步合法动作语义集合不匹配")
+        chosen = next((item for item in legal if item.action_id == action_id), None)
+        if chosen is None:
+            raise SkillReplayDivergenceError(
+                f"第 {index} 步 chosen action_id 不在 live legal_actions 中"
+            )
+        expected_semantics = envelope.chosen_action_semantics[index]
+        actual_semantics = action_semantics(chosen)
+        if actual_semantics != expected_semantics:
+            raise SkillReplayDivergenceError(f"第 {index} 步 chosen action 语义不匹配")
+        if index == 0 and envelope.state_hash_before:
+            if compute_state_hash(game.state) != envelope.state_hash_before:
+                raise SkillReplayDivergenceError("起始状态哈希不匹配")
+        if chosen.skill_id == "sgs_skill_jili":
+            if jili_step_seen:
+                raise SkillReplayDivergenceError("生产武将回放包含重复 Jili 决策步")
+            jili_step_seen = True
+            if chosen.actor_id != envelope.owner_id:
+                raise SkillReplayDivergenceError("Jili 决策 actor 与 owner_id 不匹配")
+            if chosen.payload.get("trigger_event_sequence") != envelope.trigger_event_sequence:
+                raise SkillReplayDivergenceError("Jili trigger_event_sequence 不匹配")
+            if chosen.payload.get("trigger_event_type") != envelope.trigger_event_type:
+                raise SkillReplayDivergenceError("Jili trigger_event_type 不匹配")
+            if chosen.payload.get("continuation_identity") != envelope.continuation_identity:
+                raise SkillReplayDivergenceError("Jili continuation_identity 不匹配")
+            if game.pending_card_continuation_identity != envelope.continuation_identity:
+                raise SkillReplayDivergenceError("live pending continuation identity 不匹配")
+            if game.skill_runtime is None:
+                raise SkillReplayDivergenceError("Jili 决策前缺少 SkillRuntime")
+            try:
+                skill_state = game.skill_runtime.get_skill_state(
+                    envelope.owner_id, "sgs_skill_jili"
+                )
+            except UnsupportedRuleError as exc:
+                raise SkillReplayDivergenceError(str(exc)) from exc
+            actual_usage_before = {
+                "uses_this_phase": skill_state.uses_this_phase,
+                "uses_this_turn": skill_state.uses_this_turn,
+            }
+            if actual_usage_before != dict(envelope.usage_before):
+                raise SkillReplayDivergenceError("Jili usage_before 不匹配")
+            if dict(skill_state.marks) != dict(envelope.marks_before):
+                raise SkillReplayDivergenceError("Jili marks_before 不匹配")
+        game.step(BatchActionIdController(action_id))
+        steps_verified += 1
+
+    if not jili_step_seen:
+        raise SkillReplayDivergenceError("生产武将回放未重现 Jili 决策")
+
+    if compute_state_hash(game.state) != envelope.state_hash_after:
+        raise SkillReplayDivergenceError("终态哈希不匹配")
+    if game.skill_runtime is None:
+        raise SkillReplayDivergenceError("重放会话未装载 SkillRuntime")
+    if game.general_registry is None:
+        raise SkillReplayDivergenceError("重放会话未装载 GeneralRegistry")
+    try:
+        final_skill_state = game.skill_runtime.get_skill_state(
+            envelope.owner_id, "sgs_skill_jili"
+        )
+    except UnsupportedRuleError as exc:
+        raise SkillReplayDivergenceError(str(exc)) from exc
+    actual_usage_after = {
+        "uses_this_phase": final_skill_state.uses_this_phase,
+        "uses_this_turn": final_skill_state.uses_this_turn,
+    }
+    if actual_usage_after != dict(envelope.usage_after):
+        raise SkillReplayDivergenceError("Jili usage_after 不匹配")
+    if dict(final_skill_state.marks) != dict(envelope.marks_after):
+        raise SkillReplayDivergenceError("Jili marks_after 不匹配")
+    if game.pending_card_continuation_identity is not None:
+        raise SkillReplayDivergenceError("Jili 决策后 continuation 未完成消费")
+    if envelope.continuation_identity not in game.consumed_card_continuation_identities:
+        raise SkillReplayDivergenceError("Jili continuation 未记录为已消费")
+
+    actual_events = tuple(event.to_replay_dict() for event in game.events)
+    if actual_events != envelope.event_slice:
+        raise SkillReplayDivergenceError("事件内容或序号切片不匹配")
+    if rng_calls_hash(game.rng_calls) != envelope.rng_hash:
+        raise SkillReplayDivergenceError("RNG 回放不一致")
+    trigger_event = next(
+        (
+            event
+            for event in game.events
+            if event.sequence == envelope.trigger_event_sequence
+        ),
+        None,
+    )
+    if trigger_event is None or trigger_event.event_type.value != envelope.trigger_event_type:
+        raise SkillReplayDivergenceError("Jili 触发事件序号或类型不匹配")
+
+    return SkillReplayVerificationResult(
+        verified=True,
+        steps_verified=steps_verified,
+        registry_identity_matched=True,
+        state_hashes_matched=True,
+        details=f"生产武将回放验证通过，共 {steps_verified} 步",
+    )

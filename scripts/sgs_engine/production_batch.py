@@ -26,7 +26,7 @@ import json
 from pathlib import Path
 import secrets
 from types import MappingProxyType, SimpleNamespace
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from ..deck_data import DeckRecord, load_deck_csv
 from .actions import (
@@ -91,6 +91,7 @@ from .production_cards import (
     PRODUCTION_ARMOR_KEYS,
     SLASH_CARD_KEYS,
     actual_distance,
+    attack_range_of,
     check_weapon_skill_gate,
     equipped_weapon_key,
     hand_limit_of,
@@ -100,6 +101,11 @@ from .production_cards import (
     is_valid_slash_target,
     normalize_target_order,
     target_zone_refs,
+)
+from .generals import (
+    AuthoritativeGeneralRegistry,
+    GeneralDefinition,
+    create_authoritative_general_batch_v1_registry,
 )
 from .replay import canonical_json, sha256_value, state_sha256
 from .rng import DeterministicRNG, RNGCall
@@ -217,6 +223,67 @@ class _PendingSkillDecision:
     card_instance_id: str | None
     window_revision: int
     consumption_key: tuple[str, ...]
+    payload: Mapping[str, Any] = MappingProxyType({})
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingCardContinuation:
+    """Authenticated single-layer continuation for a paused card action.
+
+    The callback is process-local authority and is never serialized.  Every
+    externally observable identity is derived from the signed action and the
+    queued CARD_USED/CARD_PLAYED event.  V1 deliberately supports one layer;
+    attempting to open another checkpoint while this record exists fails
+    closed instead of replacing or silently skipping the outer continuation.
+    """
+
+    continuation_id: str
+    source_event_sequence: int
+    source_event_type: str
+    card_action_identity: str
+    actor_id: str
+    owner_id: str
+    card_instance_id: str | None
+    target_ids: tuple[str, ...]
+    required_card_zone: ZoneRef | None
+    expected_phase: str
+    expected_pending_dying_id: str | None
+    window_revision: int
+    expected_revision: int
+    callback: Callable[[GameState], GameState]
+
+
+@dataclass(frozen=True, slots=True)
+class _AuthoritativeMutationSnapshot:
+    """Exact rollback boundary for one authoritative session mutation.
+
+    ``GameState`` and the batch/skill runtime values are immutable references,
+    while EventQueue and DeterministicRNG own mutable storage.  Both forms are
+    captured here so a failed ``step()`` or continuation callback can restore
+    every authoritative semantic input, including audit counters.
+    """
+
+    state: GameState
+    events: tuple[GameEvent, ...]
+    event_next_sequence: int
+    rng_random_state: object
+    rng_calls: tuple[RNGCall, ...]
+    runtime: "_BatchRuntime"
+    skill_runtime: AuthoritativeSkillRuntime | None
+    skill_pending: _PendingSkillDecision | None
+    skill_trigger_queue: tuple[_PendingSkillDecision, ...]
+    skill_consumed_triggers: frozenset[tuple[str, ...]]
+    skill_hand_limit_exempt_ids: frozenset[str]
+    pending_card_continuation: _PendingCardContinuation | None
+    consumed_card_continuations: frozenset[str]
+    continuation_in_progress_id: str | None
+    checkpointed_card_event_sequences: frozenset[int]
+    active_validated_action: LegalAction | None
+    phase_history: tuple["BatchPhaseEntry", ...]
+    step_count: int
+    turn_start_sequence: int
+    outcome_policy: OutcomePolicy | None = None
+    mode_policy_snapshot: object = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -2933,6 +3000,10 @@ class ProductionBasicCardBatch:
         # EMPTY_SKILL_REGISTRY into old no-skill constructors.
         skill_registry: AuthoritativeSkillRegistry | None = None,
         skill_assignments: Mapping[str, Sequence[str]] | None = None,
+        # Opt-in general authority. Automatically derives character metadata
+        # and full skill sets into SkillRuntime without manual skill stitching.
+        general_registry: AuthoritativeGeneralRegistry | None = None,
+        general_assignments: Mapping[str, str] | None = None,
         # POST-B C5：仅供正式身份会话在完成身份牌 shuffle 后注入同一
         # DeterministicRNG。不是公开 RNG 注入口；传入对象不能授予
         # formal authority。C1-C4 不传此参数，RNG 消费顺序保持不变。
@@ -3008,6 +3079,14 @@ class ProductionBasicCardBatch:
         self._skill_trigger_queue: list[_PendingSkillDecision] = []
         self._skill_consumed_triggers: frozenset[tuple[str, ...]] = frozenset()
         self._skill_hand_limit_exempt_ids: frozenset[str] = frozenset()
+        self._pending_card_continuation: _PendingCardContinuation | None = None
+        self._consumed_card_continuations: frozenset[str] = frozenset()
+        self._continuation_in_progress_id: str | None = None
+        self._checkpointed_card_event_sequences: frozenset[int] = frozenset()
+        self._active_validated_action: LegalAction | None = None
+        self._general_registry = None
+        self._general_assignments = None
+        self._turn_start_sequence = 1
 
         if session_id is None:
             session_id = secrets.token_hex(16)
@@ -3060,15 +3139,49 @@ class ProductionBasicCardBatch:
             for instance_id in ordered_ids
             if instance_id not in dealt
         )
-        players = tuple(
-            PlayerState(
-                prepared_player_ids[index],
-                index + 1,
-                player_hp[index],
-                player_max_hp[index],
+
+        # F-001: General authority for player starting_hp / max_hp / character metadata
+        if general_assignments is not None:
+            active_gen_reg = general_registry
+            if active_gen_reg is None:
+                from .generals import create_authoritative_general_batch_v1_registry
+                active_gen_reg = create_authoritative_general_batch_v1_registry()
+            for pid, g_key in general_assignments.items():
+                if pid not in prepared_player_ids:
+                    raise ValueError(f"武将分配引用了未知角色{pid!r}")
+                if not active_gen_reg.has_general(g_key):
+                    raise UnsupportedRuleError(f"武将注册表未包含武将键{g_key!r}")
+                g_def = active_gen_reg.get_general(g_key)
+                p_idx = prepared_player_ids.index(pid)
+                if player_hp[p_idx] != g_def.starting_hp or player_max_hp[p_idx] != g_def.max_hp:
+                    raise ValueError(
+                        f"角色 {pid} 指定了武将 {g_key} (权威体力 {g_def.starting_hp}/{g_def.max_hp})，"
+                        f"与显式传入的体力 {player_hp[p_idx]}/{player_max_hp[p_idx]} 冲突"
+                    )
+
+        player_states = []
+        for index, pid in enumerate(prepared_player_ids):
+            if general_assignments is not None and pid in general_assignments:
+                g_key = general_assignments[pid]
+                active_gen_reg = general_registry or create_authoritative_general_batch_v1_registry()
+                g_def = active_gen_reg.get_general(g_key)
+                hp = g_def.starting_hp
+                max_hp = g_def.max_hp
+                char_meta = g_def.to_character_metadata()
+            else:
+                hp = player_hp[index]
+                max_hp = player_max_hp[index]
+                char_meta = None
+            player_states.append(
+                PlayerState(
+                    pid,
+                    index + 1,
+                    hp,
+                    max_hp,
+                    character=char_meta,
+                )
             )
-            for index in range(len(prepared_player_ids))
-        )
+        players = tuple(player_states)
         hand_zones = {
             player_id: ZoneRef.hand(player_id)
             for player_id in prepared_player_ids
@@ -3132,7 +3245,12 @@ class ProductionBasicCardBatch:
             self._registry.register(
                 self.mode_id, f"card:{key}", adapter
             )
-        self._init_skill_authority(skill_registry, skill_assignments)
+        self._init_general_and_skill_authority(
+            skill_registry,
+            skill_assignments,
+            general_registry,
+            general_assignments,
+        )
 
     @property
     def state(self) -> GameState:
@@ -3145,6 +3263,73 @@ class ProductionBasicCardBatch:
     @property
     def skill_runtime(self) -> AuthoritativeSkillRuntime | None:
         return self._skill_runtime
+
+    @property
+    def general_registry(self) -> AuthoritativeGeneralRegistry | None:
+        return self._general_registry
+
+    @property
+    def general_assignments(self) -> Mapping[str, str] | None:
+        return self._general_assignments
+
+    def _init_general_and_skill_authority(
+        self,
+        skill_registry: AuthoritativeSkillRegistry | None,
+        skill_assignments: Mapping[str, Sequence[str]] | None,
+        general_registry: AuthoritativeGeneralRegistry | None,
+        general_assignments: Mapping[str, str] | None,
+    ) -> None:
+        if general_assignments is not None:
+            if not isinstance(general_assignments, Mapping):
+                raise TypeError("general_assignments必须是映射")
+            if not general_assignments:
+                raise ValueError("general_assignments不得为空映射")
+            if general_registry is None:
+                general_registry = create_authoritative_general_batch_v1_registry()
+            if not isinstance(general_registry, AuthoritativeGeneralRegistry):
+                raise TypeError("general_registry必须是AuthoritativeGeneralRegistry")
+            if not general_registry.is_frozen:
+                raise ValueError("传入的武将注册表必须已冻结")
+
+            known_players = set(self._player_ids)
+            derived_skill_assignments: dict[str, tuple[str, ...]] = {}
+            for player_id, general_key in general_assignments.items():
+                if player_id not in known_players:
+                    raise ValueError(f"武将分配引用了未知角色{player_id!r}")
+                if not isinstance(general_key, str) or not general_key.strip():
+                    raise ValueError(f"角色{player_id}的武将键必须是非空字符串")
+                if not general_registry.has_general(general_key):
+                    raise UnsupportedRuleError(f"武将注册表未包含武将键{general_key!r}")
+                general_def = general_registry.get_general(general_key)
+                derived_skill_assignments[player_id] = general_def.skill_ids
+
+            if skill_registry is None:
+                from .skill_impl_v1 import create_proof_slice_v1_registry
+                skill_registry = create_proof_slice_v1_registry()
+            if not isinstance(skill_registry, AuthoritativeSkillRegistry):
+                raise TypeError("skill_registry必须是AuthoritativeSkillRegistry")
+            if not skill_registry.is_frozen:
+                raise ValueError("传入的技能注册表必须已冻结")
+
+            for player_id, s_ids in derived_skill_assignments.items():
+                for s_id in s_ids:
+                    if not skill_registry.has_skill(s_id):
+                        raise UnsupportedRuleError(f"技能注册表缺少武将分配所需的技能{s_id!r}")
+
+            if skill_assignments is not None:
+                if {k: tuple(v) for k, v in skill_assignments.items()} != derived_skill_assignments:
+                    raise ValueError("显式传入的skill_assignments与general_assignments派生的技能不一致")
+
+            self._general_registry = general_registry
+            self._general_assignments = MappingProxyType(dict(general_assignments))
+            self._init_skill_authority(skill_registry, derived_skill_assignments)
+        else:
+            if general_registry is not None:
+                if not general_assignments:
+                    raise ValueError("未提供general_assignments时不能指定general_registry")
+            self._general_registry = None
+            self._general_assignments = None
+            self._init_skill_authority(skill_registry, skill_assignments)
 
     def _init_skill_authority(
         self,
@@ -3179,16 +3364,18 @@ class ProductionBasicCardBatch:
         card_instance: CardInstance,
         card_key: str,
         candidate_targets: Sequence[str],
+        state: GameState | None = None,
     ) -> tuple[str, ...]:
         """Optional static-modifier filter. Identity when skills are disabled."""
         if self._skill_runtime is None:
             return tuple(candidate_targets)
+        target_state = self.state if state is None else state
         return self._skill_runtime.filter_legal_targets(
             user_id=user_id,
             card_instance=card_instance,
             card_key=card_key,
             candidate_targets=candidate_targets,
-            state=self.state,
+            state=target_state,
         )
 
     def _timing_window_for_event(self, event: GameEvent) -> SkillTimingWindow | None:
@@ -3200,10 +3387,13 @@ class ProductionBasicCardBatch:
             return SkillTimingWindow.ON_CARD_DISCARDED
         return None
 
-    def _discover_production_skill_triggers(self, start_sequence: int) -> None:
+    def _discover_production_skill_triggers(
+        self, start_sequence: int, state: GameState | None = None
+    ) -> None:
         skill_runtime = self._skill_runtime
         if skill_runtime is None:
             return
+        active_state = self.state if state is None else state
         hits: list[_PendingSkillDecision] = []
         for event in self._events.snapshot():
             if event.sequence is None or event.sequence < start_sequence:
@@ -3211,15 +3401,31 @@ class ProductionBasicCardBatch:
             window = self._timing_window_for_event(event)
             if window is None:
                 continue
+            ctx_payload: dict[str, Any] = {}
+            if event.event_type in (EventType.CARD_USED, EventType.CARD_PLAYED) and event.card_user:
+                turn_events = [
+                    e
+                    for e in self._events.snapshot()
+                    if e.sequence is not None
+                    and e.sequence >= self._turn_start_sequence
+                    and e.sequence <= event.sequence
+                    and e.event_type in (EventType.CARD_USED, EventType.CARD_PLAYED)
+                    and e.card_user == event.card_user
+                ]
+                turn_card_count = len(turn_events)
+                pre_attack_range = attack_range_of(active_state, event.card_user)
+                ctx_payload["turn_card_count"] = turn_card_count
+                ctx_payload["pre_attack_range"] = pre_attack_range
             found = skill_runtime.evaluate_triggers_for_event(
                 event,
-                self.state,
+                active_state,
                 self._runtime.current_player_id,
                 self.phase.value,
                 window,
+                context_payload=ctx_payload,
             )
             for owner_id, skill_id, _handler, _ctx in found:
-                player = self.state.players_by_id.get(owner_id)
+                player = active_state.players_by_id.get(owner_id)
                 if player is None or not player.alive:
                     continue
                 consumption_key = (
@@ -3241,8 +3447,9 @@ class ProductionBasicCardBatch:
                         trigger_index=0,
                         trigger_event_type=event.event_type.value,
                         card_instance_id=event.card_instance_id,
-                        window_revision=self.state.revision,
+                        window_revision=active_state.revision,
                         consumption_key=consumption_key,
+                        payload=MappingProxyType(dict(_ctx.payload)),
                     )
                 )
         if not hits:
@@ -3255,6 +3462,250 @@ class ProductionBasicCardBatch:
             )
         self._skill_pending = hits[0]
         self._skill_trigger_queue = hits[1:]
+
+    def _post_card_used_or_played_checkpoint(
+        self,
+        state: GameState,
+        event_seq_before: int,
+        continuation: Callable[[GameState], GameState],
+    ) -> GameState:
+        """Generic production seam: POST_CARD_USED_OR_PLAYED_TRIGGER_CHECKPOINT.
+
+        Evaluates skill triggers immediately after CARD_USED / CARD_PLAYED is emitted,
+        before card resolution / equipment installation completes.
+        If an optional trigger opens a decision window, card resolution is paused and
+        continuation will be resumed upon skill resolution (Pass or Activate).
+        If no trigger is pending, executes continuation(state) immediately.
+        """
+        emitted = tuple(
+            event
+            for event in self._events.snapshot()
+            if event.sequence is not None
+            and event.sequence >= event_seq_before
+            and event.event_type in (EventType.CARD_USED, EventType.CARD_PLAYED)
+        )
+        if len(emitted) != 1:
+            raise UnsupportedRuleError(
+                "POST_CARD_USED_OR_PLAYED_TRIGGER_CHECKPOINT 必须绑定恰好一个"
+                f"新 CARD_USED/CARD_PLAYED 事件，实际为 {len(emitted)}，失败关闭"
+            )
+        source_event = emitted[0]
+        assert source_event.sequence is not None
+        if source_event.sequence in self._checkpointed_card_event_sequences:
+            raise UnsupportedRuleError("同一 CARD_USED/CARD_PLAYED 事件不得重复进入 checkpoint")
+        self._checkpointed_card_event_sequences = (
+            self._checkpointed_card_event_sequences | {source_event.sequence}
+        )
+
+        if self._skill_runtime is not None and not self.is_finished:
+            if self._pending_card_continuation is not None:
+                raise UnsupportedRuleError(
+                    "检测到嵌套 CARD_USED/CARD_PLAYED trigger/window；"
+                    "AUTHORITATIVE_GENERAL_BATCH_V1 仅支持单层 continuation，失败关闭"
+                )
+            self._discover_production_skill_triggers(event_seq_before, state=state)
+            if self._skill_pending is not None:
+                action = self._active_validated_action
+                if action is None or not action.action_id:
+                    raise UnsupportedRuleError("card continuation 缺少已签名 card action identity")
+                actor_id = source_event.card_user or action.actor_id
+                required_zone = (
+                    None
+                    if source_event.card_instance_id is None
+                    or source_event.card_instance_id not in state.cards_by_id
+                    else state.location_of(source_event.card_instance_id)
+                )
+                identity_payload = {
+                    "session_id": self._session_id,
+                    "source_event_sequence": source_event.sequence,
+                    "source_event_type": source_event.event_type.value,
+                    "card_action_identity": action.action_id,
+                    "actor_id": actor_id,
+                    "owner_id": action.actor_id,
+                    "card_instance_id": source_event.card_instance_id,
+                    "target_ids": list(source_event.target_ids),
+                    "expected_phase": self.phase.value,
+                    "expected_pending_dying_id": self._runtime.pending_dying_id,
+                    "window_revision": state.revision,
+                }
+                continuation_id = sha256_value(identity_payload)
+                if continuation_id in self._consumed_card_continuations:
+                    raise UnsupportedRuleError("card continuation identity 已经消费，禁止重复建立")
+                self._pending_card_continuation = _PendingCardContinuation(
+                    continuation_id=continuation_id,
+                    source_event_sequence=source_event.sequence,
+                    source_event_type=source_event.event_type.value,
+                    card_action_identity=action.action_id,
+                    actor_id=actor_id,
+                    owner_id=action.actor_id,
+                    card_instance_id=source_event.card_instance_id,
+                    target_ids=source_event.target_ids,
+                    required_card_zone=required_zone,
+                    expected_phase=self.phase.value,
+                    expected_pending_dying_id=self._runtime.pending_dying_id,
+                    window_revision=state.revision,
+                    expected_revision=state.revision,
+                    callback=continuation,
+                )
+                return state
+        return continuation(state)
+
+    @property
+    def pending_card_continuation_identity(self) -> str | None:
+        pending = self._pending_card_continuation
+        return None if pending is None else pending.continuation_id
+
+    @property
+    def consumed_card_continuation_identities(self) -> frozenset[str]:
+        """Return immutable continuation consumption evidence for replay verification."""
+
+        return self._consumed_card_continuations
+
+    def _snapshot_authoritative_mutation_state(
+        self,
+    ) -> _AuthoritativeMutationSnapshot:
+        """Capture all mutable authoritative state for exception rollback."""
+
+        mode_policy_snapshot = None
+        if self._mode_policy is not None:
+            snapshot_fn = getattr(
+                self._mode_policy, "snapshot_authoritative_state", None
+            )
+            if callable(snapshot_fn):
+                mode_policy_snapshot = snapshot_fn()
+
+        return _AuthoritativeMutationSnapshot(
+            state=self._state,
+            events=self._events.snapshot(),
+            event_next_sequence=self._events.next_sequence,
+            rng_random_state=self._rng._random.getstate(),
+            rng_calls=self._rng.calls,
+            runtime=self._runtime,
+            skill_runtime=self._skill_runtime,
+            skill_pending=self._skill_pending,
+            skill_trigger_queue=tuple(self._skill_trigger_queue),
+            skill_consumed_triggers=self._skill_consumed_triggers,
+            skill_hand_limit_exempt_ids=self._skill_hand_limit_exempt_ids,
+            pending_card_continuation=self._pending_card_continuation,
+            consumed_card_continuations=self._consumed_card_continuations,
+            continuation_in_progress_id=self._continuation_in_progress_id,
+            checkpointed_card_event_sequences=(
+                self._checkpointed_card_event_sequences
+            ),
+            active_validated_action=self._active_validated_action,
+            phase_history=tuple(self._phase_history),
+            step_count=self._step_count,
+            turn_start_sequence=self._turn_start_sequence,
+            outcome_policy=self._outcome_policy,
+            mode_policy_snapshot=mode_policy_snapshot,
+        )
+
+    def _restore_authoritative_mutation_state(
+        self,
+        snapshot: _AuthoritativeMutationSnapshot,
+    ) -> None:
+        """Restore an exact snapshot without emitting events or consuming RNG."""
+
+        self._state = snapshot.state
+        self._events._events.clear()
+        self._events._events.extend(snapshot.events)
+        self._events._next_sequence = snapshot.event_next_sequence
+        self._rng._random.setstate(snapshot.rng_random_state)
+        self._rng._calls = list(snapshot.rng_calls)
+        self._runtime = snapshot.runtime
+        self._skill_runtime = snapshot.skill_runtime
+        self._skill_pending = snapshot.skill_pending
+        self._skill_trigger_queue = list(snapshot.skill_trigger_queue)
+        self._skill_consumed_triggers = snapshot.skill_consumed_triggers
+        self._skill_hand_limit_exempt_ids = snapshot.skill_hand_limit_exempt_ids
+        self._pending_card_continuation = snapshot.pending_card_continuation
+        self._consumed_card_continuations = snapshot.consumed_card_continuations
+        self._continuation_in_progress_id = snapshot.continuation_in_progress_id
+        self._checkpointed_card_event_sequences = (
+            snapshot.checkpointed_card_event_sequences
+        )
+        self._active_validated_action = snapshot.active_validated_action
+        self._phase_history = list(snapshot.phase_history)
+        self._step_count = snapshot.step_count
+        self._turn_start_sequence = snapshot.turn_start_sequence
+        self._outcome_policy = snapshot.outcome_policy
+        if self._mode_policy is not None:
+            restore_fn = getattr(
+                self._mode_policy, "restore_authoritative_state", None
+            )
+            if callable(restore_fn):
+                restore_fn(snapshot.mode_policy_snapshot)
+
+    def _resume_pending_card_continuation(
+        self,
+        state: GameState,
+        continuation_id: str,
+    ) -> GameState:
+        pending = self._pending_card_continuation
+        if pending is None:
+            if continuation_id in self._consumed_card_continuations:
+                raise InvalidActionError("card continuation 已消费，禁止 duplicate resume")
+            raise InvalidActionError("当前没有可恢复的 card continuation")
+        if continuation_id != pending.continuation_id:
+            raise InvalidActionError("card continuation identity 不匹配")
+        if continuation_id in self._consumed_card_continuations:
+            raise InvalidActionError("card continuation 已消费，禁止 duplicate resume")
+        if self._continuation_in_progress_id is not None:
+            raise UnsupportedRuleError(
+                "card continuation 正在恢复，禁止递归 resume，失败关闭"
+            )
+        if state.revision != pending.expected_revision:
+            raise UnsupportedRuleError("card continuation expected revision 已过期，失败关闭")
+        if self.is_finished or self.phase is ProductionPhase.FINISHED:
+            raise UnsupportedRuleError("终局状态不得恢复 card continuation")
+        if self.phase.value != pending.expected_phase:
+            raise UnsupportedRuleError("card continuation phase 已过期，失败关闭")
+        if self._runtime.pending_dying_id != pending.expected_pending_dying_id:
+            raise UnsupportedRuleError("card continuation pending dying 身份已变化，失败关闭")
+        actor = state.players_by_id.get(pending.actor_id)
+        owner = state.players_by_id.get(pending.owner_id)
+        if actor is None or owner is None or not actor.alive or not owner.alive:
+            raise UnsupportedRuleError("card continuation actor/owner 已死亡或离场，失败关闭")
+        if pending.required_card_zone is not None:
+            assert pending.card_instance_id is not None
+            if pending.card_instance_id not in state.cards_by_id:
+                raise UnsupportedRuleError("card continuation 引用实体牌已不存在，失败关闭")
+            if state.location_of(pending.card_instance_id) != pending.required_card_zone:
+                raise UnsupportedRuleError("card continuation 实体牌已离开预期牌区，失败关闭")
+        for target_id in pending.target_ids:
+            target = state.players_by_id.get(target_id)
+            if target is None or not target.alive:
+                raise UnsupportedRuleError("card continuation 目标已死亡或离场，失败关闭")
+
+        transaction = self._snapshot_authoritative_mutation_state()
+        self._continuation_in_progress_id = continuation_id
+        try:
+            next_state = pending.callback(state)
+            if not isinstance(next_state, GameState):
+                raise ProductionBatchError(
+                    "card continuation callback 必须返回 GameState"
+                )
+            next_state.assert_card_conservation()
+            if self._continuation_in_progress_id != continuation_id:
+                raise UnsupportedRuleError(
+                    "card continuation in-progress identity 被改写，失败关闭"
+                )
+            if self._pending_card_continuation is not pending:
+                raise UnsupportedRuleError(
+                    "card continuation callback 改写了 pending identity，失败关闭"
+                )
+
+            # Two-phase commit: callback and postconditions succeeded, so the
+            # continuation only now becomes externally consumed.
+            self._consumed_card_continuations = (
+                self._consumed_card_continuations | {continuation_id}
+            )
+            self._pending_card_continuation = None
+            self._continuation_in_progress_id = None
+            return next_state
+        except Exception:
+            self._restore_authoritative_mutation_state(transaction)
+            raise
 
     def _skill_audit_value(self) -> dict[str, object] | None:
         if self._skill_runtime is None:
@@ -3274,10 +3725,31 @@ class ProductionBasicCardBatch:
                 "window_revision": self._skill_pending.window_revision,
                 "consumption_key": list(self._skill_pending.consumption_key),
             }
+        continuation = None
+        if self._pending_card_continuation is not None:
+            item = self._pending_card_continuation
+            continuation = {
+                "continuation_id": item.continuation_id,
+                "source_event_sequence": item.source_event_sequence,
+                "source_event_type": item.source_event_type,
+                "card_action_identity": item.card_action_identity,
+                "actor_id": item.actor_id,
+                "owner_id": item.owner_id,
+                "card_instance_id": item.card_instance_id,
+                "target_ids": list(item.target_ids),
+                "expected_phase": item.expected_phase,
+                "expected_pending_dying_id": item.expected_pending_dying_id,
+                "window_revision": item.window_revision,
+                "expected_revision": item.expected_revision,
+                "consumed": item.continuation_id in self._consumed_card_continuations,
+            }
         return {
             "runtime": self._skill_runtime.audit_fingerprint(),
             "pending_skill_decision": pending,
+            "pending_card_continuation": continuation,
             "consumed_triggers": [list(key) for key in sorted(self._skill_consumed_triggers)],
+            "consumed_card_continuations": sorted(self._consumed_card_continuations),
+            "continuation_in_progress_id": self._continuation_in_progress_id,
         }
 
     @property
@@ -3705,6 +4177,10 @@ class ProductionBasicCardBatch:
             | None
         ) = None,
     ) -> LegalAction:
+        if self._continuation_in_progress_id is not None:
+            raise UnsupportedRuleError(
+                "continuation 正在恢复；嵌套 session step 在任何 mutation 前失败关闭"
+            )
         if self.is_finished:
             raise ProductionBatchFinishedError(
                 "胜利已经成立，对局不得继续执行动作"
@@ -3715,35 +4191,58 @@ class ProductionBasicCardBatch:
         chosen = selected.choose(legal, context)
         validated = self._validate_session_action(self.state, context, chosen)
         event_seq_before = self._events.next_sequence
-        had_pending_skill = self._skill_pending is not None
+        if "resume" in validated.payload:
+            raise InvalidActionError(
+                "serialized resume 字段不是 continuation authority，禁止提交"
+            )
+        transaction = self._snapshot_authoritative_mutation_state()
+        self._active_validated_action = validated
         try:
-            self._state = self._apply_session_action(
-                self.state, context, validated
-            )
-        except _DeckExhaustedDraw as exc:
-            # no_reshuffle_draw：预检失败，state/events 为空，使用动作前状态。
-            # reshuffle_draw：可能已取得前若干张，必须保留 exception 中的
-            # 局部状态与事件后再形成正式平局。
-            next_state = self.state
-            if exc.state is not None:
-                self._events.extend(exc.events)
-                next_state = exc.state
-            self._state, self._runtime = self._finish_game_as_draw(
-                next_state, self._runtime
-            )
-        self._step_count += 1
-        self._state.assert_card_conservation()
-        self.assert_resolution_invariants()
-        if (
-            self._skill_runtime is not None
-            and not self.is_finished
-            and not had_pending_skill
-            and self._skill_pending is None
-        ):
-            self._discover_production_skill_triggers(event_seq_before)
-        if self.is_finished:
-            self.assert_finished_state_invariants()
-        return validated
+            try:
+                self._state = self._apply_session_action(
+                    self.state, context, validated
+                )
+            except _DeckExhaustedDraw as exc:
+                # no_reshuffle_draw：预检失败，state/events 为空，使用动作前状态。
+                # reshuffle_draw：可能已取得前若干张，必须保留 exception 中的
+                # 局部状态与事件后再形成正式平局。
+                next_state = self.state
+                if exc.state is not None:
+                    self._events.extend(exc.events)
+                    next_state = exc.state
+                self._state, self._runtime = self._finish_game_as_draw(
+                    next_state, self._runtime
+                )
+            self._step_count += 1
+            self._state.assert_card_conservation()
+            self.assert_resolution_invariants()
+            if self._skill_runtime is not None:
+                uncheckpointed = tuple(
+                    event.sequence
+                    for event in self._events.snapshot()
+                    if event.sequence is not None
+                    and event.sequence >= event_seq_before
+                    and event.event_type in (
+                        EventType.CARD_USED,
+                        EventType.CARD_PLAYED,
+                    )
+                    and event.sequence
+                    not in self._checkpointed_card_event_sequences
+                )
+                if uncheckpointed:
+                    raise UnsupportedRuleError(
+                        "正式生产路径产生 CARD_USED/CARD_PLAYED 但未经过"
+                        " POST_CARD_USED_OR_PLAYED_TRIGGER_CHECKPOINT："
+                        + ",".join(str(item) for item in uncheckpointed)
+                    )
+            if self.is_finished:
+                self.assert_finished_state_invariants()
+            return validated
+        except Exception:
+            self._restore_authoritative_mutation_state(transaction)
+            raise
+        finally:
+            self._active_validated_action = None
 
     def assert_resolution_invariants(self) -> None:
         """结算中临时区不变量：PROCESSING 中实体必须能被当前挂起根解释。
@@ -3783,6 +4282,11 @@ class ProductionBasicCardBatch:
                 value = getattr(holder, field_name, None)
                 if isinstance(value, str) and value:
                     accounted.add(value)
+        if self._skill_pending is not None and self._skill_pending.card_instance_id:
+            accounted.add(self._skill_pending.card_instance_id)
+        for q in self._skill_trigger_queue:
+            if q.card_instance_id:
+                accounted.add(q.card_instance_id)
         if pending_slash is not None and pending_slash.virtual:
             for instance_id in pending_slash.material_ids:
                 if instance_id not in processing_ids:
@@ -5455,6 +5959,7 @@ class ProductionBasicCardBatch:
                 is_extra_turn=False,
             )
             self._skill_hand_limit_exempt_ids = frozenset()
+            self._turn_start_sequence = self._events.next_sequence
         entering_new_play = (
             next_runtime.phase is ProductionPhase.PLAY
             and previous.phase
@@ -5545,6 +6050,15 @@ class ProductionBasicCardBatch:
             "trigger_event_type": pending.trigger_event_type,
             "consumption_key": list(pending.consumption_key),
         }
+        continuation = self._pending_card_continuation
+        if continuation is not None:
+            base_payload["continuation_identity"] = continuation.continuation_id
+        if pending.payload:
+            for k, v in pending.payload.items():
+                if k == "pre_attack_range":
+                    base_payload["draw_count"] = v
+                else:
+                    base_payload[k] = v
         activate = LegalAction(
             action_type=ActionType.ACTIVATE_SKILL,
             actor_id=pending.actor_id,
@@ -5617,6 +6131,12 @@ class ProductionBasicCardBatch:
                 raise InvalidActionError("触发消费身份与当前窗口不一致")
             if consumption in self._skill_consumed_triggers:
                 raise InvalidActionError("同一生产事件不能重复消费技能触发")
+            continuation = self._pending_card_continuation
+            expected_continuation = (
+                None if continuation is None else continuation.continuation_id
+            )
+            if action.payload.get("continuation_identity") != expected_continuation:
+                raise InvalidActionError("技能动作 continuation identity 与当前窗口不一致")
         handler = skill_runtime.registry.get_handler(skill_id)
         next_state = handler.apply_in_production(
             self, action, context, state, skill_state
@@ -5627,6 +6147,16 @@ class ProductionBasicCardBatch:
             }
             self._skill_pending = None
             self._open_next_queued_skill_decision(next_state)
+            if self._skill_pending is None and not self._skill_trigger_queue:
+                if self._pending_card_continuation is not None:
+                    continuation = replace(
+                        self._pending_card_continuation,
+                        expected_revision=next_state.revision,
+                    )
+                    self._pending_card_continuation = continuation
+                    next_state = self._resume_pending_card_continuation(
+                        next_state, continuation.continuation_id
+                    )
         self._skill_runtime = skill_runtime.increment_usage(actor_id, skill_id)
         next_state.assert_card_conservation()
         return next_state
@@ -5644,17 +6174,40 @@ class ProductionBasicCardBatch:
             raise InvalidActionError("放弃动作的技能ID与窗口不一致")
         if action.payload.get("decision") != "pass":
             raise InvalidActionError("技能放弃动作的 decision 必须为 pass")
+        player = state.players_by_id.get(pending.actor_id)
+        if player is None or not player.alive:
+            raise UnsupportedRuleError("技能决策窗口所有者已死亡或离场，失败关闭")
+        skill_state = skill_runtime.get_skill_state(pending.actor_id, pending.skill_id)
+        if not skill_state.effective:
+            raise UnsupportedRuleError("技能决策窗口打开后技能已失效或失去，失败关闭")
         if pending.window_revision != state.revision:
             raise UnsupportedRuleError("技能决策窗口状态版本已过期，失败关闭")
         consumption = tuple(action.payload.get("consumption_key") or ())
         if consumption != pending.consumption_key:
             raise InvalidActionError("触发消费身份与当前窗口不一致")
+        continuation = self._pending_card_continuation
+        expected_continuation = (
+            None if continuation is None else continuation.continuation_id
+        )
+        if action.payload.get("continuation_identity") != expected_continuation:
+            raise InvalidActionError("放弃动作 continuation identity 与当前窗口不一致")
         self._skill_consumed_triggers = self._skill_consumed_triggers | {
             pending.consumption_key
         }
         self._skill_pending = None
         self._open_next_queued_skill_decision(state)
-        return state
+        next_state = state
+        if self._skill_pending is None and not self._skill_trigger_queue:
+            if self._pending_card_continuation is not None:
+                continuation = replace(
+                    self._pending_card_continuation,
+                    expected_revision=state.revision,
+                )
+                self._pending_card_continuation = continuation
+                next_state = self._resume_pending_card_continuation(
+                    state, continuation.continuation_id
+                )
+        return next_state
 
     def _open_next_queued_skill_decision(self, state: GameState) -> None:
         if not self._skill_trigger_queue:
@@ -7049,151 +7602,159 @@ class ProductionBasicCardBatch:
                        context.actor_id: runtime.slash_used_counts.get(
                            context.actor_id, 0
                        ) + 1}
-        ignore_armor = equipped_weapon == "sgs_weapon_qinggangjian"
-        pending_slash = _PendingSlash(
-            context.actor_id,
-            target,
-            action.card_instance_id,
-            boosted,
-            ignore_armor=ignore_armor,
-            fire_converted=fire_converted,
-            virtual=zhangba_virtual,
-            material_ids=(zhangba_materials if zhangba_virtual else ()),
-            target_sequence=(fangtian_targets if multi_target else ()),
-            current_target_index=0,
-        )
-        if (
-            equipped_weapon == "sgs_weapon_cixiongshuanggujian"
-            and is_cixiong_opposite_gender_target(
-                state, actor_id=context.actor_id, target_id=target
+        def _resume_slash_target(s: GameState) -> GameState:
+            ignore_armor = equipped_weapon == "sgs_weapon_qinggangjian"
+            pending_slash = _PendingSlash(
+                context.actor_id,
+                target,
+                action.card_instance_id,
+                boosted,
+                ignore_armor=ignore_armor,
+                fire_converted=fire_converted,
+                virtual=zhangba_virtual,
+                material_ids=(zhangba_materials if zhangba_virtual else ()),
+                target_sequence=(fangtian_targets if multi_target else ()),
+                current_target_index=0,
             )
-        ):
-            # 指定异性目标后先打开雌雄双股剑发动窗口；被动防具无效化与
-            # 【闪】／八卦响应都必须等目标选择完成后按最新状态评估。
-            base_runtime = replace(
+            if (
+                equipped_weapon == "sgs_weapon_cixiongshuanggujian"
+                and is_cixiong_opposite_gender_target(
+                    s, actor_id=context.actor_id, target_id=target
+                )
+            ):
+                # 指定异性目标后先打开雌雄双股剑发动窗口；被动防具无效化与
+                # 【闪】／八卦响应都必须等目标选择完成后按最新状态评估。
+                base_runtime = replace(
+                    runtime,
+                    slash_used_counts=MappingProxyType(next_counts),
+                    wine_buff_owner_id=None,
+                    pending_slash=pending_slash,
+                    response_window_source_sequence=used_sequence,
+                    bagua_attempted=False,
+                )
+                next_runtime = self._enter_cixiong_activation(
+                    s, base_runtime
+                )
+                self._commit_runtime(runtime, next_runtime)
+                return s
+            if fire_converted:
+                # 朱雀羽扇转火杀（7.10＋基础术语20.6）：转化后的【杀】不再被
+                # 藤甲普通杀免疫；转化未提供颜色（记为“无”），不触发仁王盾
+                # 黑色杀无效化。八卦阵等响应判定不受影响（只有青釭剑抑制）。
+                invalidation = None
+            else:
+                # CP-04P 青釭剑（Knowledge 7.2 用户整理解释）：使用【杀】指定
+                # 目标后令其防具无效（armor invalid）。ignore_armor（代码历史字段）
+                # 在指定目标后快照到本次【杀】结算，驱动真实防具无效化与防具伤害
+                # 修正两个统一入口；杀结算结束后随 pending_slash 清理，不残留、
+                # 不永久修改目标防具槽。
+                invalidation = armor_invalidates_effect(
+                    s,
+                    victim_id=target,
+                    card_instance_id=action.card_instance_id,
+                    card_key=adapter.card_key,
+                    ignore_armor=ignore_armor,
+                    card_color=(
+                        card.color if zhangba_virtual else None
+                    ),
+                )
+            if invalidation is not None:
+                # 仁王盾／藤甲令【杀】对目标无效：不开闪响应窗口、不造成伤害、
+                # 不消耗【闪】、不触发濒死或传导；杀仍算已经使用并进入弃牌堆。
+                invalid_reason, armor_id = invalidation
+                cancelled_event = GameEvent(
+                    event_type=EventType.CARD_EFFECT_CANCELLED,
+                    card_instance_id=action.card_instance_id,
+                    card_key=adapter.card_key,
+                    card_user=context.actor_id,
+                    target_ids=(target,),
+                    payload={
+                        "reason": invalid_reason,
+                        "armor_instance_id": armor_id,
+                        "armor_key": _card_key(s, armor_id),
+                        "invalidated_by_armor": True,
+                    },
+                )
+                if zhangba_virtual:
+                    # 丈八虚拟杀：材料在本次杀被防具无效化（结算完成）时统一
+                    # 从处理区进入弃牌堆（USER_CONFIRMED_RULE，2026-08-09）。
+                    assert zhangba_materials is not None
+                    s, zhangba_finish_events = (
+                        self._finalize_zhangba_materials(
+                            s,
+                            actor_id=context.actor_id,
+                            material_ids=zhangba_materials,
+                            window_id=(
+                                f"zhangba-materials:{runtime.turn_number}:"
+                                f"{context.actor_id}"
+                            ),
+                            reason="zhangba_material_finalize",
+                        )
+                    )
+                    self._events.extend(
+                        (cancelled_event, *zhangba_finish_events)
+                    )
+                    base_runtime = runtime
+                else:
+                    # POST-B C2：多目标【杀】目标0被防具无效时，根【杀】必须
+                    # 保持 PROCESSING 继续后续目标；先挂起 pending_slash 再
+                    # finalize（_finish_slash_processing 的多目标守卫据此
+                    # 跳过根牌弃置，_complete_root_resolution 推进下一目标）。
+                    base_runtime = replace(
+                        runtime, pending_slash=pending_slash
+                    )
+                    s, r_temp, finish_events = (
+                        self._finish_slash_processing(
+                            s,
+                            base_runtime,
+                            action.card_instance_id,
+                            f"slash_invalidated_by_{invalid_reason}",
+                        )
+                    )
+                    self._events.extend((cancelled_event, *finish_events))
+                    base_runtime = r_temp
+                next_runtime = replace(
+                    base_runtime,
+                    slash_used_counts=MappingProxyType(next_counts),
+                    wine_buff_owner_id=None,
+                    bagua_attempted=False,
+                )
+                s, next_runtime = self._complete_root_resolution(
+                    s, next_runtime
+                )
+                self._commit_runtime(runtime, next_runtime)
+                return s
+            next_runtime = replace(
                 runtime,
+                phase=ProductionPhase.SLASH_RESPONSE,
                 slash_used_counts=MappingProxyType(next_counts),
                 wine_buff_owner_id=None,
                 pending_slash=pending_slash,
+                response_window_id=(
+                    f"slash:{runtime.turn_number}:{action.card_instance_id}"
+                    + (":0" if multi_target else "")
+                ),
+                response_window_order=(target,),
                 response_window_source_sequence=used_sequence,
                 bagua_attempted=False,
             )
-            next_runtime = self._enter_cixiong_activation(
-                next_state, base_runtime
+            self._open_required_response_obligation(
+                response_kind="slash_dodge",
+                root_card_id=pending_slash.slash_instance_id,
+                root_card_type="slash",
+                responder_id=target,
+                response_card_type="dodge",
+                source_id=pending_slash.attacker_id,
+                duel_response_index=None,
             )
             self._commit_runtime(runtime, next_runtime)
-            return next_state
-        if fire_converted:
-            # 朱雀羽扇转火杀（7.10＋基础术语20.6）：转化后的【杀】不再被
-            # 藤甲普通杀免疫；转化未提供颜色（记为“无”），不触发仁王盾
-            # 黑色杀无效化。八卦阵等响应判定不受影响（只有青釭剑抑制）。
-            invalidation = None
-        else:
-            # CP-04P 青釭剑（Knowledge 7.2 用户整理解释）：使用【杀】指定
-            # 目标后令其防具无效（armor invalid）。ignore_armor（代码历史字段）
-            # 在指定目标后快照到本次【杀】结算，驱动真实防具无效化与防具伤害
-            # 修正两个统一入口；杀结算结束后随 pending_slash 清理，不残留、
-            # 不永久修改目标防具槽。
-            invalidation = armor_invalidates_effect(
-                state,
-                victim_id=target,
-                card_instance_id=action.card_instance_id,
-                card_key=adapter.card_key,
-                ignore_armor=ignore_armor,
-                card_color=(
-                    card.color if zhangba_virtual else None
-                ),
-            )
-        if invalidation is not None:
-            # 仁王盾／藤甲令【杀】对目标无效：不开闪响应窗口、不造成伤害、
-            # 不消耗【闪】、不触发濒死或传导；杀仍算已经使用并进入弃牌堆。
-            invalid_reason, armor_id = invalidation
-            cancelled_event = GameEvent(
-                event_type=EventType.CARD_EFFECT_CANCELLED,
-                card_instance_id=action.card_instance_id,
-                card_key=adapter.card_key,
-                card_user=context.actor_id,
-                target_ids=(target,),
-                payload={
-                    "reason": invalid_reason,
-                    "armor_instance_id": armor_id,
-                    "armor_key": _card_key(state, armor_id),
-                    "invalidated_by_armor": True,
-                },
-            )
-            if zhangba_virtual:
-                # 丈八虚拟杀：材料在本次杀被防具无效化（结算完成）时统一
-                # 从处理区进入弃牌堆（USER_CONFIRMED_RULE，2026-08-09）。
-                assert zhangba_materials is not None
-                next_state, zhangba_finish_events = (
-                    self._finalize_zhangba_materials(
-                        next_state,
-                        actor_id=context.actor_id,
-                        material_ids=zhangba_materials,
-                        window_id=(
-                            f"zhangba-materials:{runtime.turn_number}:"
-                            f"{context.actor_id}"
-                        ),
-                        reason="zhangba_material_finalize",
-                    )
-                )
-                self._events.extend(
-                    (cancelled_event, *zhangba_finish_events)
-                )
-                base_runtime = runtime
-            else:
-                # POST-B C2：多目标【杀】目标0被防具无效时，根【杀】必须
-                # 保持 PROCESSING 继续后续目标；先挂起 pending_slash 再
-                # finalize（_finish_slash_processing 的多目标守卫据此
-                # 跳过根牌弃置，_complete_root_resolution 推进下一目标）。
-                base_runtime = replace(
-                    runtime, pending_slash=pending_slash
-                )
-                next_state, runtime, finish_events = (
-                    self._finish_slash_processing(
-                        next_state,
-                        base_runtime,
-                        action.card_instance_id,
-                        f"slash_invalidated_by_{invalid_reason}",
-                    )
-                )
-                self._events.extend((cancelled_event, *finish_events))
-            next_runtime = replace(
-                runtime,
-                slash_used_counts=MappingProxyType(next_counts),
-                wine_buff_owner_id=None,
-                bagua_attempted=False,
-            )
-            next_state, next_runtime = self._complete_root_resolution(
-                next_state, next_runtime
-            )
-            self._commit_runtime(runtime, next_runtime)
-            return next_state
-        next_runtime = replace(
-            runtime,
-            phase=ProductionPhase.SLASH_RESPONSE,
-            slash_used_counts=MappingProxyType(next_counts),
-            wine_buff_owner_id=None,
-            pending_slash=pending_slash,
-            response_window_id=(
-                f"slash:{runtime.turn_number}:{action.card_instance_id}"
-                + (":0" if multi_target else "")
-            ),
-            response_window_order=(target,),
-            response_window_source_sequence=used_sequence,
-            bagua_attempted=False,
+            return s
+
+        return self._post_card_used_or_played_checkpoint(
+            next_state,
+            event_seq_before=used_sequence,
+            continuation=_resume_slash_target,
         )
-        self._open_required_response_obligation(
-            response_kind="slash_dodge",
-            root_card_id=pending_slash.slash_instance_id,
-            root_card_type="slash",
-            responder_id=target,
-            response_card_type="dodge",
-            source_id=pending_slash.attacker_id,
-            duel_response_index=None,
-        )
-        self._commit_runtime(runtime, next_runtime)
-        return next_state
 
     # ------------------------------------------------------------------
     # 雌雄双股剑：指定异性目标后、闪／防具响应前的两段选择窗口
@@ -7657,6 +8218,7 @@ class ProductionBasicCardBatch:
             response_card_type="dodge",
             duel_response_index=None,
         )
+        event_seq_before = self._events.next_sequence
         window = self._build_window(runtime)
         dodge_payload: dict[str, object] = {
             "response_to": runtime.pending_slash.slash_instance_id
@@ -7679,147 +8241,159 @@ class ProductionBasicCardBatch:
             context.actor_id,
             "dodge_response_complete",
         )
+        queued = self._events.extend((bound_event, *dodge_move_events))
+        dodge_sequence = queued[0].sequence
+        assert dodge_sequence is not None
         if not progress.completed:
             # required=2 等 extension 的首张实体【闪】已真实消耗，但根【杀】
             # 留在 PROCESSING 且阶段不前进；ResponseWindow 不承载该计数。
-            self._events.extend((bound_event, *dodge_move_events))
             self._commit_required_response_progress(progress)
             self._commit_runtime(
                 runtime,
                 replace(runtime, bagua_attempted=False),
             )
-            return next_state
-        slash_id = runtime.pending_slash.slash_instance_id
-        next_state, slash_runtime, slash_finish_events = (
-            self._finish_slash_processing(
-                next_state, runtime, slash_id, "slash_cancelled_by_dodge"
-            )
-        )
-        self._commit_required_response_progress(progress)
-        cancelled_event = GameEvent(
-            event_type=EventType.CARD_EFFECT_CANCELLED,
-            card_instance_id=slash_id,
-            card_key=(
-                "sgs_basic_sha"
-                if runtime.pending_slash.virtual
-                else _card_key(state, slash_id)
-            ),
-            target_ids=(context.actor_id,),
-            payload={"reason": "dodge"},
-        )
-        # MB-M-007 事件顺序：Jink response/card events → 虚拟/实体杀
-        # CARD_EFFECT_CANCELLED → Slash root 收尾（丈八材料 finalize 事件）。
-        self._events.extend(
-            (
-                bound_event,
-                *dodge_move_events,
-                cancelled_event,
-                *slash_finish_events,
-            )
-        )
-        pending = slash_runtime.pending_slash
-        assert pending is not None
-        # CP-04P 青釭剑生命周期终点A（Knowledge 7.2.1 用户移动版实测确认）：
-        # 目标以【闪】成功完成本次响应时，在该【闪】相关结算完成后，本次
-        # 【杀】的青釭剑防具无效状态即清除；此后该目标防具恢复正常，后续
-        # 武器窗口与后续独立牌结算不再受本次青釭剑影响（不移除防具实体、
-        # 不永久改变装备状态）。
-        lifecycle_slash = replace(pending, ignore_armor=False)
-        # CP-04P 贯石斧（7.7 当前确认）：使用的【杀】被【闪】响应后，可弃置
-        # 自己手牌区与装备区合计2张牌使此【杀】强制造成伤害。贯石斧自身
-        # 不能作为代价之一（USER_CONFIRMED_MOBILE_RULE，2026-08-08 用户移动版
-        # 实测确认），可弃牌数不足2张时无法发动，直接完成；否则打开选择
-        # 窗口（杀已因闪进入弃牌堆）。
-        guanshifu_affordable = False
-        weapon_key = equipped_weapon_key(state, pending.attacker_id)
-        if weapon_key == "sgs_weapon_guanshifu":
-            weapon_ids = state.card_ids_in(
-                ZoneRef.equipment(pending.attacker_id, "weapon")
-            )
-            own_cards = len(
-                state.card_ids_in(ZoneRef.hand(pending.attacker_id))
-            ) + sum(
-                len(state.card_ids_in(ZoneRef.equipment(pending.attacker_id, slot)))
-                for slot in EQUIPMENT_SLOTS
-            )
-            if weapon_ids:
-                # 排除当前提供技能的贯石斧自身
-                own_cards -= 1
-            guanshifu_affordable = own_cards >= 2
-        if guanshifu_affordable:
-            next_runtime = replace(
-                slash_runtime,
-                phase=ProductionPhase.WEAPON_SLASH_CHOICE,
-                pending_slash=lifecycle_slash,
-                pending_slash_choice=_PendingSlashChoice(
-                    weapon_key="sgs_weapon_guanshifu",
-                    kind="guanshifu_force_hit",
-                    attacker_id=pending.attacker_id,
-                    target_id=pending.target_id,
-                    window_id=(
-                        f"weapon-slash-choice:{runtime.turn_number}:"
-                        f"{pending.slash_instance_id}"
-                    ),
-                    pending_slash=lifecycle_slash,
-                ),
-            )
-        elif weapon_key == "sgs_weapon_qinglongyanyuedao" and any(
-            state.cards_by_id[instance_id].card_key in SLASH_CARD_KEYS
-            for instance_id in state.card_ids_in(
-                ZoneRef.hand(pending.attacker_id)
-            )
-        ):
-            # CP-04P 青龙偃月刀（7.6 用户整理解释）：使用的【杀】被【闪】
-            # 响应后，可继续对该目标使用一张【杀】。攻击者手牌中仍有
-            # 【杀】候选时打开选择窗口；候选只暴露不透明句柄，客户端
-            # 不得提交裸实体ID。攻击范围与距离在窗口打开时按原目标
-            # 校验，实际使用前应用层再次动态重检。
-            window_id = (
-                f"weapon-slash-choice:{runtime.turn_number}:"
-                f"{pending.slash_instance_id}"
-            )
-            hand_ids = tuple(
-                state.card_ids_in(ZoneRef.hand(pending.attacker_id))
-            )
-            snapshot_digest = sha256_value(hand_ids)
-            handles = MappingProxyType(
-                {
-                    _hand_choice_handle(
-                        self._session_id,
-                        self._session_secret,
-                        window_id,
-                        pending.attacker_id,
-                        "hand",
-                        snapshot_digest,
-                        instance_id,
-                    ): instance_id
-                    for instance_id in hand_ids
-                    if state.cards_by_id[instance_id].card_key
-                    in SLASH_CARD_KEYS
-                }
-            )
-            next_runtime = replace(
-                slash_runtime,
-                phase=ProductionPhase.WEAPON_SLASH_CHOICE,
-                pending_slash=lifecycle_slash,
-                pending_slash_choice=_PendingSlashChoice(
-                    weapon_key="sgs_weapon_qinglongyanyuedao",
-                    kind="qinglong_continue",
-                    attacker_id=pending.attacker_id,
-                    target_id=pending.target_id,
-                    window_id=window_id,
-                    pending_slash=lifecycle_slash,
-                    handles=handles,
-                    snapshot_digest=snapshot_digest,
-                ),
-            )
-        else:
-            next_state, next_runtime = self._complete_root_resolution(
+            return self._post_card_used_or_played_checkpoint(
                 next_state,
-                replace(slash_runtime, pending_slash=lifecycle_slash),
+                event_seq_before=dodge_sequence,
+                continuation=lambda s: s,
             )
-        self._commit_runtime(runtime, next_runtime)
-        return next_state
+
+        def _resume_slash_dodged(s: GameState) -> GameState:
+            slash_id = runtime.pending_slash.slash_instance_id
+            s, slash_runtime, slash_finish_events = (
+                self._finish_slash_processing(
+                    s, runtime, slash_id, "slash_cancelled_by_dodge"
+                )
+            )
+            self._commit_required_response_progress(progress)
+            cancelled_event = GameEvent(
+                event_type=EventType.CARD_EFFECT_CANCELLED,
+                card_instance_id=slash_id,
+                card_key=(
+                    "sgs_basic_sha"
+                    if runtime.pending_slash.virtual
+                    else _card_key(s, slash_id)
+                ),
+                target_ids=(context.actor_id,),
+                payload={"reason": "dodge"},
+            )
+            # MB-M-007 事件顺序：Jink response/card events → 虚拟/实体杀
+            # CARD_EFFECT_CANCELLED → Slash root 收尾（丈八材料 finalize 事件）。
+            self._events.extend(
+                (
+                    cancelled_event,
+                    *slash_finish_events,
+                )
+            )
+            pending = slash_runtime.pending_slash
+            assert pending is not None
+            # CP-04P 青釭剑生命周期终点A（Knowledge 7.2.1 用户移动版实测确认）：
+            # 目标以【闪】成功完成本次响应时，在该【闪】相关结算完成后，本次
+            # 【杀】的青釭剑防具无效状态即清除；此后该目标防具恢复正常，后续
+            # 武器窗口与后续独立牌结算不再受本次青釭剑影响（不移除防具实体、
+            # 不永久改变装备状态）。
+            lifecycle_slash = replace(pending, ignore_armor=False)
+            # CP-04P 贯石斧（7.7 当前确认）：使用的【杀】被【闪】响应后，可弃置
+            # 自己手牌区与装备区合计2张牌使此【杀】强制造成伤害。贯石斧自身
+            # 不能作为代价之一（USER_CONFIRMED_MOBILE_RULE，2026-08-08 用户移动版
+            # 实测确认），可弃牌数不足2张时无法发动，直接完成；否则打开选择
+            # 窗口（杀已因闪进入弃牌堆）。
+            guanshifu_affordable = False
+            weapon_key = equipped_weapon_key(s, pending.attacker_id)
+            if weapon_key == "sgs_weapon_guanshifu":
+                weapon_ids = s.card_ids_in(
+                    ZoneRef.equipment(pending.attacker_id, "weapon")
+                )
+                own_cards = len(
+                    s.card_ids_in(ZoneRef.hand(pending.attacker_id))
+                ) + sum(
+                    len(s.card_ids_in(ZoneRef.equipment(pending.attacker_id, slot)))
+                    for slot in EQUIPMENT_SLOTS
+                )
+                if weapon_ids:
+                    # 排除当前提供技能的贯石斧自身
+                    own_cards -= 1
+                guanshifu_affordable = own_cards >= 2
+            if guanshifu_affordable:
+                next_runtime = replace(
+                    slash_runtime,
+                    phase=ProductionPhase.WEAPON_SLASH_CHOICE,
+                    pending_slash=lifecycle_slash,
+                    pending_slash_choice=_PendingSlashChoice(
+                        weapon_key="sgs_weapon_guanshifu",
+                        kind="guanshifu_force_hit",
+                        attacker_id=pending.attacker_id,
+                        target_id=pending.target_id,
+                        window_id=(
+                            f"weapon-slash-choice:{runtime.turn_number}:"
+                            f"{pending.slash_instance_id}"
+                        ),
+                        pending_slash=lifecycle_slash,
+                    ),
+                )
+            elif weapon_key == "sgs_weapon_qinglongyanyuedao" and any(
+                s.cards_by_id[instance_id].card_key in SLASH_CARD_KEYS
+                for instance_id in s.card_ids_in(
+                    ZoneRef.hand(pending.attacker_id)
+                )
+            ):
+                # CP-04P 青龙偃月刀（7.6 用户整理解释）：使用的【杀】被【闪】
+                # 响应后，可继续对该目标使用一张【杀】。攻击者手牌中仍有
+                # 【杀】候选时打开选择窗口；候选只暴露不透明句柄，客户端
+                # 不得提交裸实体ID。攻击范围与距离在窗口打开时按原目标
+                # 校验，实际使用前应用层再次动态重检。
+                window_id = (
+                    f"weapon-slash-choice:{runtime.turn_number}:"
+                    f"{pending.slash_instance_id}"
+                )
+                hand_ids = tuple(
+                    s.card_ids_in(ZoneRef.hand(pending.attacker_id))
+                )
+                snapshot_digest = sha256_value(hand_ids)
+                handles = MappingProxyType(
+                    {
+                        _hand_choice_handle(
+                            self._session_id,
+                            self._session_secret,
+                            window_id,
+                            pending.attacker_id,
+                            "hand",
+                            snapshot_digest,
+                            instance_id,
+                        ): instance_id
+                        for instance_id in hand_ids
+                        if s.cards_by_id[instance_id].card_key
+                        in SLASH_CARD_KEYS
+                    }
+                )
+                next_runtime = replace(
+                    slash_runtime,
+                    phase=ProductionPhase.WEAPON_SLASH_CHOICE,
+                    pending_slash=lifecycle_slash,
+                    pending_slash_choice=_PendingSlashChoice(
+                        weapon_key="sgs_weapon_qinglongyanyuedao",
+                        kind="qinglong_continue",
+                        attacker_id=pending.attacker_id,
+                        target_id=pending.target_id,
+                        window_id=window_id,
+                        pending_slash=lifecycle_slash,
+                        handles=handles,
+                        snapshot_digest=snapshot_digest,
+                    ),
+                )
+            else:
+                s, next_runtime = self._complete_root_resolution(
+                    s,
+                    replace(slash_runtime, pending_slash=lifecycle_slash),
+                )
+            self._commit_runtime(runtime, next_runtime)
+            return s
+
+        return self._post_card_used_or_played_checkpoint(
+            next_state,
+            event_seq_before=dodge_sequence,
+            continuation=_resume_slash_dodged,
+        )
 
     def apply_slash_damage(
         self,
@@ -8406,14 +8980,13 @@ class ProductionBasicCardBatch:
                 choice.attacker_id, 0
             ),
         )
-        next_state, next_runtime = self._apply_qinglong_slash_use(
+        next_state = self._apply_qinglong_slash_use(
             state,
             runtime,
             slash_instance_id=instance_id,
             attacker_id=choice.attacker_id,
             target_id=choice.target_id,
         )
-        self._commit_runtime(runtime, next_runtime)
         return next_state
 
     def _apply_qinglong_slash_use(
@@ -8424,7 +8997,7 @@ class ProductionBasicCardBatch:
         slash_instance_id: str,
         attacker_id: str,
         target_id: str,
-    ) -> tuple[GameState, _BatchRuntime]:
+    ) -> GameState:
         """青龙偃月刀继续【杀】的正式使用子结算。
 
         继续使用的【杀】由青龙偃月刀技能授权，不受“通常每个出牌阶段只能
@@ -8440,6 +9013,7 @@ class ProductionBasicCardBatch:
         adapter = self._formal_registry.adapter_for(card.card_key)
         if not isinstance(adapter, SlashAdapter):
             raise ProductionBatchError("青龙偃月刀继续杀必须使用【杀】生产适配器")
+        event_seq_before = self._events.next_sequence
         next_state, move_event = self._move_to_processing(
             state, slash_instance_id, attacker_id, "qinglong_continue_slash_use"
         )
@@ -8489,7 +9063,15 @@ class ProductionBasicCardBatch:
             response_window_source_sequence=used_sequence,
             bagua_attempted=False,
         )
-        return next_state, next_runtime
+        def _open_qinglong_response(current: GameState) -> GameState:
+            self._commit_runtime(runtime, next_runtime)
+            return current
+
+        return self._post_card_used_or_played_checkpoint(
+            next_state,
+            event_seq_before,
+            _open_qinglong_response,
+        )
 
     # ------------------------------------------------------------------
     # CP-04P 丈八蛇矛：两张手牌当作普通【杀】使用或打出（虚拟杀）
@@ -9143,6 +9725,7 @@ class ProductionBasicCardBatch:
         ):
             raise InvalidActionError("只能使用行动角色真实手牌中的实体牌")
 
+        event_seq_before = self._events.next_sequence
         next_state, move_event = self._move_to_processing(
             state, action.card_instance_id, context.actor_id, "wuzhong_use"
         )
@@ -9158,30 +9741,37 @@ class ProductionBasicCardBatch:
         used_sequence = queued[0].sequence
         assert used_sequence is not None
         order = self._response_order_from_turn_player(state, runtime)
-        next_runtime = replace(
-            runtime,
-            phase=ProductionPhase.TRICK_RESPONSE,
-            pending_trick=_PendingTrick(
-                context.actor_id,
-                context.actor_id,
-                action.card_instance_id,
-                adapter.card_key,
-            ),
-            trick_effect_active=True,
-            trick_consecutive_passes=0,
-            trick_response_order=order,
-            trick_response_index=0,
-            trick_decision_count=0,
-            trick_direct_response_to=action.card_instance_id,
-            response_window_id=(
-                f"trick:{runtime.turn_number}:"
-                f"{action.card_instance_id}:dec0"
-            ),
-            response_window_order=(order[0],),
-            response_window_source_sequence=used_sequence,
+        def _open_wuzhong_response(current: GameState) -> GameState:
+            next_runtime = replace(
+                runtime,
+                phase=ProductionPhase.TRICK_RESPONSE,
+                pending_trick=_PendingTrick(
+                    context.actor_id,
+                    context.actor_id,
+                    action.card_instance_id,
+                    adapter.card_key,
+                ),
+                trick_effect_active=True,
+                trick_consecutive_passes=0,
+                trick_response_order=order,
+                trick_response_index=0,
+                trick_decision_count=0,
+                trick_direct_response_to=action.card_instance_id,
+                response_window_id=(
+                    f"trick:{runtime.turn_number}:"
+                    f"{action.card_instance_id}:dec0"
+                ),
+                response_window_order=(order[0],),
+                response_window_source_sequence=used_sequence,
+            )
+            self._commit_runtime(runtime, next_runtime)
+            return current
+
+        return self._post_card_used_or_played_checkpoint(
+            next_state,
+            event_seq_before,
+            _open_wuzhong_response,
         )
-        self._commit_runtime(runtime, next_runtime)
-        return next_state
 
     def apply_wuxie(
         self,
@@ -9231,6 +9821,7 @@ class ProductionBasicCardBatch:
         ):
             raise InvalidActionError("只能使用行动角色真实手牌中的实体牌")
 
+        event_seq_before = self._events.next_sequence
         window = self._build_window(runtime)
         wuxie_event = GameEvent(
             event_type=EventType.CARD_USED,
@@ -9256,23 +9847,30 @@ class ProductionBasicCardBatch:
             state, action.card_instance_id, context.actor_id, "wuxie_response"
         )
         self._events.extend((record.response_event, *move_events))
-        next_index = (runtime.trick_response_index + 1) % len(
-            runtime.trick_response_order
+        def _complete_wuxie_response(current: GameState) -> GameState:
+            next_index = (runtime.trick_response_index + 1) % len(
+                runtime.trick_response_order
+            )
+            next_runtime = replace(
+                runtime,
+                trick_effect_active=not runtime.trick_effect_active,
+                trick_consecutive_passes=0,
+                trick_direct_response_to=action.card_instance_id,
+                trick_response_index=next_index,
+                trick_decision_count=runtime.trick_decision_count + 1,
+                response_window_id=self._trick_window_id(
+                    runtime, runtime.trick_decision_count + 1
+                ),
+                response_window_order=(runtime.trick_response_order[next_index],),
+            )
+            self._commit_runtime(runtime, next_runtime)
+            return current
+
+        return self._post_card_used_or_played_checkpoint(
+            next_state,
+            event_seq_before,
+            _complete_wuxie_response,
         )
-        next_runtime = replace(
-            runtime,
-            trick_effect_active=not runtime.trick_effect_active,
-            trick_consecutive_passes=0,
-            trick_direct_response_to=action.card_instance_id,
-            trick_response_index=next_index,
-            trick_decision_count=runtime.trick_decision_count + 1,
-            response_window_id=self._trick_window_id(
-                runtime, runtime.trick_decision_count + 1
-            ),
-            response_window_order=(runtime.trick_response_order[next_index],),
-        )
-        self._commit_runtime(runtime, next_runtime)
-        return next_state
 
     def apply_pass_trick_response(
         self,
@@ -9517,6 +10115,7 @@ class ProductionBasicCardBatch:
 
         if action.card_instance_id is None:
             raise InvalidActionError("使用普通锦囊必须指定实体牌")
+        event_seq_before = self._events.next_sequence
         next_state, move_event = self._move_to_processing(
             state, action.card_instance_id, context.actor_id, move_reason
         )
@@ -9532,30 +10131,37 @@ class ProductionBasicCardBatch:
         used_sequence = queued[0].sequence
         assert used_sequence is not None
         order = self._response_order_from_turn_player(state, runtime)
-        next_runtime = replace(
-            runtime,
-            phase=ProductionPhase.TRICK_RESPONSE,
-            pending_trick=_PendingTrick(
-                context.actor_id,
-                target_id,
-                action.card_instance_id,
-                adapter.card_key,
-            ),
-            trick_effect_active=True,
-            trick_consecutive_passes=0,
-            trick_response_order=order,
-            trick_response_index=0,
-            trick_decision_count=0,
-            trick_direct_response_to=action.card_instance_id,
-            response_window_id=(
-                f"trick:{runtime.turn_number}:"
-                f"{action.card_instance_id}:dec0"
-            ),
-            response_window_order=(order[0],),
-            response_window_source_sequence=used_sequence,
+        def _open_response(current: GameState) -> GameState:
+            next_runtime = replace(
+                runtime,
+                phase=ProductionPhase.TRICK_RESPONSE,
+                pending_trick=_PendingTrick(
+                    context.actor_id,
+                    target_id,
+                    action.card_instance_id,
+                    adapter.card_key,
+                ),
+                trick_effect_active=True,
+                trick_consecutive_passes=0,
+                trick_response_order=order,
+                trick_response_index=0,
+                trick_decision_count=0,
+                trick_direct_response_to=action.card_instance_id,
+                response_window_id=(
+                    f"trick:{runtime.turn_number}:"
+                    f"{action.card_instance_id}:dec0"
+                ),
+                response_window_order=(order[0],),
+                response_window_source_sequence=used_sequence,
+            )
+            self._commit_runtime(runtime, next_runtime)
+            return current
+
+        return self._post_card_used_or_played_checkpoint(
+            next_state,
+            event_seq_before,
+            _open_response,
         )
-        self._commit_runtime(runtime, next_runtime)
-        return next_state
 
     def _open_zone_choice(
         self,
@@ -10239,6 +10845,66 @@ class ProductionBasicCardBatch:
         if payload.get("duel_round") != duel.round_index:
             raise InvalidActionError("【决斗】响应动作绑定的回合轮次已过期")
 
+        def _complete_duel_play(
+            current: GameState,
+            *,
+            played_id: str,
+            progress: RequiredResponseProgress,
+            material_ids: tuple[str, str] | None = None,
+        ) -> GameState:
+            completed = current
+            if material_ids is not None:
+                completed, finalize_events = self._finalize_zhangba_materials(
+                    completed,
+                    actor_id=context.actor_id,
+                    material_ids=material_ids,
+                    window_id=(
+                        f"zhangba-materials:{runtime.turn_number}:"
+                        f"{context.actor_id}"
+                    ),
+                    reason="zhangba_material_finalize",
+                )
+                self._events.extend(finalize_events)
+            if not progress.completed:
+                self._commit_required_response_progress(progress)
+                self._commit_runtime(runtime, runtime)
+                return completed
+            next_round = (duel.response_index + 1) // 2
+            next_duel = replace(
+                duel,
+                responder_id=duel.opponent_id,
+                opponent_id=duel.responder_id,
+                round_index=next_round,
+                response_index=duel.response_index + 1,
+                slash_sequence=(*duel.slash_sequence, played_id),
+            )
+            self._commit_required_response_progress(progress)
+            if not completed.players_by_id[next_duel.responder_id].alive:
+                completed, finish_event = self._finish_processing(
+                    completed,
+                    duel.trick_instance_id,
+                    "duel_resolved_responder_dead",
+                    extra={
+                        "dead_responder": next_duel.responder_id,
+                        "root_trick_instance_id": duel.trick_instance_id,
+                    },
+                )
+                self._events.extend((finish_event,))
+                next_runtime = self._return_to_play(runtime)
+            else:
+                next_runtime = replace(runtime, pending_duel=next_duel)
+                self._open_required_response_obligation(
+                    response_kind="duel_slash",
+                    root_card_id=next_duel.trick_instance_id,
+                    root_card_type="duel",
+                    responder_id=next_duel.responder_id,
+                    response_card_type="slash",
+                    source_id=next_duel.opponent_id,
+                    duel_response_index=next_duel.response_index,
+                )
+            self._commit_runtime(runtime, next_runtime)
+            return completed
+
         zhangba_virtual = bool(payload.get("zhangba_virtual"))
         if zhangba_virtual:
             # 丈八蛇矛虚拟打出：响应【决斗】时把两张手牌当作普通【杀】
@@ -10329,65 +10995,18 @@ class ProductionBasicCardBatch:
                 target_ids=(duel.target_id,),
                 payload=played_payload,
             )
+            event_seq_before = self._events.next_sequence
             self._events.extend((played_event, *material_events))
-            # USER_CONFIRMED_RULE（2026-08-09）：响应【决斗】的丈八
-            # 虚拟杀打出即完成（无后续独立杀结算），材料在打出完成后
-            # 统一从处理区进入弃牌堆。
-            next_state, finalize_events = self._finalize_zhangba_materials(
+            return self._post_card_used_or_played_checkpoint(
                 next_state,
-                actor_id=context.actor_id,
-                material_ids=material_ids,
-                window_id=(
-                    f"zhangba-materials:{runtime.turn_number}:"
-                    f"{context.actor_id}"
+                event_seq_before,
+                lambda current: _complete_duel_play(
+                    current,
+                    played_id=virtual_id,
+                    progress=progress,
+                    material_ids=material_ids,
                 ),
-                reason="zhangba_material_finalize",
             )
-            self._events.extend(finalize_events)
-            if not progress.completed:
-                # 第一张（可证明材料生命周期的）丈八虚拟【杀】已完整消耗，
-                # 但不能交换决斗响应者或推进 response_index。
-                self._commit_required_response_progress(progress)
-                self._commit_runtime(runtime, runtime)
-                return next_state
-            next_round = (duel.response_index + 1) // 2
-            next_duel = replace(
-                duel,
-                responder_id=duel.opponent_id,
-                opponent_id=duel.responder_id,
-                round_index=next_round,
-                response_index=duel.response_index + 1,
-                slash_sequence=(*duel.slash_sequence, virtual_id),
-            )
-            self._commit_required_response_progress(progress)
-            if not state.players_by_id[next_duel.responder_id].alive:
-                next_state, finish_event = self._finish_processing(
-                    next_state,
-                    duel.trick_instance_id,
-                    "duel_resolved_responder_dead",
-                    extra={
-                        "dead_responder": next_duel.responder_id,
-                        "root_trick_instance_id": duel.trick_instance_id,
-                    },
-                )
-                self._events.extend((finish_event,))
-                next_runtime = self._return_to_play(runtime)
-            else:
-                next_runtime = replace(
-                    runtime,
-                    pending_duel=next_duel,
-                )
-                self._open_required_response_obligation(
-                    response_kind="duel_slash",
-                    root_card_id=next_duel.trick_instance_id,
-                    root_card_type="duel",
-                    responder_id=next_duel.responder_id,
-                    response_card_type="slash",
-                    source_id=next_duel.opponent_id,
-                    duel_response_index=next_duel.response_index,
-                )
-            self._commit_runtime(runtime, next_runtime)
-            return next_state
 
         card = state.cards_by_id[action.card_instance_id]
         if card.card_key not in SLASH_CARD_KEYS:
@@ -10440,53 +11059,17 @@ class ProductionBasicCardBatch:
         next_state, move_events = self._consume_immediately(
             state, action.card_instance_id, context.actor_id, "duel_slash_response"
         )
+        event_seq_before = self._events.next_sequence
         self._events.extend((played_event, *move_events))
-        if not progress.completed:
-            # 第一张实体【杀】已真实进入弃牌堆，当前 responder 与 response_index
-            # 仍保持不变，等待同一人完成本义务或显式 pass。
-            self._commit_required_response_progress(progress)
-            self._commit_runtime(runtime, runtime)
-            return next_state
-        next_round = (duel.response_index + 1) // 2
-        next_duel = replace(
-            duel,
-            responder_id=duel.opponent_id,
-            opponent_id=duel.responder_id,
-            round_index=next_round,
-            response_index=duel.response_index + 1,
-            slash_sequence=(*duel.slash_sequence, action.card_instance_id),
+        return self._post_card_used_or_played_checkpoint(
+            next_state,
+            event_seq_before,
+            lambda current: _complete_duel_play(
+                current,
+                played_id=action.card_instance_id,
+                progress=progress,
+            ),
         )
-        self._commit_required_response_progress(progress)
-        if not state.players_by_id[next_duel.responder_id].alive:
-            # 死亡角色不能继续打出【杀】；轮到死亡角色继续响应时，
-            # 后续【决斗】立即结束，不向死亡角色凭空补结算伤害。
-            next_state, finish_event = self._finish_processing(
-                next_state,
-                duel.trick_instance_id,
-                "duel_resolved_responder_dead",
-                extra={
-                    "dead_responder": next_duel.responder_id,
-                    "root_trick_instance_id": duel.trick_instance_id,
-                },
-            )
-            self._events.extend((finish_event,))
-            next_runtime = self._return_to_play(runtime)
-        else:
-            next_runtime = replace(
-                runtime,
-                pending_duel=next_duel,
-            )
-            self._open_required_response_obligation(
-                response_kind="duel_slash",
-                root_card_id=next_duel.trick_instance_id,
-                root_card_type="duel",
-                responder_id=next_duel.responder_id,
-                response_card_type="slash",
-                source_id=next_duel.opponent_id,
-                duel_response_index=next_duel.response_index,
-            )
-        self._commit_runtime(runtime, next_runtime)
-        return next_state
 
     def apply_pass_duel_slash(
         self,
@@ -11047,108 +11630,121 @@ class ProductionBasicCardBatch:
             context.actor_id,
             f"{reason_prefix}:enter_processing",
         )
+        pre_attack_range = attack_range_of(state, context.actor_id) if slot == "weapon" else None
+        used_payload: dict[str, Any] = {
+            "purpose": "equip",
+            "equipment_slot": slot,
+            "card_name": getattr(adapter, "card_name", card.card_name),
+        }
+        if pre_attack_range is not None:
+            used_payload["attack_range_before"] = pre_attack_range
         used_event = GameEvent(
             event_type=EventType.CARD_USED,
             card_instance_id=action.card_instance_id,
             card_key=card.card_key,
             card_user=context.actor_id,
             target_ids=(context.actor_id,),
-            payload={
-                "purpose": "equip",
-                "equipment_slot": slot,
-                "card_name": getattr(adapter, "card_name", card.card_name),
-            },
+            payload=used_payload,
         )
-        self._events.extend((used_event, enter_event))
+        queued = self._events.extend((used_event, enter_event))
+        used_sequence = queued[0].sequence
+        assert used_sequence is not None
 
-        target_slot = ZoneRef.equipment(context.actor_id, slot)
-        old_ids = next_state.card_ids_in(target_slot)
-        if len(old_ids) > 1:
-            raise ProductionBatchError(f"{slot}槽必须至多包含一张装备牌")
-        equip_events: list[GameEvent] = []
-        if old_ids:
-            old_id = old_ids[0]
-            next_state = next_state.move_cards(
-                {
-                    old_id: DISCARD_PILE,
-                    action.card_instance_id: target_slot,
-                }
-            )
-            if slot == "armor":
-                # 统一装备离区钩子：白银狮子离开装备区时恢复1点体力。
-                next_state, recovery_events = self._apply_armor_leave_recovery(
-                    next_state,
-                    instance_id=old_id,
-                    owner_id=context.actor_id,
-                    reason="equip_replaced",
+        def _complete_equip(s: GameState) -> GameState:
+            target_slot = ZoneRef.equipment(context.actor_id, slot)
+            old_ids = s.card_ids_in(target_slot)
+            if len(old_ids) > 1:
+                raise ProductionBatchError(f"{slot}槽必须至多包含一张装备牌")
+            equip_events: list[GameEvent] = []
+            if old_ids:
+                old_id = old_ids[0]
+                s = s.move_cards(
+                    {
+                        old_id: DISCARD_PILE,
+                        action.card_instance_id: target_slot,
+                    }
                 )
-                equip_events.extend(recovery_events)
+                if slot == "armor":
+                    # 统一装备离区钩子：白银狮子离开装备区时恢复1点体力。
+                    s, recovery_events = self._apply_armor_leave_recovery(
+                        s,
+                        instance_id=old_id,
+                        owner_id=context.actor_id,
+                        reason="equip_replaced",
+                    )
+                    equip_events.extend(recovery_events)
+                equip_events.append(
+                    GameEvent(
+                        event_type=EventType.CARD_MOVED,
+                        card_instance_id=old_id,
+                        card_key=_card_key(s, old_id),
+                        card_user=context.actor_id,
+                        payload={
+                            "source": _zone_payload(target_slot),
+                            "destination": _zone_payload(DISCARD_PILE),
+                            "reason": f"{reason_prefix}:replaced_old_to_discard",
+                            "equipment_slot": slot,
+                        },
+                    )
+                )
+                equip_events.append(
+                    GameEvent(
+                        event_type=EventType.EQUIPMENT_REMOVED,
+                        card_instance_id=old_id,
+                        card_key=_card_key(s, old_id),
+                        equipment_owner=context.actor_id,
+                        target_ids=(context.actor_id,),
+                        payload={"slot": slot, "reason": "replaced"},
+                    )
+                )
+                equip_events.append(
+                    GameEvent(
+                        event_type=EventType.EQUIPMENT_REPLACED,
+                        card_instance_id=action.card_instance_id,
+                        card_key=card.card_key,
+                        equipment_owner=context.actor_id,
+                        target_ids=(context.actor_id,),
+                        payload={
+                            "slot": slot,
+                            "old_instance_id": old_id,
+                            "new_instance_id": action.card_instance_id,
+                        },
+                    )
+                )
+            else:
+                s = s.move_card(action.card_instance_id, target_slot)
             equip_events.append(
                 GameEvent(
                     event_type=EventType.CARD_MOVED,
-                    card_instance_id=old_id,
-                    card_key=_card_key(state, old_id),
+                    card_instance_id=action.card_instance_id,
+                    card_key=card.card_key,
                     card_user=context.actor_id,
                     payload={
-                        "source": _zone_payload(target_slot),
-                        "destination": _zone_payload(DISCARD_PILE),
-                        "reason": f"{reason_prefix}:replaced_old_to_discard",
+                        "source": _zone_payload(PROCESSING_ZONE),
+                        "destination": _zone_payload(target_slot),
+                        "reason": f"{reason_prefix}:equipped",
                         "equipment_slot": slot,
                     },
                 )
             )
             equip_events.append(
                 GameEvent(
-                    event_type=EventType.EQUIPMENT_REMOVED,
-                    card_instance_id=old_id,
-                    card_key=_card_key(state, old_id),
-                    equipment_owner=context.actor_id,
-                    target_ids=(context.actor_id,),
-                    payload={"slot": slot, "reason": "replaced"},
-                )
-            )
-            equip_events.append(
-                GameEvent(
-                    event_type=EventType.EQUIPMENT_REPLACED,
+                    event_type=EventType.EQUIPMENT_EQUIPPED,
                     card_instance_id=action.card_instance_id,
                     card_key=card.card_key,
                     equipment_owner=context.actor_id,
                     target_ids=(context.actor_id,),
-                    payload={
-                        "slot": slot,
-                        "old_instance_id": old_id,
-                        "new_instance_id": action.card_instance_id,
-                    },
+                    payload={"slot": slot, "reason": "equip"},
                 )
             )
-        else:
-            next_state = next_state.move_card(action.card_instance_id, target_slot)
-        equip_events.append(
-            GameEvent(
-                event_type=EventType.CARD_MOVED,
-                card_instance_id=action.card_instance_id,
-                card_key=card.card_key,
-                card_user=context.actor_id,
-                payload={
-                    "source": _zone_payload(PROCESSING_ZONE),
-                    "destination": _zone_payload(target_slot),
-                    "reason": f"{reason_prefix}:equipped",
-                    "equipment_slot": slot,
-                },
-            )
+            self._events.extend(tuple(equip_events))
+            return s
+
+        return self._post_card_used_or_played_checkpoint(
+            next_state,
+            event_seq_before=used_sequence,
+            continuation=_complete_equip,
         )
-        equip_events.append(
-            GameEvent(
-                event_type=EventType.EQUIPMENT_EQUIPPED,
-                card_instance_id=action.card_instance_id,
-                card_key=card.card_key,
-                equipment_owner=context.actor_id,
-                target_ids=(context.actor_id,),
-                payload={"slot": slot, "reason": "equip"},
-            )
-        )
-        self._events.extend(tuple(equip_events))
-        return next_state
 
     def _apply_armor_leave_recovery(
         self,
@@ -11338,14 +11934,6 @@ class ProductionBasicCardBatch:
                     "creates_card_played_event": False,
                 },
             )
-            next_state, slash_runtime, slash_finish_events = (
-                self._finish_slash_processing(
-                    next_state,
-                    runtime,
-                    pending.slash_instance_id,
-                    "slash_cancelled_by_bagua",
-                )
-            )
             cancelled_event = GameEvent(
                 event_type=EventType.CARD_EFFECT_CANCELLED,
                 card_instance_id=pending.slash_instance_id,
@@ -11362,14 +11950,30 @@ class ProductionBasicCardBatch:
                     "virtual_response": True,
                 },
             )
-            # MB-M-007：八卦虚拟闪事件 → CARD_EFFECT_CANCELLED → 根收尾
-            # （丈八材料 finalize 事件不得早于闪/取消事件）。
-            self._events.extend(
-                (virtual_dodge, cancelled_event, *slash_finish_events)
-            )
-            next_runtime = replace(slash_runtime, bagua_attempted=True)
-            next_state, next_runtime = self._complete_root_resolution(
-                next_state, next_runtime
+            event_seq_before = self._events.next_sequence
+            self._events.extend((virtual_dodge,))
+
+            def _complete_bagua_dodge(current: GameState) -> GameState:
+                completed, slash_runtime, slash_finish_events = (
+                    self._finish_slash_processing(
+                        current,
+                        runtime,
+                        pending.slash_instance_id,
+                        "slash_cancelled_by_bagua",
+                    )
+                )
+                self._events.extend((cancelled_event, *slash_finish_events))
+                completed_runtime = replace(slash_runtime, bagua_attempted=True)
+                completed, completed_runtime = self._complete_root_resolution(
+                    completed, completed_runtime
+                )
+                self._commit_runtime(runtime, completed_runtime)
+                return completed
+
+            return self._post_card_used_or_played_checkpoint(
+                next_state,
+                event_seq_before,
+                _complete_bagua_dodge,
             )
         else:
             group = runtime.pending_group_trick
@@ -11397,15 +12001,25 @@ class ProductionBasicCardBatch:
                     "group_user_id": group.user_id,
                 },
             )
-            resolved = self._group_resolved_event(
-                next_state, group, current, result="responded"
+            event_seq_before = self._events.next_sequence
+            self._events.extend((virtual_jink,))
+
+            def _complete_bagua_jink(current_state: GameState) -> GameState:
+                resolved = self._group_resolved_event(
+                    current_state, group, current, result="responded"
+                )
+                self._events.extend((resolved,))
+                completed, completed_runtime = self._advance_group_target(
+                    current_state, next_runtime, group, current
+                )
+                self._commit_runtime(runtime, completed_runtime)
+                return completed
+
+            return self._post_card_used_or_played_checkpoint(
+                next_state,
+                event_seq_before,
+                _complete_bagua_jink,
             )
-            self._events.extend((virtual_jink, resolved))
-            next_state, next_runtime = self._advance_group_target(
-                next_state, next_runtime, group, current
-            )
-        self._commit_runtime(runtime, next_runtime)
-        return next_state
 
     def _bagua_take_judgment_card(
         self,
@@ -11530,6 +12144,7 @@ class ProductionBasicCardBatch:
                 "第二目标必须处于第一目标当前攻击范围内且为合法杀目标"
             )
 
+        event_seq_before = self._events.next_sequence
         next_state, move_event = self._move_to_processing(
             state, action.card_instance_id, context.actor_id, "jiedaosharen_use"
         )
@@ -11585,8 +12200,15 @@ class ProductionBasicCardBatch:
                 session_id=self._session_id,
             ),
         )
-        self._commit_runtime(runtime, next_runtime)
-        return next_state
+        def _open_jiedao_response(current: GameState) -> GameState:
+            self._commit_runtime(runtime, next_runtime)
+            return current
+
+        return self._post_card_used_or_played_checkpoint(
+            next_state,
+            event_seq_before,
+            _open_jiedao_response,
+        )
 
 
     def _open_borrowed_sword(
@@ -11934,7 +12556,7 @@ class ProductionBasicCardBatch:
                 )
             )
             self._events.extend(material_events)
-            next_state, next_runtime = self._apply_forced_slash_use(
+            next_state = self._apply_forced_slash_use(
                 next_state,
                 runtime,
                 slash_instance_id=virtual_id,
@@ -11942,7 +12564,6 @@ class ProductionBasicCardBatch:
                 target_id=pending.second_target_id,
                 zhangba_materials=material_ids,
             )
-            self._commit_runtime(runtime, next_runtime)
             return next_state
         handle = payload.get("handle")
         instance_id = _resolve_borrowed_sword_slash_handle(
@@ -11990,7 +12611,7 @@ class ProductionBasicCardBatch:
             target_id=pending.second_target_id,
             slash_card_key=card.card_key,
         )
-        next_state, next_runtime = self._apply_forced_slash_use(
+        next_state = self._apply_forced_slash_use(
             state,
             runtime,
             slash_instance_id=instance_id,
@@ -11998,7 +12619,6 @@ class ProductionBasicCardBatch:
             target_id=pending.second_target_id,
             fire_converted=fire_converted,
         )
-        self._commit_runtime(runtime, next_runtime)
         return next_state
 
 
@@ -12012,7 +12632,7 @@ class ProductionBasicCardBatch:
         target_id: str,
         fire_converted: bool = False,
         zhangba_materials: tuple[str, str] | None = None,
-    ) -> tuple[GameState, _BatchRuntime]:
+    ) -> GameState:
         """借刀要求的正式【杀】使用子结算。
 
         绕过“通常出杀次数上限”这一项前置检查（绕过来自借刀规则本身），
@@ -12036,6 +12656,7 @@ class ProductionBasicCardBatch:
         adapter = self._formal_registry.adapter_for(card.card_key)
         if not isinstance(adapter, SlashAdapter):
             raise ProductionBatchError("借刀强制使用杀必须使用【杀】生产适配器")
+        event_seq_before = self._events.next_sequence
         if zhangba_materials is None:
             next_state, move_event = self._move_to_processing(
                 state,
@@ -12085,6 +12706,46 @@ class ProductionBasicCardBatch:
             queued = self._events.extend((used_event, move_event))
         used_sequence = queued[0].sequence
         assert used_sequence is not None
+
+        return self._post_card_used_or_played_checkpoint(
+            next_state,
+            event_seq_before,
+            lambda current: self._continue_forced_slash_use(
+                current,
+                runtime,
+                card=card,
+                slash_instance_id=slash_instance_id,
+                attacker_id=attacker_id,
+                target_id=target_id,
+                boosted=boosted,
+                fire_converted=fire_converted,
+                zhangba_materials=zhangba_materials,
+                used_sequence=used_sequence,
+            ),
+        )
+
+    def _continue_forced_slash_use(
+        self,
+        state: GameState,
+        runtime: _BatchRuntime,
+        *,
+        card: CardInstance,
+        slash_instance_id: str,
+        attacker_id: str,
+        target_id: str,
+        boosted: bool,
+        fire_converted: bool,
+        zhangba_materials: tuple[str, str] | None,
+        used_sequence: int,
+    ) -> GameState:
+        pending = runtime.pending_borrowed_sword
+        if pending is None or pending.stage != "slash_request":
+            raise UnsupportedRuleError("强制【杀】 continuation 的借刀根已过期，失败关闭")
+        if zhangba_materials is not None and any(
+            state.location_of(instance_id) != PROCESSING_ZONE
+            for instance_id in zhangba_materials
+        ):
+            raise UnsupportedRuleError("丈八强制【杀】材料已离开 PROCESSING，失败关闭")
         next_counts = {
             **runtime.slash_used_counts,
             attacker_id: runtime.slash_used_counts.get(attacker_id, 0) + 1,
@@ -12134,9 +12795,9 @@ class ProductionBasicCardBatch:
                 response_window_source_sequence=used_sequence,
                 bagua_attempted=False,
             )
-            return next_state, self._enter_cixiong_activation(
-                next_state, base_runtime
-            )
+            next_runtime = self._enter_cixiong_activation(state, base_runtime)
+            self._commit_runtime(runtime, next_runtime)
+            return state
         # CP-04P 朱雀羽扇×借刀：转火杀按火【杀】身份结算——从使用入口
         # 开始，藤甲普通杀免疫等无效化检查按转化后的身份处理（转换后
         # 不再被藤甲免疫；未转换的普通杀仍按普通杀身份接受无效化检查）。
@@ -12153,9 +12814,9 @@ class ProductionBasicCardBatch:
                 if zhangba_materials is not None:
                     # 丈八虚拟杀：无实体在处理区，材料在本次杀被防具无效
                     # 化（结算完成）时统一从处理区进入弃牌堆。
-                    next_state, zhangba_finish_events = (
+                    state, zhangba_finish_events = (
                         self._finalize_zhangba_materials(
-                            next_state,
+                            state,
                             actor_id=attacker_id,
                             material_ids=zhangba_materials,
                             window_id=(
@@ -12167,8 +12828,8 @@ class ProductionBasicCardBatch:
                     )
                     finish_events = zhangba_finish_events
                 else:
-                    next_state, finish_event = self._finish_processing(
-                        next_state,
+                    state, finish_event = self._finish_processing(
+                        state,
                         slash_instance_id,
                         f"slash_invalidated_by_{invalid_reason}",
                     )
@@ -12197,10 +12858,11 @@ class ProductionBasicCardBatch:
                     borrowed_sword_slash_handles=MappingProxyType({}),
                     borrowed_sword_slash_snapshot_digest=None,
                 )
-                next_state, next_runtime = self._complete_root_resolution(
-                    next_state, base_runtime
+                state, next_runtime = self._complete_root_resolution(
+                    state, base_runtime
                 )
-                return next_state, next_runtime
+                self._commit_runtime(runtime, next_runtime)
+                return state
         next_runtime = replace(
             runtime,
             phase=ProductionPhase.SLASH_RESPONSE,
@@ -12216,7 +12878,8 @@ class ProductionBasicCardBatch:
             response_window_order=(target_id,),
             response_window_source_sequence=used_sequence,
         )
-        return next_state, next_runtime
+        self._commit_runtime(runtime, next_runtime)
+        return state
 
     def _borrowed_sword_weapon_gain(
         self,
@@ -12356,6 +13019,7 @@ class ProductionBasicCardBatch:
                 f"{adapter.card_name}当前没有合法目标，不能使用"
             )
 
+        event_seq_before = self._events.next_sequence
         next_state, move_event = self._move_to_processing(
             state,
             action.card_instance_id,
@@ -12390,31 +13054,38 @@ class ProductionBasicCardBatch:
         )
         first_target = sequence[0]
         order = self._response_order_from_turn_player(state, runtime)
-        next_runtime = replace(
-            runtime,
-            phase=ProductionPhase.TRICK_RESPONSE,
-            pending_group_trick=group,
-            pending_trick=_PendingTrick(
-                context.actor_id,
-                first_target,
-                action.card_instance_id,
-                adapter.card_key,
-            ),
-            trick_effect_active=True,
-            trick_consecutive_passes=0,
-            trick_response_order=order,
-            trick_response_index=0,
-            trick_decision_count=0,
-            trick_direct_response_to=action.card_instance_id,
-            response_window_id=(
-                f"trick:{runtime.turn_number}:"
-                f"{action.card_instance_id}:gt0:dec0"
-            ),
-            response_window_order=(order[0],),
-            response_window_source_sequence=used_sequence,
+        def _open_group_response(current: GameState) -> GameState:
+            next_runtime = replace(
+                runtime,
+                phase=ProductionPhase.TRICK_RESPONSE,
+                pending_group_trick=group,
+                pending_trick=_PendingTrick(
+                    context.actor_id,
+                    first_target,
+                    action.card_instance_id,
+                    adapter.card_key,
+                ),
+                trick_effect_active=True,
+                trick_consecutive_passes=0,
+                trick_response_order=order,
+                trick_response_index=0,
+                trick_decision_count=0,
+                trick_direct_response_to=action.card_instance_id,
+                response_window_id=(
+                    f"trick:{runtime.turn_number}:"
+                    f"{action.card_instance_id}:gt0:dec0"
+                ),
+                response_window_order=(order[0],),
+                response_window_source_sequence=used_sequence,
+            )
+            self._commit_runtime(runtime, next_runtime)
+            return current
+
+        return self._post_card_used_or_played_checkpoint(
+            next_state,
+            event_seq_before,
+            _open_group_response,
         )
-        self._commit_runtime(runtime, next_runtime)
-        return next_state
 
     def _group_target_sequence(
         self,
@@ -13049,6 +13720,7 @@ class ProductionBasicCardBatch:
             state, len(sequence), f"五谷丰登展示{len(sequence)}张牌"
         )
 
+        event_seq_before = self._events.next_sequence
         next_state, move_event = self._move_to_processing(
             state,
             action.card_instance_id,
@@ -13071,76 +13743,77 @@ class ProductionBasicCardBatch:
         used_sequence = queued[0].sequence
         assert used_sequence is not None
 
-        reveal_window_id = (
-            f"wugu-reveal:{runtime.turn_number}:"
-            f"{action.card_instance_id}"
-        )
-        pool_state, reveal_events = self._reveal_cards(
-            next_state,
-            len(sequence),
-            user_id=context.actor_id,
-            trick_instance_id=action.card_instance_id,
-            window_id=reveal_window_id,
-            reason="wugu_reveal",
-        )
-        self._events.extend(reveal_events)
-        # POST-B C3（§2.11-2）：展示原子步骤完整执行后牌堆变为0 →
-        # 立即平局；平局终局优先于逐目标选牌（展示池由平局清理进入
-        # 弃牌堆）。
-        pool_state, draw_check = self._check_2v2_draw_after_consumption(
-            pool_state, runtime
-        )
-        if draw_check.game_over_reason is not None:
-            self._commit_runtime(runtime, draw_check)
-            return pool_state
-        pool = tuple(pool_state.card_ids_in(REVEALED_ZONE))
-        if len(pool) != len(sequence):
-            raise ProductionBatchError(
-                "五谷展示池数量与目标序列不一致"
+        def _reveal_wugu_pool(current: GameState) -> GameState:
+            reveal_window_id = (
+                f"wugu-reveal:{runtime.turn_number}:"
+                f"{action.card_instance_id}"
             )
-        pool_digest = sha256_value(pool)
-
-        group = _PendingGroupTrick(
-            user_id=context.actor_id,
-            trick_instance_id=action.card_instance_id,
-            trick_key=adapter.card_key,
-            target_sequence=sequence,
-        )
-        first_target = sequence[0]
-        order = self._response_order_from_turn_player(state, runtime)
-        next_runtime = replace(
-            runtime,
-            phase=ProductionPhase.TRICK_RESPONSE,
-            pending_group_trick=group,
-            pending_wugu=_PendingWugu(
+            pool_state, reveal_events = self._reveal_cards(
+                current,
+                len(sequence),
+                user_id=context.actor_id,
+                trick_instance_id=action.card_instance_id,
+                window_id=reveal_window_id,
+                reason="wugu_reveal",
+            )
+            self._events.extend(reveal_events)
+            pool_state, draw_check = self._check_2v2_draw_after_consumption(
+                pool_state, runtime
+            )
+            if draw_check.game_over_reason is not None:
+                self._commit_runtime(runtime, draw_check)
+                return pool_state
+            pool = tuple(pool_state.card_ids_in(REVEALED_ZONE))
+            if len(pool) != len(sequence):
+                raise ProductionBatchError("五谷展示池数量与目标序列不一致")
+            pool_digest = sha256_value(pool)
+            group = _PendingGroupTrick(
                 user_id=context.actor_id,
                 trick_instance_id=action.card_instance_id,
                 trick_key=adapter.card_key,
-                pool=pool,
-                pool_digest=pool_digest,
                 target_sequence=sequence,
-            ),
-            pending_trick=_PendingTrick(
-                context.actor_id,
-                first_target,
-                action.card_instance_id,
-                adapter.card_key,
-            ),
-            trick_effect_active=True,
-            trick_consecutive_passes=0,
-            trick_response_order=order,
-            trick_response_index=0,
-            trick_decision_count=0,
-            trick_direct_response_to=action.card_instance_id,
-            response_window_id=(
-                f"trick:{runtime.turn_number}:"
-                f"{action.card_instance_id}:gt0:dec0"
-            ),
-            response_window_order=(order[0],),
-            response_window_source_sequence=used_sequence,
+            )
+            first_target = sequence[0]
+            order = self._response_order_from_turn_player(state, runtime)
+            next_runtime = replace(
+                runtime,
+                phase=ProductionPhase.TRICK_RESPONSE,
+                pending_group_trick=group,
+                pending_wugu=_PendingWugu(
+                    user_id=context.actor_id,
+                    trick_instance_id=action.card_instance_id,
+                    trick_key=adapter.card_key,
+                    pool=pool,
+                    pool_digest=pool_digest,
+                    target_sequence=sequence,
+                ),
+                pending_trick=_PendingTrick(
+                    context.actor_id,
+                    first_target,
+                    action.card_instance_id,
+                    adapter.card_key,
+                ),
+                trick_effect_active=True,
+                trick_consecutive_passes=0,
+                trick_response_order=order,
+                trick_response_index=0,
+                trick_decision_count=0,
+                trick_direct_response_to=action.card_instance_id,
+                response_window_id=(
+                    f"trick:{runtime.turn_number}:"
+                    f"{action.card_instance_id}:gt0:dec0"
+                ),
+                response_window_order=(order[0],),
+                response_window_source_sequence=used_sequence,
+            )
+            self._commit_runtime(runtime, next_runtime)
+            return pool_state
+
+        return self._post_card_used_or_played_checkpoint(
+            next_state,
+            event_seq_before,
+            _reveal_wugu_pool,
         )
-        self._commit_runtime(runtime, next_runtime)
-        return pool_state
 
     def _open_wugu_pick_phase(
         self,
@@ -13396,6 +14069,7 @@ class ProductionBasicCardBatch:
         sequence = normalize_target_order(
             state, context.actor_id, action.target_ids
         )
+        event_seq_before = self._events.next_sequence
         next_state, move_event = self._move_to_processing(
             state,
             action.card_instance_id,
@@ -13447,8 +14121,15 @@ class ProductionBasicCardBatch:
             response_window_order=(order[0],),
             response_window_source_sequence=used_sequence,
         )
-        self._commit_runtime(runtime, next_runtime)
-        return next_state
+        def _open_tiesuo_response(current: GameState) -> GameState:
+            self._commit_runtime(runtime, next_runtime)
+            return current
+
+        return self._post_card_used_or_played_checkpoint(
+            next_state,
+            event_seq_before,
+            _open_tiesuo_response,
+        )
 
     def apply_tiesuo_recast(
         self,
@@ -13962,22 +14643,33 @@ class ProductionBasicCardBatch:
                 "group_user_id": group.user_id,
             },
         )
-        next_state, move_events = self._consume_immediately(
+        queued = self._events.extend((played_event,))
+        played_sequence = queued[0].sequence
+        assert played_sequence is not None
+
+        def _resume_group_advance(s: GameState) -> GameState:
+            s, move_events = self._consume_immediately(
+                s,
+                instance_id,
+                context.actor_id,
+                f"{group.trick_key}_response",
+            )
+            self._events.extend(move_events)
+            resolved = self._group_resolved_event(
+                s, group, current, result="responded"
+            )
+            self._events.extend((resolved,))
+            s, next_runtime = self._advance_group_target(
+                s, runtime, group, current
+            )
+            self._commit_runtime(runtime, next_runtime)
+            return s
+
+        return self._post_card_used_or_played_checkpoint(
             state,
-            instance_id,
-            context.actor_id,
-            f"{group.trick_key}_response",
+            event_seq_before=played_sequence,
+            continuation=_resume_group_advance,
         )
-        self._events.extend((played_event, *move_events))
-        resolved = self._group_resolved_event(
-            next_state, group, current, result="responded"
-        )
-        self._events.extend((resolved,))
-        next_state, next_runtime = self._advance_group_target(
-            next_state, runtime, group, current
-        )
-        self._commit_runtime(runtime, next_runtime)
-        return next_state
 
     def apply_pass_group_response(
         self,
@@ -14095,14 +14787,9 @@ class ProductionBasicCardBatch:
         ):
             raise InvalidActionError("只能使用行动角色真实手牌中的实体牌")
 
+        event_seq_before = self._events.next_sequence
         next_state, move_events = self._consume_immediately(
             state, action.card_instance_id, context.actor_id, "peach_resolve"
-        )
-        healed = next_state.players_by_id[context.actor_id]
-        next_state = _replace_player(
-            next_state,
-            context.actor_id,
-            hp=min(healed.max_hp, healed.hp + 1),
         )
         self._events.extend(
             (
@@ -14117,8 +14804,22 @@ class ProductionBasicCardBatch:
                 *move_events,
             )
         )
-        self._commit_runtime(runtime, runtime)
-        return next_state
+
+        def _complete_peach(current: GameState) -> GameState:
+            healed = current.players_by_id[context.actor_id]
+            completed = _replace_player(
+                current,
+                context.actor_id,
+                hp=min(healed.max_hp, healed.hp + 1),
+            )
+            self._commit_runtime(runtime, runtime)
+            return completed
+
+        return self._post_card_used_or_played_checkpoint(
+            next_state,
+            event_seq_before,
+            _complete_peach,
+        )
 
     def apply_wine_buff(
         self,
@@ -14145,6 +14846,7 @@ class ProductionBasicCardBatch:
         ):
             raise InvalidActionError("只能使用行动角色真实手牌中的实体牌")
 
+        event_seq_before = self._events.next_sequence
         next_state, move_events = self._consume_immediately(
             state, action.card_instance_id, context.actor_id, "wine_buff_resolve"
         )
@@ -14161,13 +14863,20 @@ class ProductionBasicCardBatch:
                 *move_events,
             )
         )
-        next_runtime = replace(
-            runtime,
-            wine_buff_owner_id=context.actor_id,
-            wine_buff_used_this_play_phase=True,
+        def _complete_wine(current: GameState) -> GameState:
+            next_runtime = replace(
+                runtime,
+                wine_buff_owner_id=context.actor_id,
+                wine_buff_used_this_play_phase=True,
+            )
+            self._commit_runtime(runtime, next_runtime)
+            return current
+
+        return self._post_card_used_or_played_checkpoint(
+            next_state,
+            event_seq_before,
+            _complete_wine,
         )
-        self._commit_runtime(runtime, next_runtime)
-        return next_state
 
     def _pending_damage_card_id(self, runtime: _BatchRuntime) -> str:
         if runtime.pending_lose_hp_dying:
@@ -14279,6 +14988,7 @@ class ProductionBasicCardBatch:
         ):
             raise InvalidActionError("只能使用救援角色真实手牌中的实体牌")
 
+        event_seq_before = self._events.next_sequence
         window = self._build_window(runtime)
         rescue_event = GameEvent(
             event_type=EventType.CARD_USED,
@@ -14293,60 +15003,58 @@ class ProductionBasicCardBatch:
         next_state, move_events = self._consume_immediately(
             state, action.card_instance_id, context.actor_id, "dying_rescue"
         )
-        dying = next_state.players_by_id[dying_id]
-        next_state = _replace_player(
-            next_state, dying_id, hp=min(dying.max_hp, dying.hp + 1)
-        )
-        pending_events: list[GameEvent] = [
-            record.response_event,
-            *move_events,
-        ]
-        if next_state.players_by_id[dying_id].hp >= 1:
-            nested = self._c7_resume_after_lose_hp_rescue(
-                next_state, runtime, dying_id, pending_events
+        self._events.extend((record.response_event, *move_events))
+
+        def _complete_peach_rescue(current: GameState) -> GameState:
+            dying = current.players_by_id[dying_id]
+            completed = _replace_player(
+                current, dying_id, hp=min(dying.max_hp, dying.hp + 1)
             )
-            if nested is not None:
-                return nested
-            if runtime.pending_group_trick is not None:
-                self._events.extend(pending_events)
-                # 群体锦囊：救援完成后恢复逐目标队列，原锦囊继续留在
-                # 处理区，直到全部目标完成才进入弃牌堆。
-                next_state, next_runtime = self._resume_group_after_damage(
-                    next_state, runtime, dying_id, rescued=True
+            active_runtime = runtime
+            if completed.players_by_id[dying_id].hp >= 1:
+                nested = self._c7_resume_after_lose_hp_rescue(
+                    completed, active_runtime, dying_id, ()
                 )
-            elif runtime.pending_chain is not None:
-                self._events.extend(pending_events)
-                # 属性伤害传导：原始角色或传导目标救援完成后，从准确索引
-                # 恢复传导；原始角色先完成根牌结算再继续。
-                next_state, next_runtime = self._resume_chain_after_rescue(
-                    next_state, runtime, dying_id, rescued=True
-                )
-            else:
-                next_state, runtime, finish_events = (
-                    self._finish_pending_damage_card(
-                        next_state,
-                        runtime,
-                        self._pending_damage_rescue_reason(runtime),
+                if nested is not None:
+                    return nested
+                if active_runtime.pending_group_trick is not None:
+                    completed, next_runtime = self._resume_group_after_damage(
+                        completed, active_runtime, dying_id, rescued=True
                     )
+                elif active_runtime.pending_chain is not None:
+                    completed, next_runtime = self._resume_chain_after_rescue(
+                        completed, active_runtime, dying_id, rescued=True
+                    )
+                else:
+                    completed, active_runtime, finish_events = (
+                        self._finish_pending_damage_card(
+                            completed,
+                            active_runtime,
+                            self._pending_damage_rescue_reason(active_runtime),
+                        )
+                    )
+                    self._events.extend(finish_events)
+                    completed, next_runtime = self._complete_root_resolution(
+                        completed, active_runtime
+                    )
+            else:
+                decision_count = active_runtime.rescue_decision_count + 1
+                next_runtime = replace(
+                    active_runtime,
+                    rescue_decision_count=decision_count,
+                    response_window_id=self._rescue_window_id(
+                        active_runtime, active_runtime.rescue_index, decision_count
+                    ),
+                    response_window_order=(context.actor_id,),
                 )
-                pending_events.extend(finish_events)
-                self._events.extend(pending_events)
-                next_state, next_runtime = self._complete_root_resolution(
-                    next_state, runtime
-                )
-        else:
-            self._events.extend(pending_events)
-            decision_count = runtime.rescue_decision_count + 1
-            next_runtime = replace(
-                runtime,
-                rescue_decision_count=decision_count,
-                response_window_id=self._rescue_window_id(
-                    runtime, runtime.rescue_index, decision_count
-                ),
-                response_window_order=(context.actor_id,),
-            )
-        self._commit_runtime(runtime, next_runtime)
-        return next_state
+            self._commit_runtime(runtime, next_runtime)
+            return completed
+
+        return self._post_card_used_or_played_checkpoint(
+            next_state,
+            event_seq_before,
+            _complete_peach_rescue,
+        )
 
     def apply_wine_self_rescue(
         self,
@@ -14382,6 +15090,7 @@ class ProductionBasicCardBatch:
         ):
             raise InvalidActionError("只能使用自救角色真实手牌中的实体牌")
 
+        event_seq_before = self._events.next_sequence
         window = self._build_window(runtime)
         rescue_event = GameEvent(
             event_type=EventType.CARD_USED,
@@ -14396,59 +15105,58 @@ class ProductionBasicCardBatch:
         next_state, move_events = self._consume_immediately(
             state, action.card_instance_id, context.actor_id, "dying_self_rescue"
         )
-        dying = next_state.players_by_id[dying_id]
-        next_state = _replace_player(
-            next_state, dying_id, hp=min(dying.max_hp, dying.hp + 1)
-        )
-        pending_events: list[GameEvent] = [
-            record.response_event,
-            *move_events,
-        ]
-        if next_state.players_by_id[dying_id].hp >= 1:
-            nested = self._c7_resume_after_lose_hp_rescue(
-                next_state, runtime, dying_id, pending_events
+        self._events.extend((record.response_event, *move_events))
+
+        def _complete_wine_rescue(current: GameState) -> GameState:
+            dying = current.players_by_id[dying_id]
+            completed = _replace_player(
+                current, dying_id, hp=min(dying.max_hp, dying.hp + 1)
             )
-            if nested is not None:
-                return nested
-            if runtime.pending_group_trick is not None:
-                self._events.extend(pending_events)
-                # 群体锦囊：救援完成后恢复逐目标队列，原锦囊继续留在
-                # 处理区，直到全部目标完成才进入弃牌堆。
-                next_state, next_runtime = self._resume_group_after_damage(
-                    next_state, runtime, dying_id, rescued=True
+            active_runtime = runtime
+            if completed.players_by_id[dying_id].hp >= 1:
+                nested = self._c7_resume_after_lose_hp_rescue(
+                    completed, active_runtime, dying_id, ()
                 )
-            elif runtime.pending_chain is not None:
-                self._events.extend(pending_events)
-                # 属性伤害传导：救援完成后恢复挂起队列。
-                next_state, next_runtime = self._resume_chain_after_rescue(
-                    next_state, runtime, dying_id, rescued=True
-                )
-            else:
-                next_state, runtime, finish_events = (
-                    self._finish_pending_damage_card(
-                        next_state,
-                        runtime,
-                        self._pending_damage_rescue_reason(runtime),
+                if nested is not None:
+                    return nested
+                if active_runtime.pending_group_trick is not None:
+                    completed, next_runtime = self._resume_group_after_damage(
+                        completed, active_runtime, dying_id, rescued=True
                     )
+                elif active_runtime.pending_chain is not None:
+                    completed, next_runtime = self._resume_chain_after_rescue(
+                        completed, active_runtime, dying_id, rescued=True
+                    )
+                else:
+                    completed, active_runtime, finish_events = (
+                        self._finish_pending_damage_card(
+                            completed,
+                            active_runtime,
+                            self._pending_damage_rescue_reason(active_runtime),
+                        )
+                    )
+                    self._events.extend(finish_events)
+                    completed, next_runtime = self._complete_root_resolution(
+                        completed, active_runtime
+                    )
+            else:
+                decision_count = active_runtime.rescue_decision_count + 1
+                next_runtime = replace(
+                    active_runtime,
+                    rescue_decision_count=decision_count,
+                    response_window_id=self._rescue_window_id(
+                        active_runtime, active_runtime.rescue_index, decision_count
+                    ),
+                    response_window_order=(context.actor_id,),
                 )
-                pending_events.extend(finish_events)
-                self._events.extend(pending_events)
-                next_state, next_runtime = self._complete_root_resolution(
-                    next_state, runtime
-                )
-        else:
-            self._events.extend(pending_events)
-            decision_count = runtime.rescue_decision_count + 1
-            next_runtime = replace(
-                runtime,
-                rescue_decision_count=decision_count,
-                response_window_id=self._rescue_window_id(
-                    runtime, runtime.rescue_index, decision_count
-                ),
-                response_window_order=(context.actor_id,),
-            )
-        self._commit_runtime(runtime, next_runtime)
-        return next_state
+            self._commit_runtime(runtime, next_runtime)
+            return completed
+
+        return self._post_card_used_or_played_checkpoint(
+            next_state,
+            event_seq_before,
+            _complete_wine_rescue,
+        )
 
     def apply_pass_rescue(
         self,
@@ -15156,10 +15864,15 @@ class ProductionBasicCardBatch:
             raise InvalidActionError(
                 f"目标判定区不得已有同名{adapter.card_name}"
             )
-        # 直接：手牌 → 目标判定区（不经处理区）
+        event_seq_before = self._events.next_sequence
+        # 无技能会话保持既有直接移动语义；技能会话先把材料置于处理区，
+        # CARD_USED checkpoint 完成后才进入判定区。
         source = state.location_of(action.card_instance_id)
         target_zone = ZoneRef.judgment(target)
-        next_state = state.move_card(action.card_instance_id, target_zone)
+        checkpoint_state = state.move_card(
+            action.card_instance_id,
+            target_zone if self._skill_runtime is None else PROCESSING_ZONE,
+        )
         entry_index = runtime.judgment_entry_counter + 1
         placed_event = GameEvent(
             event_type=EventType.CARD_MOVED,
@@ -15185,17 +15898,36 @@ class ProductionBasicCardBatch:
                 "judgment_zone_entry_index": entry_index,
             },
         )
-        self._events.extend((used_event, placed_event))
-        next_runtime = replace(
-            runtime,
-            judgment_entry_indices=MappingProxyType(
-                {**runtime.judgment_entry_indices,
-                 action.card_instance_id: entry_index}
-            ),
-            judgment_entry_counter=entry_index,
+        if self._skill_runtime is None:
+            self._events.extend((used_event, placed_event))
+        else:
+            self._events.extend((used_event,))
+
+        def _place_delayed_trick(current: GameState) -> GameState:
+            completed = current
+            if self._skill_runtime is not None:
+                if current.location_of(action.card_instance_id) != PROCESSING_ZONE:
+                    raise UnsupportedRuleError(
+                        "延时锦囊 continuation 恢复前已离开 PROCESSING，失败关闭"
+                    )
+                completed = current.move_card(action.card_instance_id, target_zone)
+                self._events.extend((placed_event,))
+            next_runtime = replace(
+                runtime,
+                judgment_entry_indices=MappingProxyType(
+                    {**runtime.judgment_entry_indices,
+                     action.card_instance_id: entry_index}
+                ),
+                judgment_entry_counter=entry_index,
+            )
+            self._commit_runtime(runtime, next_runtime)
+            return completed
+
+        return self._post_card_used_or_played_checkpoint(
+            checkpoint_state,
+            event_seq_before,
+            _place_delayed_trick,
         )
-        self._commit_runtime(runtime, next_runtime)
-        return next_state
 
     def apply_proceed_prepare(
         self, state: GameState, context: ActionContext, action: LegalAction
@@ -16032,9 +16764,17 @@ class ProductionBasicCardBatch:
 
 
     def _next_lightning_target(
-        self, state: GameState, owner_id: str
+        self,
+        state: GameState,
+        owner_id: str,
+        trick_instance_id: str | None = None,
     ) -> str:
-        """从当前结算角色下家开始，按存活座次递增搜索无闪电的合法角色。"""
+        """从当前结算角色下家开始，搜索可成为该【闪电】目标的角色。
+
+        同名判定区限制先形成结构候选，再复用会话统一静态目标合法性缝隙；
+        因而【帷幕】及未来同类“不能成为目标”技能不需要 lightning-only
+        查找实现。没有其他合法目标时回置当前持有者，不构成一次新指定。
+        """
         players = list(state.players_by_id.values())
         owner_seat = state.players_by_id[owner_id].seat
         ring = len(players)
@@ -16046,6 +16786,7 @@ class ProductionBasicCardBatch:
             [p for p in players if p.player_id != owner_id],
             key=lambda p: cyclic_step(p.player_id),
         )
+        structural_candidates: list[str] = []
         for player in ordered:
             if not player.alive:
                 continue
@@ -16056,7 +16797,33 @@ class ProductionBasicCardBatch:
                 )
             ):
                 continue
-            return player.player_id
+            structural_candidates.append(player.player_id)
+        if trick_instance_id is None:
+            owned_lightning = tuple(
+                instance_id
+                for instance_id in state.card_ids_in(
+                    ZoneRef.judgment(owner_id)
+                )
+                if state.cards_by_id[instance_id].card_key
+                == "sgs_delayed_shandian"
+            )
+            if len(owned_lightning) != 1:
+                raise ProductionBatchError(
+                    "闪电转移目标搜索必须绑定唯一当前【闪电】实体"
+                )
+            trick_instance_id = owned_lightning[0]
+        card = state.cards_by_id.get(trick_instance_id)
+        if card is None or card.card_key != "sgs_delayed_shandian":
+            raise ProductionBatchError("闪电转移必须绑定当前真实【闪电】实体")
+        legal_candidates = self.filter_targets_for_card(
+            owner_id,
+            card,
+            card.card_key,
+            structural_candidates,
+            state,
+        )
+        if legal_candidates:
+            return legal_candidates[0]
         # 无其他合法角色：回置当前角色自己的判定区
         return owner_id
 
@@ -16070,7 +16837,9 @@ class ProductionBasicCardBatch:
     ) -> tuple[GameState, _BatchRuntime]:
         """闪电转移或回置：追加新entry_index，不弃置、不覆盖、不立即判定。"""
         trick_id = pending.trick_instance_id
-        next_owner = self._next_lightning_target(state, pending.target_id)
+        next_owner = self._next_lightning_target(
+            state, pending.target_id, trick_id
+        )
         new_index = runtime.judgment_entry_counter + 1
         source_zone = (
             PROCESSING_ZONE
@@ -18222,9 +18991,7 @@ class ProductionBasicCardBatch:
             player = state.players_by_id[actor_id]
             if player.hp >= player.max_hp:
                 raise InvalidActionError("满体力时不能使用虚拟桃")
-            next_state = _replace_player(
-                state, actor_id, hp=min(player.max_hp, player.hp + 1)
-            )
+            event_seq_before = self._events.next_sequence
             self._events.extend(
                 (
                     GameEvent(
@@ -18238,7 +19005,19 @@ class ProductionBasicCardBatch:
                             "source": "ambitionist_mark",
                         },
                     ),
-                    GameEvent(
+                )
+            )
+
+            def _complete_virtual_peach_play(current: GameState) -> GameState:
+                live_player = current.players_by_id[actor_id]
+                next_state = _replace_player(
+                    current,
+                    actor_id,
+                    hp=min(live_player.max_hp, live_player.hp + 1),
+                )
+                self._events.extend(
+                    (
+                        GameEvent(
                         event_type=EventType.HP_RECOVER,
                         target_ids=(actor_id,),
                         payload={
@@ -18246,10 +19025,16 @@ class ProductionBasicCardBatch:
                             "reason": "ambitionist_mark_virtual_peach",
                         },
                     ),
+                    )
                 )
+                self._commit_runtime(runtime, runtime)
+                return next_state
+
+            return self._post_card_used_or_played_checkpoint(
+                state,
+                event_seq_before,
+                _complete_virtual_peach_play,
             )
-            self._commit_runtime(runtime, runtime)
-            return next_state
         if runtime.phase is not ProductionPhase.DYING_RESCUE:
             raise InvalidActionError("虚拟桃只能在出牌阶段或濒死救援使用")
         dying_id = runtime.pending_dying_id
@@ -18257,6 +19042,7 @@ class ProductionBasicCardBatch:
             raise InvalidActionError("救援虚拟桃只能以濒死角色为目标")
         if context.actor_id != runtime.rescue_order[runtime.rescue_index]:
             raise InvalidActionError("当前不是该角色的救援时机")
+        event_seq_before = self._events.next_sequence
         window = self._build_window(runtime)
         rescue_event = GameEvent(
             event_type=EventType.CARD_USED,
@@ -18271,64 +19057,72 @@ class ProductionBasicCardBatch:
         )
         record = window.respond(actor_id, rescue_event)
         assert record.response_event is not None
-        dying = state.players_by_id[dying_id]
-        next_state = _replace_player(
-            state, dying_id, hp=min(dying.max_hp, dying.hp + 1)
-        )
-        pending_events: list[GameEvent] = [
-            record.response_event,
-            GameEvent(
-                event_type=EventType.HP_RECOVER,
-                target_ids=(dying_id,),
-                payload={
-                    "amount": 1,
-                    "reason": "ambitionist_mark_virtual_peach",
-                },
-            ),
-        ]
-        if next_state.players_by_id[dying_id].hp >= 1:
-            nested = self._c7_resume_after_lose_hp_rescue(
-                next_state, runtime, dying_id, pending_events
+        self._events.extend((record.response_event,))
+
+        def _complete_virtual_peach_rescue(current: GameState) -> GameState:
+            dying = current.players_by_id[dying_id]
+            next_state = _replace_player(
+                current, dying_id, hp=min(dying.max_hp, dying.hp + 1)
             )
-            if nested is not None:
-                return nested
-            if runtime.pending_group_trick is not None:
-                self._events.extend(pending_events)
-                next_state, next_runtime = self._resume_group_after_damage(
-                    next_state, runtime, dying_id, rescued=True
+            pending_events: list[GameEvent] = [
+                GameEvent(
+                    event_type=EventType.HP_RECOVER,
+                    target_ids=(dying_id,),
+                    payload={
+                        "amount": 1,
+                        "reason": "ambitionist_mark_virtual_peach",
+                    },
+                ),
+            ]
+            if next_state.players_by_id[dying_id].hp >= 1:
+                nested = self._c7_resume_after_lose_hp_rescue(
+                    next_state, runtime, dying_id, pending_events
                 )
-            elif runtime.pending_chain is not None:
-                self._events.extend(pending_events)
-                next_state, next_runtime = self._resume_chain_after_rescue(
-                    next_state, runtime, dying_id, rescued=True
-                )
-            else:
-                next_state, runtime, finish_events = (
-                    self._finish_pending_damage_card(
-                        next_state,
-                        runtime,
-                        self._pending_damage_rescue_reason(runtime),
+                if nested is not None:
+                    return nested
+                if runtime.pending_group_trick is not None:
+                    self._events.extend(pending_events)
+                    next_state, next_runtime = self._resume_group_after_damage(
+                        next_state, runtime, dying_id, rescued=True
                     )
-                )
-                pending_events.extend(finish_events)
-                self._events.extend(pending_events)
-                next_state, next_runtime = self._complete_root_resolution(
-                    next_state, runtime
-                )
-            self._commit_runtime(self._runtime, next_runtime)
+                elif runtime.pending_chain is not None:
+                    self._events.extend(pending_events)
+                    next_state, next_runtime = self._resume_chain_after_rescue(
+                        next_state, runtime, dying_id, rescued=True
+                    )
+                else:
+                    next_state, active_runtime, finish_events = (
+                        self._finish_pending_damage_card(
+                            next_state,
+                            runtime,
+                            self._pending_damage_rescue_reason(runtime),
+                        )
+                    )
+                    pending_events.extend(finish_events)
+                    self._events.extend(pending_events)
+                    next_state, next_runtime = self._complete_root_resolution(
+                        next_state, active_runtime
+                    )
+                self._commit_runtime(self._runtime, next_runtime)
+                return next_state
+            self._events.extend(pending_events)
+            decision_count = runtime.rescue_decision_count + 1
+            next_runtime = replace(
+                runtime,
+                rescue_decision_count=decision_count,
+                response_window_id=self._rescue_window_id(
+                    runtime, runtime.rescue_index, decision_count
+                ),
+                response_window_order=(context.actor_id,),
+            )
+            self._commit_runtime(runtime, next_runtime)
             return next_state
-        self._events.extend(pending_events)
-        decision_count = runtime.rescue_decision_count + 1
-        next_runtime = replace(
-            runtime,
-            rescue_decision_count=decision_count,
-            response_window_id=self._rescue_window_id(
-                runtime, runtime.rescue_index, decision_count
-            ),
-            response_window_order=(context.actor_id,),
+
+        return self._post_card_used_or_played_checkpoint(
+            state,
+            event_seq_before,
+            _complete_virtual_peach_rescue,
         )
-        self._commit_runtime(runtime, next_runtime)
-        return next_state
 
 
 __all__ = [

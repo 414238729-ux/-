@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.sgs_engine.actions import ActionType, InvalidActionError, UnsupportedRuleError
+from scripts.sgs_engine.actions import ActionType, InvalidActionError
 from scripts.sgs_engine.events import EventType
 from scripts.sgs_engine.model import ZoneRef
 from scripts.sgs_engine.production_batch import (
@@ -214,7 +214,7 @@ def test_weimu_confirmed_black_group_trick_scope_filters_owner() -> None:
     )
 
 
-def test_weimu_black_delayed_trick_gap_fails_closed() -> None:
+def test_weimu_black_delayed_trick_is_filtered_at_target_legality() -> None:
     registry = create_skill_registry((WeimuSkillHandler(),))
     plain = _fresh_play(seed=4)
     assert any(
@@ -227,8 +227,11 @@ def test_weimu_black_delayed_trick_gap_fails_closed() -> None:
         skill_registry=registry,
         skill_assignments={"p2": ("sgs_skill_weimu",)},
     )
-    with pytest.raises(UnsupportedRuleError, match="NOT_PROVEN"):
-        game.legal_actions()
+    assert not any(
+        action.payload.get("operation") == "use_bingliang"
+        and "p2" in action.target_ids
+        for action in game.legal_actions()
+    )
 
 
 def _mingzhe_red_dodge_seed() -> int:

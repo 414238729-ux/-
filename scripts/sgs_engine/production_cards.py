@@ -2387,8 +2387,9 @@ class DelayedTrickAdapter(TrickCardAdapter):
 
     延时锦囊在出牌阶段使用后直接进入目标判定区（不经处理区、不开普通
     锦囊TRICK_RESPONSE窗口）；判定区公开；进入判定区时分配单调递增的
-    判定区进入序号；同名延时锦囊不得在同一角色判定区共存。判定区内的
-    结算在目标角色判定阶段进行，判定前先开【无懈可击】窗口。
+    判定区进入序号；同名延时锦囊不得在同一角色判定区共存。新的放置目标
+    统一经过会话的静态目标合法性过滤；判定区内的结算在目标角色判定阶段
+    进行，判定前先开【无懈可击】窗口。
     """
 
     def _enumerate_use(
@@ -2564,13 +2565,17 @@ class ShandianAdapter(DelayedTrickAdapter):
             "use_timing": "own_play_phase",
             "use_limit": "unlimited_base;requires_entity_card",
             "target_count": 1,
-            "target_filter": "self_without_shandian_in_judgment_zone",
+            "target_filter": (
+                "self_without_shandian_in_judgment_zone;"
+                "subject_to_static_target_legality"
+            ),
             "placement": "hand->own_judgment_zone_direct",
             "judgment": "spade_2_to_9_hits_3_thunder_no_source;otherwise_transfer_next",
             "nullification_timing": "judgment_phase_before_judging",
             "movement_lifecycle": (
                 "hit:judgment_zone->processing->discard_after_damage;"
-                "miss_or_nullified:judgment_zone->transfer_next_player_judgment_zone"
+                "miss_or_nullified:judgment_zone->next_legal_player_judgment_zone;"
+                "no_legal_other_target:restore_current_judgment_zone"
             ),
             "adapter_version": self.adapter_version,
             "implemented": self.implemented,

@@ -358,10 +358,10 @@ def test_skill_runtime_active_enumeration_and_usage_limit() -> None:
 
 def test_implementation_identity_matches_pin() -> None:
     """Computed implementation_identity must strictly match POST_B_CURRENT pin."""
-    from scripts.sgs_engine.formal_duel import implementation_identity
-    from tests.test_post_b_c1_precommit_test_state_closure import (
+    from scripts.current_implementation_pin import (
         POST_B_CURRENT_IMPLEMENTATION_IDENTITY,
     )
+    from scripts.sgs_engine.formal_duel import implementation_identity
 
     actual = implementation_identity()
     assert actual == POST_B_CURRENT_IMPLEMENTATION_IDENTITY
@@ -375,6 +375,7 @@ def test_implementation_identity_matches_pin() -> None:
         "scripts/sgs_engine/skill_runtime.py",
         "scripts/sgs_engine/skill_impl_v1.py",
         "scripts/sgs_engine/skill_replay.py",
+        "scripts/sgs_engine/generals.py",
     ],
 )
 def test_implementation_identity_changes_on_skill_source_mutation(skill_file: str) -> None:

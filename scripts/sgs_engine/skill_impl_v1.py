@@ -287,7 +287,7 @@ class MingzheSkillHandler(SkillHandler):
 
 
 class WeimuSkillHandler(SkillHandler):
-    """【帷幕】V1: ordinary black tricks, including confirmed group tricks."""
+    """【帷幕】: prohibit all black tricks at target-legality formation."""
 
     def __init__(self) -> None:
         self._definition = SkillDefinition(
@@ -299,8 +299,8 @@ class WeimuSkillHandler(SkillHandler):
             timing_windows=frozenset({SkillTimingWindow.TARGET_FILTER}),
             is_mandatory=True,
             description=(
-                "锁定技，你不能成为黑色锦囊牌的目标。V1 已证明普通锦囊（含群体）"
-                "目标过滤；延时锦囊适用边界尚未冻结，失败关闭。"
+                "锁定技，你不能成为黑色锦囊牌的目标。适用于普通、群体与"
+                "延时锦囊，并在目标合法性或自动目标集合形成阶段生效。"
             ),
         )
 
@@ -321,19 +321,11 @@ class WeimuSkillHandler(SkillHandler):
             return True
         if card_instance is None:
             raise UnsupportedRuleError("【帷幕】目标过滤必须提供实体牌以判定颜色，禁止只凭 card_key 猜测")
-        is_delayed_trick = (
-            card_instance.card_type == "延时锦囊牌"
+        is_trick = card_instance.card_type in {"锦囊牌", "延时锦囊牌"} or (
+            card_key.startswith("sgs_trick_")
             or card_key.startswith("sgs_delayed_")
         )
-        if is_delayed_trick and card_instance.color == "黑":
-            raise UnsupportedRuleError(
-                "【帷幕】对黑色延时锦囊的适用边界为 NOT_PROVEN；V1 失败关闭"
-            )
-        is_ordinary_trick = (
-            card_instance.card_type == "锦囊牌"
-            or card_key.startswith("sgs_trick_")
-        )
-        if is_ordinary_trick and card_instance.color == "黑":
+        if is_trick and card_instance.color == "黑":
             return False
         return True
 
@@ -478,12 +470,127 @@ class PojiangSkillHandler(SkillHandler):
         return next_state
 
 
+class JiliSkillHandler(SkillHandler):
+    """【蒺藜】：当你于一回合内使用或打出第X张牌时，你可以摸X张牌（X为你的攻击范围）。"""
+
+    def __init__(self) -> None:
+        self._definition = SkillDefinition(
+            skill_id="sgs_skill_jili",
+            skill_name="蒺藜",
+            version="1.0.0",
+            kind=AuthoritativeSkillKind.TRIGGERED,
+            timing_windows=frozenset(
+                {
+                    SkillTimingWindow.ON_CARD_USED,
+                    SkillTimingWindow.ON_CARD_PLAYED,
+                }
+            ),
+            is_mandatory=False,
+            description="当你于一回合内使用或打出第X张牌时，你可以摸X张牌（X为你的攻击范围）。",
+        )
+
+    @property
+    def definition(self) -> SkillDefinition:
+        return self._definition
+
+    def evaluate_trigger(
+        self,
+        context: SkillTriggerContext,
+        state: GameState,
+        skill_state: SkillRuntimeState,
+    ) -> bool:
+        owner_id = skill_state.owner_id
+        event = context.event
+        if event is None:
+            return False
+        if event.event_type not in (EventType.CARD_USED, EventType.CARD_PLAYED):
+            return False
+        if event.card_user != owner_id:
+            return False
+        turn_card_count = context.payload.get("turn_card_count")
+        if turn_card_count is None or not isinstance(turn_card_count, int) or turn_card_count < 1:
+            return False
+        pre_attack_range = context.payload.get("pre_attack_range")
+        if pre_attack_range is None or not isinstance(pre_attack_range, int) or pre_attack_range < 1:
+            return False
+        return turn_card_count == pre_attack_range
+
+    def enumerate_trigger_actions(
+        self,
+        context: SkillTriggerContext,
+        state: GameState,
+        skill_state: SkillRuntimeState,
+    ) -> tuple[LegalAction, ...]:
+        owner_id = skill_state.owner_id
+        seq = context.event.sequence if context.event else None
+        draw_count = context.payload.get("pre_attack_range", 1)
+        return (
+            LegalAction(
+                action_type=ActionType.ACTIVATE_SKILL,
+                actor_id=owner_id,
+                skill_id="sgs_skill_jili",
+                payload={
+                    "decision": "activate",
+                    "draw_count": draw_count,
+                    "trigger_event_sequence": seq,
+                },
+            ),
+            LegalAction(
+                action_type=ActionType.PASS,
+                actor_id=owner_id,
+                skill_id="sgs_skill_jili",
+                payload={"decision": "pass", "trigger_event_sequence": seq},
+            ),
+        )
+
+    def apply_action(
+        self,
+        action: LegalAction,
+        context: ActionContext,
+        state: GameState,
+        skill_state: SkillRuntimeState,
+    ) -> tuple[GameState, SkillRuntimeState, tuple[GameEvent, ...]]:
+        owner_id = skill_state.owner_id
+        if action.actor_id != owner_id:
+            raise InvalidActionError(f"动作执行角色 {action.actor_id} 与技能所有者 {owner_id} 不一致")
+        if action.payload.get("decision") == "pass" or action.action_type is ActionType.PASS:
+            return state, skill_state, ()
+        raise UnsupportedRuleError(
+            "【蒺藜】组件 apply_action 不能执行生产摸牌；必须通过 ProductionBasicCardBatch.step"
+        )
+
+    def apply_in_production(
+        self,
+        session: object,
+        action: LegalAction,
+        context: ActionContext,
+        state: GameState,
+        skill_state: SkillRuntimeState,
+    ) -> GameState:
+        if action.payload.get("decision") == "pass" or action.action_type is ActionType.PASS:
+            raise InvalidActionError("【蒺藜】放弃必须走 pass_skill 生产入口，不得进入效果结算")
+        owner_id = skill_state.owner_id
+        if action.actor_id != owner_id:
+            raise InvalidActionError(f"动作执行角色 {action.actor_id} 与技能所有者 {owner_id} 不一致")
+        draw_count = action.payload.get("draw_count")
+        if draw_count is None or not isinstance(draw_count, int) or draw_count < 1:
+            raise InvalidActionError("【蒺藜】摸牌数量必须为正整数")
+        return session.draw_cards_for_skill(
+            state,
+            owner_id,
+            draw_count,
+            reason="sgs_skill_jili",
+            skill_owner=owner_id,
+        )
+
+
 def create_proof_slice_v1_handlers() -> tuple[SkillHandler, ...]:
-    """V1 production proof handlers: 破降 / 明哲 / 帷幕. Mutao is component-only."""
+    """V1 production proof handlers: 破降 / 明哲 / 帷幕 / 蒺藜. Mutao is component-only."""
     return (
         PojiangSkillHandler(),
         MingzheSkillHandler(),
         WeimuSkillHandler(),
+        JiliSkillHandler(),
     )
 
 

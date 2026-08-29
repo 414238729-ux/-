@@ -367,6 +367,12 @@ class TwoVsTwoModePolicy:
     def deck_supply_mode(self) -> str:
         return self.configuration.deck_supply_mode
 
+    def snapshot_authoritative_state(self) -> object:
+        return None
+
+    def restore_authoritative_state(self, snapshot: object) -> None:
+        pass
+
     def team_of(self, player_id: str) -> str:
         team = self.teams.get(player_id)
         if team is None:
