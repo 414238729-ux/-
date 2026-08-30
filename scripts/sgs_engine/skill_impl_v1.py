@@ -9,6 +9,7 @@ Each skill implements SkillHandler with exact Knowledge rules and zero approxima
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import MappingProxyType
 from typing import Any, Sequence
 
@@ -28,6 +29,7 @@ from .model import (
     ZoneRef,
 )
 from .skill_registry import AuthoritativeSkillRegistry, create_skill_registry
+from .replay import sha256_value
 
 
 def _mingzhe_loser_id(event: GameEvent) -> str | None:
@@ -584,13 +586,197 @@ class JiliSkillHandler(SkillHandler):
         )
 
 
+class ZuilunSkillHandler(SkillHandler):
+    """【罪论】：结束阶段的可选、事实绑定、多步生产结算。"""
+
+    def __init__(self) -> None:
+        self._definition = SkillDefinition(
+            skill_id="sgs_skill_zuilun",
+            skill_name="罪论",
+            version="1.0.0",
+            kind=AuthoritativeSkillKind.TRIGGERED,
+            timing_windows=frozenset({SkillTimingWindow.END_PHASE_START}),
+            is_mandatory=False,
+            max_uses_per_turn=1,
+            description=(
+                "结束阶段，你可以统一检查本回合造成伤害、未弃置牌、"
+                "手牌数为全场最少三项；满足几项便从牌堆顶三张中获得几张，"
+                "均不满足则你与一名其他角色依次失去1点体力。"
+            ),
+        )
+
+    @property
+    def definition(self) -> SkillDefinition:
+        return self._definition
+
+    def evaluate_trigger(
+        self,
+        context: SkillTriggerContext,
+        state: GameState,
+        skill_state: SkillRuntimeState,
+    ) -> bool:
+        event = context.event
+        owner = state.players_by_id.get(skill_state.owner_id)
+        return (
+            event is not None
+            and event.event_type is EventType.END_PHASE_STARTED
+            and context.timing_window is SkillTimingWindow.END_PHASE_START
+            and context.turn_player_id == skill_state.owner_id
+            and owner is not None
+            and owner.alive
+        )
+
+    def apply_action(
+        self,
+        action: LegalAction,
+        context: ActionContext,
+        state: GameState,
+        skill_state: SkillRuntimeState,
+    ) -> tuple[GameState, SkillRuntimeState, tuple[GameEvent, ...]]:
+        del action, context, state, skill_state
+        raise UnsupportedRuleError(
+            "【罪论】必须通过 ProductionBasicCardBatch 的多步事务结算"
+        )
+
+    def apply_in_production(
+        self,
+        session: object,
+        action: LegalAction,
+        context: ActionContext,
+        state: GameState,
+        skill_state: SkillRuntimeState,
+    ) -> GameState:
+        return session.resolve_zuilun_activation(
+            state, action, context, skill_state
+        )
+
+
+class FuyinSkillHandler(SkillHandler):
+    """【父荫】：使用者侧用牌 checkpoint 后的锁定目标作用域无效。"""
+
+    _CARD_KEYS = frozenset(
+        {
+            "sgs_basic_sha",
+            "sgs_basic_huosha",
+            "sgs_basic_leisha",
+            "sgs_trick_juedou",
+        }
+    )
+    _TURN_MARK = "fuyin_consumed_turn"
+
+    def __init__(self) -> None:
+        self._definition = SkillDefinition(
+            skill_id="sgs_skill_fuyin",
+            skill_name="父荫",
+            version="1.0.0",
+            kind=AuthoritativeSkillKind.TRIGGERED,
+            tags=frozenset({AuthoritativeSkillTag.LOCKED}),
+            timing_windows=frozenset({SkillTimingWindow.ON_BECOME_TARGET}),
+            is_mandatory=True,
+            description=(
+                "锁定技，每个独立回合第一次成为【杀】或【决斗】目标后立即"
+                "消耗机会；若使用者用牌后的手牌数不大于你，则该牌对你无效。"
+            ),
+        )
+
+    @property
+    def definition(self) -> SkillDefinition:
+        return self._definition
+
+    def apply_action(
+        self,
+        action: LegalAction,
+        context: ActionContext,
+        state: GameState,
+        skill_state: SkillRuntimeState,
+    ) -> tuple[GameState, SkillRuntimeState, tuple[GameEvent, ...]]:
+        del action, context, state, skill_state
+        raise InvalidActionError("【父荫】为锁定技，不接受 ACTIVATE/PASS 动作")
+
+    def resolve_target_effect_after_card_used(
+        self,
+        *,
+        event: GameEvent,
+        state: GameState,
+        skill_state: SkillRuntimeState,
+        turn_number: int,
+    ) -> tuple[SkillRuntimeState, bool, tuple[GameEvent, ...]] | None:
+        owner_id = skill_state.owner_id
+        if (
+            event.event_type is not EventType.CARD_USED
+            or event.card_key not in self._CARD_KEYS
+            or owner_id not in event.target_ids
+            or event.card_user is None
+        ):
+            return None
+        if skill_state.marks.get(self._TURN_MARK) == turn_number:
+            return None
+        user_hand_count = len(state.card_ids_in(ZoneRef.hand(event.card_user)))
+        owner_hand_count = len(state.card_ids_in(ZoneRef.hand(owner_id)))
+        ineffective = user_hand_count <= owner_hand_count
+        marks = dict(skill_state.marks)
+        marks[self._TURN_MARK] = turn_number
+        updated = replace(skill_state, marks=marks)
+        resolution_identity = sha256_value(
+            {
+                "skill_id": self.definition.skill_id,
+                "owner_id": owner_id,
+                "source_event_sequence": event.sequence,
+                "turn_number": turn_number,
+                "user_hand_count": user_hand_count,
+                "owner_hand_count": owner_hand_count,
+                "ineffective": ineffective,
+            }
+        )
+        condition_event = GameEvent(
+            event_type=EventType.SKILL_CONDITION_EVALUATED,
+            card_instance_id=event.card_instance_id,
+            card_key=event.card_key,
+            card_user=event.card_user,
+            skill_owner=owner_id,
+            target_ids=(owner_id,),
+            payload={
+                "skill_id": self.definition.skill_id,
+                "source_event_sequence": event.sequence,
+                "turn_number": turn_number,
+                "consumed_before": False,
+                "consumed_after": True,
+                "user_hand_count_after_use": user_hand_count,
+                "owner_hand_count": owner_hand_count,
+                "target_effect_ineffective": ineffective,
+                "resolution_identity": resolution_identity,
+            },
+        )
+        events = [condition_event]
+        if ineffective:
+            events.append(
+                GameEvent(
+                    event_type=EventType.TARGET_EFFECT_INEFFECTIVE,
+                    card_instance_id=event.card_instance_id,
+                    card_key=event.card_key,
+                    card_user=event.card_user,
+                    skill_owner=owner_id,
+                    target_ids=(owner_id,),
+                    payload={
+                        "reason": self.definition.skill_id,
+                        "source_event_sequence": event.sequence,
+                        "turn_number": turn_number,
+                        "resolution_identity": resolution_identity,
+                    },
+                )
+            )
+        return updated, ineffective, tuple(events)
+
+
 def create_proof_slice_v1_handlers() -> tuple[SkillHandler, ...]:
-    """V1 production proof handlers: 破降 / 明哲 / 帷幕 / 蒺藜. Mutao is component-only."""
+    """V1 production proof handlers, including Batch V1 G1/G2 generals."""
     return (
         PojiangSkillHandler(),
         MingzheSkillHandler(),
         WeimuSkillHandler(),
         JiliSkillHandler(),
+        ZuilunSkillHandler(),
+        FuyinSkillHandler(),
     )
 
 

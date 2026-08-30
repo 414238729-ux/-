@@ -73,6 +73,7 @@ class SkillTimingWindow(str, Enum):
     RESPONSE_WINDOW = "response_window"
     PHASE_CHANGE = "phase_change"
     TURN_CHANGE = "turn_change"
+    END_PHASE_START = "end_phase_start"
 
 
 _ACTIVE_ONLY_WINDOWS = frozenset(
@@ -93,6 +94,7 @@ _TRIGGER_WINDOWS = frozenset(
         SkillTimingWindow.ON_BECOME_TARGET,
         SkillTimingWindow.PHASE_CHANGE,
         SkillTimingWindow.TURN_CHANGE,
+        SkillTimingWindow.END_PHASE_START,
         SkillTimingWindow.RESPONSE_WINDOW,
     }
 )
@@ -433,6 +435,24 @@ class SkillHandler(ABC):
     ) -> bool:
         """Return True if this skill's trigger conditions are met by the event/context."""
         return False
+
+    def resolve_target_effect_after_card_used(
+        self,
+        *,
+        event: GameEvent,
+        state: GameState,
+        skill_state: SkillRuntimeState,
+        turn_number: int,
+    ) -> tuple[SkillRuntimeState, bool, tuple[GameEvent, ...]] | None:
+        """Resolve a registered mandatory target-effect modifier.
+
+        ``None`` means this handler does not apply to the card/target relation.
+        The boolean is target-scoped ineffectiveness, never whole-card
+        invalidation or target cancellation.
+        """
+
+        del event, state, skill_state, turn_number
+        return None
 
     def enumerate_trigger_actions(
         self,

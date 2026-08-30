@@ -54,6 +54,7 @@ def _recompute_general_envelope_identities(data: dict) -> None:
             "usage_after": data["usage_after"],
             "marks_before": data["marks_before"],
             "marks_after": data["marks_after"],
+            "skill_runtime_after": data["skill_runtime_after"],
             "continuation_identity": data["continuation_identity"],
             "rng_hash": data["rng_hash"],
             "state_hash_after": data["state_hash_after"],
@@ -87,6 +88,7 @@ def _record_shamoke_replay(seed: int = 1) -> tuple[GeneralProductionReplayEnvelo
 
     game = ProductionBasicCardBatch(
         seed=seed,
+        first_player_id="p1",
         session_id=session_id,
         session_secret=secret,
         general_registry=gen_registry,
@@ -155,6 +157,7 @@ def _record_shamoke_replay(seed: int = 1) -> tuple[GeneralProductionReplayEnvelo
         seed=seed,
         session_id=session_id,
         session_secret_hex=secret.hex(),
+        initial_hand_count=4,
         general_registry_identity=gen_registry.registry_identity,
         general_profile_identities=gen_profiles,
         general_semantic_payloads=gen_semantics,
@@ -170,6 +173,7 @@ def _record_shamoke_replay(seed: int = 1) -> tuple[GeneralProductionReplayEnvelo
         usage_after=usage_after,
         marks_before=marks_before,
         marks_after=marks_after,
+        skill_runtime_after=game.skill_runtime.audit_fingerprint(),
         continuation_identity=continuation_identity,
         action_ids=tuple(action_ids),
         legal_set_hashes=tuple(legal_hashes),

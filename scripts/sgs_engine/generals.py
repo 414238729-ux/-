@@ -301,7 +301,17 @@ def create_authoritative_general_batch_v1_registry() -> AuthoritativeGeneralRegi
         skill_ids=("sgs_skill_jili",),
         description="蜀势力武将沙摩柯，拥有技能【蒺藜】。",
     )
-    registry = AuthoritativeGeneralRegistry([shamoke])
+    zhugezhan = GeneralDefinition(
+        general_key="zhugezhan",
+        name="诸葛瞻",
+        version="1.0.0",
+        gender=CharacterGender.MALE,
+        max_hp=3,
+        starting_hp=3,
+        skill_ids=("sgs_skill_zuilun", "sgs_skill_fuyin"),
+        description="蜀势力武将诸葛瞻，拥有技能【罪论】【父荫】。",
+    )
+    registry = AuthoritativeGeneralRegistry([shamoke, zhugezhan])
     return registry.freeze()
 
 

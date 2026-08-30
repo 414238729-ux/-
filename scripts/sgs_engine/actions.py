@@ -259,6 +259,19 @@ class RuleAdapter(ABC):
     ) -> GameState:
         raise NotImplementedError
 
+    def allows_dead_actor_continuation(
+        self, state: GameState, context: ActionContext
+    ) -> bool:
+        """Whether an already-established authoritative continuation owns this step.
+
+        The default remains fail-closed.  Stateful production adapters may opt in
+        only when their audited pending state and the signed context bind the dead
+        actor to an exact continuation identity.
+        """
+
+        del state, context
+        return False
+
 
 class RuleRegistry:
     """Exact-match mode/phase adapter registry; no fallback is permitted."""
@@ -471,7 +484,11 @@ def _action_value(action: LegalAction) -> dict[str, object]:
     }
 
 
-def _validate_state_context(state: GameState, context: ActionContext) -> None:
+def _validate_state_context(
+    state: GameState,
+    context: ActionContext,
+    adapter: RuleAdapter | None = None,
+) -> None:
     if not isinstance(state, GameState):
         raise TypeError("state必须是GameState")
     if not isinstance(context, ActionContext):
@@ -484,7 +501,10 @@ def _validate_state_context(state: GameState, context: ActionContext) -> None:
     actor = players.get(context.actor_id)
     if actor is None:
         raise InvalidActionError(f"行动角色{context.actor_id!r}不存在")
-    if not actor.alive:
+    if not actor.alive and (
+        adapter is None
+        or not adapter.allows_dead_actor_continuation(state, context)
+    ):
         raise InvalidActionError(f"行动角色{context.actor_id!r}已经死亡")
     if context.turn_player_id is not None and context.turn_player_id not in players:
         raise InvalidActionError(f"当前回合角色{context.turn_player_id!r}不存在")
@@ -497,10 +517,10 @@ def enumerate_legal_actions(
 ) -> tuple[LegalAction, ...]:
     """Enumerate a stable, complete action set bound to state and context."""
 
-    _validate_state_context(state, context)
     if not isinstance(registry, RuleRegistry):
         raise TypeError("registry必须是RuleRegistry")
     adapter = registry.resolve(context.mode, context.phase)
+    _validate_state_context(state, context, adapter)
     state_before = _state_fingerprint(state)
     adapter_before = _adapter_audit_value(adapter)
     binding_before = registry.binding_value(context.mode, context.phase)

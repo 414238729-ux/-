@@ -1015,6 +1015,7 @@ _GENERAL_PRODUCTION_REPLAY_FIELDS = frozenset(
         "seed",
         "session_id",
         "session_secret_hex",
+        "initial_hand_count",
         "general_registry_identity",
         "general_profile_identities",
         "general_semantic_payloads",
@@ -1030,6 +1031,7 @@ _GENERAL_PRODUCTION_REPLAY_FIELDS = frozenset(
         "usage_after",
         "marks_before",
         "marks_after",
+        "skill_runtime_after",
         "continuation_identity",
         "action_ids",
         "legal_set_hashes",
@@ -1057,6 +1059,7 @@ _GENERAL_PRODUCTION_REPLAY_CONTRACT_DESCRIPTOR_V1: Mapping[str, object] = {
         "skill_profile_identities",
         "trigger_event_binding",
         "usage_and_marks_transition",
+        "full_skill_runtime_after",
         "continuation_identity",
         "records_identity",
         "execution_identity",
@@ -1137,6 +1140,7 @@ class GeneralProductionReplayEnvelope:
     seed: int
     session_id: str
     session_secret_hex: str
+    initial_hand_count: int
     general_registry_identity: str
     general_profile_identities: Mapping[str, str]
     general_semantic_payloads: Mapping[str, Mapping[str, Any]]
@@ -1152,6 +1156,7 @@ class GeneralProductionReplayEnvelope:
     usage_after: Mapping[str, int]
     marks_before: Mapping[str, int]
     marks_after: Mapping[str, int]
+    skill_runtime_after: Mapping[str, Any]
     continuation_identity: str
     action_ids: tuple[str, ...]
     legal_set_hashes: tuple[str, ...]
@@ -1202,6 +1207,11 @@ class GeneralProductionReplayEnvelope:
         object.__setattr__(self, "usage_after", MappingProxyType(dict(self.usage_after)))
         object.__setattr__(self, "marks_before", MappingProxyType(dict(self.marks_before)))
         object.__setattr__(self, "marks_after", MappingProxyType(dict(self.marks_after)))
+        object.__setattr__(
+            self,
+            "skill_runtime_after",
+            MappingProxyType(dict(_json_frozen(self.skill_runtime_after))),
+        )
         if not self.records_identity:
             object.__setattr__(self, "records_identity", self._compute_records_identity())
         if not self.execution_identity:
@@ -1224,6 +1234,7 @@ class GeneralProductionReplayEnvelope:
                 "usage_after": dict(self.usage_after),
                 "marks_before": dict(self.marks_before),
                 "marks_after": dict(self.marks_after),
+                "skill_runtime_after": _json_frozen(self.skill_runtime_after),
                 "continuation_identity": self.continuation_identity,
                 "rng_hash": self.rng_hash,
                 "state_hash_after": self.state_hash_after,
@@ -1246,6 +1257,7 @@ class GeneralProductionReplayEnvelope:
             "seed": self.seed,
             "session_id": self.session_id,
             "session_secret_hex": self.session_secret_hex,
+            "initial_hand_count": self.initial_hand_count,
             "general_registry_identity": self.general_registry_identity,
             "general_profile_identities": dict(sorted(self.general_profile_identities.items())),
             "general_semantic_payloads": {
@@ -1264,6 +1276,7 @@ class GeneralProductionReplayEnvelope:
             "usage_after": dict(self.usage_after),
             "marks_before": dict(self.marks_before),
             "marks_after": dict(self.marks_after),
+            "skill_runtime_after": _json_frozen(self.skill_runtime_after),
             "continuation_identity": self.continuation_identity,
             "action_ids": list(self.action_ids),
             "legal_set_hashes": list(self.legal_set_hashes),
@@ -1297,6 +1310,9 @@ class GeneralProductionReplayEnvelope:
             raise _replay_format_error(
                 "session_secret_hex", "必须是精确 32 字节的小写十六进制字符串"
             )
+        initial_hand_count = _exact_int(
+            data["initial_hand_count"], "initial_hand_count", minimum=1
+        )
         general_registry_identity = _exact_sha256(
             data["general_registry_identity"], "general_registry_identity"
         )
@@ -1321,6 +1337,13 @@ class GeneralProductionReplayEnvelope:
         continuation_identity = _exact_sha256(
             data["continuation_identity"], "continuation_identity"
         )
+        skill_runtime_after = _exact_json_value(
+            data["skill_runtime_after"], "skill_runtime_after"
+        )
+        if type(skill_runtime_after) is not dict:
+            raise _replay_format_error(
+                "skill_runtime_after", "必须是 JSON object"
+            )
 
         action_ids = _exact_string_list(
             data["action_ids"], "action_ids", allow_empty=False, unique=True
@@ -1331,7 +1354,10 @@ class GeneralProductionReplayEnvelope:
                     f"action_ids[{index}]", "必须是 act_ 加 64 位小写 SHA-256"
                 )
         legal_set_hashes = _exact_string_list(
-            data["legal_set_hashes"], "legal_set_hashes", allow_empty=False
+            data["legal_set_hashes"],
+            "legal_set_hashes",
+            allow_empty=False,
+            unique=False,
         )
         for index, item in enumerate(legal_set_hashes):
             _exact_sha256(item, f"legal_set_hashes[{index}]")
@@ -1363,6 +1389,7 @@ class GeneralProductionReplayEnvelope:
             seed=int(seed),
             session_id=session_id,
             session_secret_hex=session_secret_hex,
+            initial_hand_count=int(initial_hand_count),
             general_registry_identity=general_registry_identity,
             general_profile_identities=general_profiles,
             general_semantic_payloads=general_semantic_payloads,
@@ -1378,6 +1405,7 @@ class GeneralProductionReplayEnvelope:
             usage_after=_exact_usage(data["usage_after"], "usage_after"),
             marks_before=_exact_marks(data["marks_before"], "marks_before"),
             marks_after=_exact_marks(data["marks_after"], "marks_after"),
+            skill_runtime_after=skill_runtime_after,
             continuation_identity=continuation_identity,
             action_ids=action_ids,
             legal_set_hashes=legal_set_hashes,
@@ -1415,13 +1443,40 @@ def _construct_general_production_replay_session(
 ) -> object:
     from .production_batch import ProductionBasicCardBatch
 
+    default_player_ids = ("p1", "p2")
+    if any(player_id not in default_player_ids for player_id in envelope.general_assignments):
+        raise SkillReplayDivergenceError(
+            "当前生产武将回放 schema 仅支持默认双人角色集合 p1/p2"
+        )
+    player_hp: list[int] = []
+    player_max_hp: list[int] = []
+    for player_id in default_player_ids:
+        general_key = envelope.general_assignments.get(player_id)
+        if general_key is None:
+            player_hp.append(4)
+            player_max_hp.append(4)
+            continue
+        definition = general_registry.get_general(general_key)
+        player_hp.append(definition.starting_hp)
+        player_max_hp.append(definition.max_hp)
+    first_semantics = envelope.chosen_action_semantics[0]
+    first_actor = first_semantics.get("actor_id")
+    if not isinstance(first_actor, str) or first_actor not in default_player_ids:
+        raise SkillReplayDivergenceError(
+            "生产武将回放首步缺少可绑定的 first_player_id"
+        )
+    constructor_kwargs: dict[str, object] = {"first_player_id": first_actor}
     return ProductionBasicCardBatch(
         seed=envelope.seed,
         session_id=envelope.session_id,
         session_secret=bytes.fromhex(envelope.session_secret_hex),
+        initial_hand_count=envelope.initial_hand_count,
+        player_hp=tuple(player_hp),
+        player_max_hp=tuple(player_max_hp),
         general_registry=general_registry,
         general_assignments=envelope.general_assignments,
         skill_registry=skill_registry,
+        **constructor_kwargs,
     )
 
 
@@ -1509,10 +1564,48 @@ def reexecute_general_production_replay(
     if set(envelope.skill_profile_identities) != all_derived_skills:
         raise SkillReplayDivergenceError("技能 profile 集合与武将派生技能集合不精确一致")
     primary_general = live_generals[envelope.primary_general_key]
-    if "sgs_skill_jili" not in primary_general.skill_ids:
-        raise SkillReplayDivergenceError("primary general 未派生 Jili")
-    if "sgs_skill_jili" not in envelope.derived_skill_assignments[envelope.owner_id]:
-        raise SkillReplayDivergenceError("owner_id 未从 primary general 派生 Jili")
+    if envelope.primary_general_key == "shamoke":
+        tracked_skill_id = "sgs_skill_jili"
+        tracked_label = "Jili"
+        decision_required = True
+        continuation_kind = "card"
+        expected_trigger_types = {
+            EventType.CARD_USED.value,
+            EventType.CARD_PLAYED.value,
+        }
+    elif envelope.primary_general_key == "zhugezhan":
+        if envelope.trigger_event_type == EventType.END_PHASE_STARTED.value:
+            tracked_skill_id = "sgs_skill_zuilun"
+            tracked_label = "Zuilun"
+            decision_required = True
+            continuation_kind = "skill"
+            expected_trigger_types = {EventType.END_PHASE_STARTED.value}
+        elif envelope.trigger_event_type == EventType.CARD_USED.value:
+            tracked_skill_id = "sgs_skill_fuyin"
+            tracked_label = "Fuyin"
+            decision_required = False
+            continuation_kind = "target_effect"
+            expected_trigger_types = {EventType.CARD_USED.value}
+        else:
+            raise SkillReplayDivergenceError(
+                "Zhugezhan 回放 trigger_event_type 不能确定 Zuilun/Fuyin 权威路径"
+            )
+    else:
+        raise SkillReplayDivergenceError(
+            f"生产武将回放尚未声明 {envelope.primary_general_key!r} 的语义验证器"
+        )
+    if envelope.trigger_event_type not in expected_trigger_types:
+        raise SkillReplayDivergenceError(
+            f"{tracked_label} trigger_event_type 与权威时机不匹配"
+        )
+    if tracked_skill_id not in primary_general.skill_ids:
+        raise SkillReplayDivergenceError(
+            f"primary general 未派生 {tracked_label}"
+        )
+    if tracked_skill_id not in envelope.derived_skill_assignments[envelope.owner_id]:
+        raise SkillReplayDivergenceError(
+            f"owner_id 未从 primary general 派生 {tracked_label}"
+        )
 
     from .production_batch import BatchActionIdController
 
@@ -1521,7 +1614,9 @@ def reexecute_general_production_replay(
     )
 
     steps_verified = 0
-    jili_step_seen = False
+    tracked_step_seen = False
+    trigger_step_seen = False
+    usage_before_verified = False
     for index, action_id in enumerate(envelope.action_ids):
         legal = game.legal_actions()
         legal_hash = legal_actions_semantic_hash(legal)
@@ -1539,41 +1634,101 @@ def reexecute_general_production_replay(
         if index == 0 and envelope.state_hash_before:
             if compute_state_hash(game.state) != envelope.state_hash_before:
                 raise SkillReplayDivergenceError("起始状态哈希不匹配")
-        if chosen.skill_id == "sgs_skill_jili":
-            if jili_step_seen:
-                raise SkillReplayDivergenceError("生产武将回放包含重复 Jili 决策步")
-            jili_step_seen = True
-            if chosen.actor_id != envelope.owner_id:
-                raise SkillReplayDivergenceError("Jili 决策 actor 与 owner_id 不匹配")
-            if chosen.payload.get("trigger_event_sequence") != envelope.trigger_event_sequence:
-                raise SkillReplayDivergenceError("Jili trigger_event_sequence 不匹配")
-            if chosen.payload.get("trigger_event_type") != envelope.trigger_event_type:
-                raise SkillReplayDivergenceError("Jili trigger_event_type 不匹配")
-            if chosen.payload.get("continuation_identity") != envelope.continuation_identity:
-                raise SkillReplayDivergenceError("Jili continuation_identity 不匹配")
-            if game.pending_card_continuation_identity != envelope.continuation_identity:
-                raise SkillReplayDivergenceError("live pending continuation identity 不匹配")
-            if game.skill_runtime is None:
-                raise SkillReplayDivergenceError("Jili 决策前缺少 SkillRuntime")
-            try:
-                skill_state = game.skill_runtime.get_skill_state(
-                    envelope.owner_id, "sgs_skill_jili"
+        if game.skill_runtime is None:
+            raise SkillReplayDivergenceError("生产武将回放缺少 SkillRuntime")
+        try:
+            pre_skill_state = game.skill_runtime.get_skill_state(
+                envelope.owner_id, tracked_skill_id
+            )
+        except UnsupportedRuleError as exc:
+            raise SkillReplayDivergenceError(str(exc)) from exc
+        if (
+            chosen.skill_id == tracked_skill_id
+            and chosen.payload.get("operation") in ("activate_skill", "pass_skill")
+        ):
+            if not decision_required:
+                raise SkillReplayDivergenceError(
+                    f"锁定技 {tracked_label} 不得生成 ACTIVATE/PASS 决策步"
                 )
-            except UnsupportedRuleError as exc:
-                raise SkillReplayDivergenceError(str(exc)) from exc
+            if tracked_step_seen:
+                raise SkillReplayDivergenceError(
+                    f"生产武将回放包含重复 {tracked_label} 决策步"
+                )
+            tracked_step_seen = True
+            if chosen.actor_id != envelope.owner_id:
+                raise SkillReplayDivergenceError(
+                    f"{tracked_label} 决策 actor 与 owner_id 不匹配"
+                )
+            if chosen.payload.get("trigger_event_sequence") != envelope.trigger_event_sequence:
+                raise SkillReplayDivergenceError(
+                    f"{tracked_label} trigger_event_sequence 不匹配"
+                )
+            if chosen.payload.get("trigger_event_type") != envelope.trigger_event_type:
+                raise SkillReplayDivergenceError(
+                    f"{tracked_label} trigger_event_type 不匹配"
+                )
+            if chosen.payload.get("continuation_identity") != envelope.continuation_identity:
+                raise SkillReplayDivergenceError(
+                    f"{tracked_label} continuation_identity 不匹配"
+                )
+            if (
+                continuation_kind == "card"
+                and game.pending_card_continuation_identity
+                != envelope.continuation_identity
+            ):
+                raise SkillReplayDivergenceError(
+                    "live pending card continuation identity 不匹配"
+                )
             actual_usage_before = {
-                "uses_this_phase": skill_state.uses_this_phase,
-                "uses_this_turn": skill_state.uses_this_turn,
+                "uses_this_phase": pre_skill_state.uses_this_phase,
+                "uses_this_turn": pre_skill_state.uses_this_turn,
             }
             if actual_usage_before != dict(envelope.usage_before):
-                raise SkillReplayDivergenceError("Jili usage_before 不匹配")
-            if dict(skill_state.marks) != dict(envelope.marks_before):
-                raise SkillReplayDivergenceError("Jili marks_before 不匹配")
+                raise SkillReplayDivergenceError(
+                    f"{tracked_label} usage_before 不匹配"
+                )
+            if dict(pre_skill_state.marks) != dict(envelope.marks_before):
+                raise SkillReplayDivergenceError(
+                    f"{tracked_label} marks_before 不匹配"
+                )
+            usage_before_verified = True
+        existing_sequences = {
+            event.sequence for event in game.events if event.sequence is not None
+        }
         game.step(BatchActionIdController(action_id))
         steps_verified += 1
+        if (
+            not trigger_step_seen
+            and envelope.trigger_event_sequence not in existing_sequences
+            and any(
+                event.sequence == envelope.trigger_event_sequence
+                for event in game.events
+            )
+        ):
+            trigger_step_seen = True
+            if not decision_required:
+                actual_usage_before = {
+                    "uses_this_phase": pre_skill_state.uses_this_phase,
+                    "uses_this_turn": pre_skill_state.uses_this_turn,
+                }
+                if actual_usage_before != dict(envelope.usage_before):
+                    raise SkillReplayDivergenceError(
+                        f"{tracked_label} usage_before 不匹配"
+                    )
+                if dict(pre_skill_state.marks) != dict(envelope.marks_before):
+                    raise SkillReplayDivergenceError(
+                        f"{tracked_label} marks_before 不匹配"
+                    )
+                usage_before_verified = True
 
-    if not jili_step_seen:
-        raise SkillReplayDivergenceError("生产武将回放未重现 Jili 决策")
+    if decision_required and not tracked_step_seen:
+        raise SkillReplayDivergenceError(
+            f"生产武将回放未重现 {tracked_label} 决策"
+        )
+    if not usage_before_verified:
+        raise SkillReplayDivergenceError(
+            f"生产武将回放未绑定 {tracked_label} usage_before/marks_before"
+        )
 
     if compute_state_hash(game.state) != envelope.state_hash_after:
         raise SkillReplayDivergenceError("终态哈希不匹配")
@@ -1583,7 +1738,7 @@ def reexecute_general_production_replay(
         raise SkillReplayDivergenceError("重放会话未装载 GeneralRegistry")
     try:
         final_skill_state = game.skill_runtime.get_skill_state(
-            envelope.owner_id, "sgs_skill_jili"
+            envelope.owner_id, tracked_skill_id
         )
     except UnsupportedRuleError as exc:
         raise SkillReplayDivergenceError(str(exc)) from exc
@@ -1592,15 +1747,30 @@ def reexecute_general_production_replay(
         "uses_this_turn": final_skill_state.uses_this_turn,
     }
     if actual_usage_after != dict(envelope.usage_after):
-        raise SkillReplayDivergenceError("Jili usage_after 不匹配")
+        raise SkillReplayDivergenceError(f"{tracked_label} usage_after 不匹配")
     if dict(final_skill_state.marks) != dict(envelope.marks_after):
-        raise SkillReplayDivergenceError("Jili marks_after 不匹配")
-    if game.pending_card_continuation_identity is not None:
-        raise SkillReplayDivergenceError("Jili 决策后 continuation 未完成消费")
-    if envelope.continuation_identity not in game.consumed_card_continuation_identities:
-        raise SkillReplayDivergenceError("Jili continuation 未记录为已消费")
+        raise SkillReplayDivergenceError(f"{tracked_label} marks_after 不匹配")
+    live_runtime_after = _json_frozen(game.skill_runtime.audit_fingerprint())
+    if live_runtime_after != _json_frozen(envelope.skill_runtime_after):
+        raise SkillReplayDivergenceError("完整 SkillRuntime runtime_after 不匹配")
+    if continuation_kind == "card":
+        if game.pending_card_continuation_identity is not None:
+            raise SkillReplayDivergenceError(
+                "Jili 决策后 card continuation 未完成消费"
+            )
+        if envelope.continuation_identity not in game.consumed_card_continuation_identities:
+            raise SkillReplayDivergenceError(
+                "Jili card continuation 未记录为已消费"
+            )
+    elif continuation_kind == "skill":
+        if envelope.continuation_identity not in game.consumed_skill_continuation_identities:
+            raise SkillReplayDivergenceError(
+                "Zuilun skill continuation 未记录为已消费"
+            )
 
-    actual_events = tuple(event.to_replay_dict() for event in game.events)
+    actual_events = tuple(
+        _json_frozen(event.to_replay_dict()) for event in game.events
+    )
     if actual_events != envelope.event_slice:
         raise SkillReplayDivergenceError("事件内容或序号切片不匹配")
     if rng_calls_hash(game.rng_calls) != envelope.rng_hash:
@@ -1614,7 +1784,49 @@ def reexecute_general_production_replay(
         None,
     )
     if trigger_event is None or trigger_event.event_type.value != envelope.trigger_event_type:
-        raise SkillReplayDivergenceError("Jili 触发事件序号或类型不匹配")
+        raise SkillReplayDivergenceError(
+            f"{tracked_label} 触发事件序号或类型不匹配"
+        )
+    if continuation_kind == "target_effect":
+        if envelope.owner_id not in trigger_event.target_ids:
+            raise SkillReplayDivergenceError("Fuyin 触发根未以 owner_id 为目标")
+        condition_events = tuple(
+            event for event in game.events
+            if event.event_type is EventType.SKILL_CONDITION_EVALUATED
+            and event.skill_owner == envelope.owner_id
+            and event.payload.get("skill_id") == "sgs_skill_fuyin"
+            and event.payload.get("source_event_sequence")
+            == envelope.trigger_event_sequence
+        )
+        if len(condition_events) != 1:
+            raise SkillReplayDivergenceError("Fuyin 机会消费/条件判定事件必须恰好一条")
+        condition_event = condition_events[0]
+        if condition_event.payload.get("resolution_identity") != envelope.continuation_identity:
+            raise SkillReplayDivergenceError("Fuyin resolution_identity 不匹配")
+        if (
+            condition_event.payload.get("consumed_before") is not False
+            or condition_event.payload.get("consumed_after") is not True
+        ):
+            raise SkillReplayDivergenceError("Fuyin 机会消费事实不匹配")
+        ineffective = condition_event.payload.get("target_effect_ineffective")
+        if type(ineffective) is not bool:
+            raise SkillReplayDivergenceError("Fuyin ineffective 结果必须是 exact bool")
+        target_events = tuple(
+            event for event in game.events
+            if event.event_type is EventType.TARGET_EFFECT_INEFFECTIVE
+            and event.skill_owner == envelope.owner_id
+            and event.payload.get("source_event_sequence")
+            == envelope.trigger_event_sequence
+        )
+        if len(target_events) != int(ineffective):
+            raise SkillReplayDivergenceError(
+                "Fuyin TARGET_EFFECT_INEFFECTIVE 与条件结果不一致"
+            )
+        if target_events and (
+            target_events[0].payload.get("resolution_identity")
+            != envelope.continuation_identity
+        ):
+            raise SkillReplayDivergenceError("Fuyin ineffective 事件身份不匹配")
 
     return SkillReplayVerificationResult(
         verified=True,

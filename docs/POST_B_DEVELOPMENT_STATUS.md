@@ -2,7 +2,8 @@
 
 > 状态标签：`AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`、`AUDITED_PASSED`
 > （CURRENT：`AUTHORITATIVE_GENERAL_BATCH_V1` 的 G1 / `shamoke` 已完成；
-> Batch V1 仍为 `IN_PROGRESS`）
+> G2 / 诸葛瞻已完成 closure audit、final full pytest 与 documentation
+> finalization；G3 / 王元姬尚未开始；Batch V1 仍为 `IN_PROGRESS`）
 >
 > 本文件是 POST-B 开发轨（deepseek-post-milestone-b-development）的新增状态文档，
 > 未登记进 `docs/CHECKPOINT_MANIFEST.json`，也不修改任何已登记文档
@@ -56,10 +57,15 @@
   （G1 / `shamoke` = `GENERAL_COMPLETE`；
   `G1_SHAMOKE_SIXTH_CLOSURE_AUDIT = PASSED`；
   `G1_SHAMOKE_FINAL_FULL_PYTEST = PASSED`；
-  G2 / 诸葛瞻与 G3 / 王元姬尚未开始，因此 Batch V1 不得登记为
+  G2 / 诸葛瞻 = `GENERAL_COMPLETE`，且
+  `G2_ZHUGEZHAN_DOCUMENTATION_FINALIZATION = PASSED`；
+  `G2_ZHUGEZHAN_FIRST_ADVERSARIAL_AUDIT = FAILED` 与
+  `G2_ZHUGEZHAN_SECOND_ADVERSARIAL_AUDIT = FAILED` 均作为历史结论保留，
+  后续 findings 已关闭并完成 closure audit 与 final full pytest；
+  G3 / 王元姬尚未开始。Batch V1 不得登记为
   `COMPLETE`、`AUDITED_PASSED` 或 frozen complete。当前 implementation identity / pin =
-  `af66c568eb0c4b166139e24349f6e46e2a4735949125a326dde0490b8ade434e`，
-  见 §16。）
+  `7394e4ca25c85f4e9454bad363c707c7a1487d0b027c014c4d8708c176359c66`，
+  见 §16–§21。）
 - `F-003` = `CLOSED`
 - `F-004` = `CLOSED`
 - `F-005` = `CLOSED`
@@ -1721,3 +1727,641 @@ READY_FOR_G2_IMPLEMENTATION = NO
 本轮未执行 commit、push、tag 或 PR，未开始 G2 / G3，也未进入 Stage3 / C8。
 后续生命周期由用户另行决定：可以单独冻结 G1，或保留当前工作树进入 G2 后再按
 Batch V1 一起冻结；本节本身不授权其中任一路径。
+
+G1 冻结完成后的 G2 preflight 见 §17 与 `docs/G2_ZHUGEZHAN_PREFLIGHT.md`。
+本节 G1 历史状态值保持冻结当时的原样，不把后来的 G2 preflight 回写进
+`READY_FOR_G2_IMPLEMENTATION = NO`。
+
+## 17. AUTHORITATIVE_GENERAL_BATCH_V1 — G2 ZHUGEZHAN PREFLIGHT
+
+### 17.1 本轮范围
+
+本轮只做 G2 诸葛瞻 preflight：
+
+- 从 G1 frozen commit 新建分支
+- rule-source preflight
+- implementation-gap map
+- timing/checkpoint map
+- GENERAL_COMPLETE proof matrix
+- deterministic test plan
+
+未实现技能，未跑 full pytest，未 commit / push / tag，未开始 G3。
+
+### 17.2 分支与冻结点
+
+- 新分支：`codex/authoritative-general-batch-v1-g2-zhugezhan`
+- 起点 / 当前 HEAD：`678179214a2260c23c95d03740191b1246024bbc`
+- G1 tag：`authoritative-general-batch-v1-g1-shamoke-audited`
+- G1 tag peeled commit 仍为上述 G1 frozen commit
+- G1 tag 与 G1 历史未改写
+
+### 17.3 Preflight 裁定
+
+```text
+G2_ZHUGEZHAN_PREFLIGHT = PASSED
+G2_RULE_SOURCE = COMPLETE
+CANONICAL_GENDER = MALE
+ZHUGEZHAN = IMPLEMENTATION_READY
+ZHUGEZHAN != GENERAL_COMPLETE
+READY_FOR_G2_IMPLEMENTATION = YES
+READY_FOR_G3 = NO
+AUTHORITATIVE_GENERAL_BATCH_V1 = IN_PROGRESS
+```
+
+技能名确认为【罪论】【父荫】。仓库中不存在【罪己】。不得沿用该错误名。
+
+`zhugezhan.gender = MALE`。来源是无争议历史人物真实性别 / canonical metadata，不属于技能 rule-source。游戏没有给出相反性别设定。不要求 Knowledge 诸葛瞻技能条目另外写“男”。虚构人物、历史性别有争议、或游戏改写性别的角色仍必须单独确认。
+
+完整缺口图、时机图、12 门矩阵与确定性测试计划见
+`docs/G2_ZHUGEZHAN_PREFLIGHT.md`。
+
+### 17.4 最小用户确认
+
+无。此前唯一 registry metadata blocker 已关闭。
+
+## 18. AUTHORITATIVE_GENERAL_BATCH_V1 — G2 ZHUGEZHAN IMPLEMENTATION
+
+### 18.1 实现范围与 canonical metadata
+
+本轮在 `codex/authoritative-general-batch-v1-g2-zhugezhan` 上实现诸葛瞻，
+保持 G1 frozen commit
+`678179214a2260c23c95d03740191b1246024bbc` 与 tag
+`authoritative-general-batch-v1-g1-shamoke-audited` 不变。canonical
+`GeneralDefinition` 为：
+
+- key = `zhugezhan`
+- gender = `MALE`
+- starting_hp / max_hp = `3 / 3`
+- skill_ids = `sgs_skill_zuilun`、`sgs_skill_fuyin`
+
+assignment 通过 live canonical definition 自动派生技能；replay 重新
+canonicalize live payload。未分配诸葛瞻时，no-skill / legacy path 保持透明。
+
+### 18.2 【罪论】production 语义
+
+- 在真正的 `END_PHASE_START` checkpoint 发现可选触发，不使用
+  `TURN_END` / `AFTER_TURN_END` 近似；跳过结束阶段时不发现。
+- 统一读取当回合伤害、弃牌与最少手牌三项通用事实，记录
+  `SKILL_CONDITION_EVALUATED` 与 `n ∈ {0,1,2,3}`；事实按 turn identity
+  确定性重置。
+- `ACTIVATE / PASS` 使用 signed action 与 single-use continuation。`n > 0`
+  进入私有 top-3 窗口，恰好选择 `n` 张获得，未选牌保留原始相对顺序
+  回到牌堆顶；记录 `PRIVATE_CARDS_OBSERVED`，不触发普通 `DRAW`。
+- top-3 供牌复用现有 deck-supply / reshuffle 规则；若仍不足且没有权威
+  private-view terminal 规则，则 fail closed。
+- `n = 0` 先令诸葛瞻失去 1 点体力，复用正式 dying / death /
+  victory 链。若游戏未结束，再通过 signed target choice 令一名其他存活角色
+  失去 1 点体力，第二段也走完整链。
+- decision、top-3 选择、目标选择、牌移动、HP、runtime、continuation、
+  events 与 RNG 全部纳入 authoritative step transaction 回滚。
+
+### 18.3 【父荫】production 语义
+
+- 作为锁定技在用牌者侧 `POST_CARD_USED_OR_PLAYED` 之后、目标效果之前
+  进入独立 mandatory target-effect checkpoint，不生成 `ACTIVATE / PASS`。
+- 每个独立回合第一次成为【杀】或【决斗】目标后立即消耗机会，无论比较
+  结果如何；非该类牌不消耗，下一 turn identity 自然重置。
+- 比较用牌后用牌者手牌数与诸葛瞻手牌数。当前者 `<=` 后者时，
+  只为该 target 记录 `TARGET_EFFECT_INEFFECTIVE`，不改写成
+  `CARD_INVALIDATED` 或 `TARGET_CANCELLED`。
+- marker 以 source card-event / target 为作用域；Fangtian 多目标【杀】的其他目标仍
+  独立正常结算。
+- 【蒺藜】先走已冻结的可选技能 continuation，然后进入父荫的独立锁定技
+  checkpoint；发现顺序确定，不争用或覆盖 Jili continuation。
+
+### 18.4 通用 primitive、replay 与 deep tamper
+
+本轮最小扩展了 `END_PHASE_START`、per-turn skill fact / state、私有
+top-deck 观看与选择、ordered skill HP-loss continuation，以及 target-scoped
+effect ineffectiveness。core 不以诸葛瞻技能名作为牌类特例布尔分支。
+
+`GeneralProductionReplayEnvelope` 的 cold-load strict replay 现在认证 canonical
+assignment / derived skills、罪论时机与条件事实、`n`、抉择、top-3 身份与
+顺序、未选牌顶顺序、HP-loss 目标、父荫消耗状态、双方手牌数、
+target-effect 结果、continuation、state / events / RNG before-after。
+deep tamper 测试在重算外层 record 与 execution identities 后，仍拒绝篡改
+`n` / 条件事实、top-3 牌或顺序、所选牌、父荫消耗状态、双方手牌数或
+ineffective 结果。
+
+### 18.5 定向验证与 implementation identity
+
+本轮仅运行 G2 registry / production / replay-tamper、G1 代表回归、Skill Runtime、
+card / Slash / Duel / target-effect、turn lifecycle / END_PHASE、no-skill、source
+integrity、Knowledge 与 pin comparison 相关定向集：
+
+```text
+collected = 617
+passed = 617
+failed = 0
+deselected = 0
+skipped = 0
+xfail = 0
+duration = 216.24s (0:03:36)
+```
+
+本轮没有运行 full pytest。新的 current development implementation identity / pin 为：
+
+```text
+c87b984a10034d6ac9de336eb17895e1892fe5c3b4dc817e2e6b27790d0e316c
+```
+
+该 pin 只更新当前开发身份；G1 frozen identity
+`af66c568eb0c4b166139e24349f6e46e2a4735949125a326dde0490b8ade434e`
+与 G1 tag 均未修改。
+
+### 18.6 当前门禁
+
+```text
+G2_ZHUGEZHAN_IMPLEMENTATION = PASSED
+ZHU GEZHAN = GENERAL_COMPLETE_CANDIDATE
+READY_FOR_G2_FIRST_ADVERSARIAL_AUDIT = YES
+READY_FOR_G2_FULL_PYTEST = NO
+READY_FOR_G3_IMPLEMENTATION = NO
+```
+
+本轮未执行 commit、push、tag 或 PR，未进入 G3、Stage3 或 C8。
+下一步仅是 G2 第一轮独立敌对审计；在该审计与后续门禁通过前，
+不得将诸葛瞻登记为 `GENERAL_COMPLETE`。
+
+## 19. AUTHORITATIVE_GENERAL_BATCH_V1 — G2 ZHUGEZHAN FIRST AUDIT REMEDIATION
+
+### 19.1 历史审计状态
+
+第一轮独立敌对审计历史结论原样保留：
+
+```text
+G2_ZHUGEZHAN_IMPLEMENTATION = PASSED
+G2_ZHUGEZHAN_FIRST_ADVERSARIAL_AUDIT = FAILED
+ZHU GEZHAN = GENERAL_COMPLETE_CANDIDATE
+REMEDIATION_REQUIRED
+READY_FOR_G2_FULL_PYTEST = NO
+READY_FOR_G3_IMPLEMENTATION = NO
+```
+
+该审计记录了 `F-G2-001` 至 `F-G2-004`；本节只记录随后 remediation 的
+生产改动与正式 repo proof，不把历史 `FAILED` 改写为通过。
+
+### 19.2 F-G2-001 — private observation projection
+
+权威事件继续保存 `PRIVATE_CARDS_OBSERVED` 的真实 `observed_card_ids`、
+顺序、选择与剩余牌序，供 strict replay 做 live semantic validation。通用
+`_redact_private_hand_event` 现在识别所有 `private_cards_observed` 事件；只有
+`skill_owner` 本人视图保留实体字段。公共视图与其他角色视图只保留
+`skill_id`、stage、数量等安全 metadata，并删除 card ids、顺序、选择、
+`window_id` 与 `continuation_identity`。
+
+| 投影视图 | top-3 / selected 实体 | 权威 strict replay 真相 |
+| --- | --- | --- |
+| owner (`p1`) | 可见 | 保留并验证 |
+| public (`None`) | 不可见 | 不修改权威记录 |
+| other player (`p2`) | 不可见 | 不修改权威记录 |
+
+正式测试从真实 `END_PHASE_STARTED → signed ACTIVATE → private selection`
+生成事件，并同时验证 owner/public/other 三视图、权威事件不变、clean replay
+通过，以及在重算 `records_identity` / `execution_identity` 后篡改观察牌身份或
+顺序仍被拒绝。
+
+### 19.3 F-G2-002 — Fuyin event semantics
+
+修复前，比较失败仍生成 `TARGET_EFFECT_INEFFECTIVE`，仅在 payload 写入
+`target_effect_ineffective=false`，事件类型与事实矛盾。修复后：
+
+- 首次机会的消费和比较结果由一条 `SKILL_CONDITION_EVALUATED` 认证；
+- 只有比较成立、该目标牌效实际无效时，才生成恰好一条
+  `TARGET_EFFECT_INEFFECTIVE`；
+- 比较失败时机会仍消费、牌效正常，且该事件数量严格为零；
+- 同回合第二次【杀】/【决斗】不再判定，下一 turn identity 恢复机会；
+- Fangtian 其他目标不继承诸葛瞻的 target-scoped ineffective；
+- 【蒺藜】`PASS` 与 `ACTIVATE` 两条 continuation 均先完成，再进入父荫。
+
+strict replay 分别记录 true / false 两条 clean path，并独立认证
+`consumed_after=true` 与 ineffective event presence；重算外层 identities 后，
+把 false 改成 true、删除 true path 的 ineffective event 或篡改手牌数/mark
+均被 live reexecution 拒绝。
+
+### 19.4 F-G2-003 — n=0 replay / deep tamper
+
+`GeneralProductionReplayEnvelope` 增加通用 `initial_hand_count` 初始配置字段，
+fresh reexecution 按记录重建同一生产会话；长回放允许合法动作集合哈希重复，
+但仍逐步比较每一项 live legal-set hash。正式覆盖两条完全由 signed production
+actions 生成的 `n=0`：
+
+1. `END_PHASE_STARTED → ACTIVATE(n=0) → self LOSE_HP → signed p2 target
+   choice → p2 LOSE_HP → continuation consumed`，诸葛瞻存活且游戏未结束；
+2. 两次真实【决斗】响应令诸葛瞻降至 1 HP、对手手牌降至 0，弃牌阶段自然
+   形成零条件；随后 `ACTIVATE(n=0) → self LOSE_HP → DYING → DEATH →
+   VICTORY`，终局严格停止第二段。
+
+两条 fresh strict reexecution 均通过。deep-tamper 在重算外层 identities 后覆盖：
+`n`、三项事实、self HP-loss、pending target legal set、未知/过期/自身目标、
+target choice、trigger sequence/type、continuation identity、per-turn runtime、
+state before/after、event slice 与 RNG hash；终局路径另拒绝伪造的第二段
+`LOSE_HP`。
+
+### 19.5 F-G2-004 — production facts
+
+四档主证明不再依赖直接写 `_state` / `_events`：
+
+| n | 真实生产动作与事实 | 最终事实 |
+| --- | --- | --- |
+| 0 | 正常摸牌后进入真实弃牌阶段；对手手牌更少 | damage=false, discarded=true, minimum=false |
+| 1 | 不造成伤害、不弃置；对手手牌更少 | false, false, false，仅“未弃置”成立 |
+| 2 | 真实【杀】成功伤害；不弃置；对手手牌更少 | true, false, false |
+| 3 | 真实装备【寒冰剑】后使用【杀】并选择正常伤害；不弃置；与对手并列最少 | true, false, true |
+
+附加 production boundaries 覆盖藤甲阻止普通【杀】时 damage=false、两次成功
+伤害仍只形成 bool fact、使用牌/决斗中打出【杀】进入弃牌堆不等于弃置、
+寒冰剑由行为执行者弃置装备区牌计为执行者弃置、【过河拆桥】弃置诸葛瞻
+的牌不计为诸葛瞻本人弃置，以及方天多目标真实死亡后 dead player 不参与
+live minimum-hand 比较。
+
+### 19.6 定向验证与 identity
+
+显式定向矩阵覆盖 G2 registry/production/replay、全部新增 visibility 与 tamper
+节点、Slash/Duel/armor/weapon/group-target、turn lifecycle、G1 Shamoke、
+Skill Runtime（含 6 个按设计修改并恢复源码的 identity mutation 节点）、
+no-skill、C7 代表集、source integrity 与 Knowledge：
+
+```text
+collected = 648
+passed = 648
+failed = 0
+deselected = 0
+skipped = 0
+xfail = 0
+duration = 1009.05s (0:16:49)
+```
+
+本轮没有运行 full pytest。新的 current development implementation identity / pin：
+
+```text
+84b78fe832f19c6055b1d44bc50c03a8ea763b44743bf4bf74c602129a6d5e3a
+```
+
+只更新 current development pin；G1 frozen identity
+`af66c568eb0c4b166139e24349f6e46e2a4735949125a326dde0490b8ade434e`
+与 tag `authoritative-general-batch-v1-g1-shamoke-audited` 均未修改。
+
+最终静态与 Git 门禁：`compileall = exit 0`；`git diff --check = exit 0`
+（仅保留既有 LF/CRLF 提示）；`staged = 0`；`unmerged = 0`。开发分支仍为
+`codex/authoritative-general-batch-v1-g2-zhugezhan`，HEAD / merge-base / G1 tag
+peeled commit 均为 `678179214a2260c23c95d03740191b1246024bbc`。
+
+### 19.7 当前门禁
+
+```text
+F-G2-001 = CLOSED
+F-G2-002 = CLOSED
+F-G2-003 = CLOSED
+F-G2-004 = CLOSED
+
+G2_ZHUGEZHAN_FIRST_AUDIT_REMEDIATION = PASSED
+ZHU GEZHAN = GENERAL_COMPLETE_CANDIDATE
+READY_FOR_G2_SECOND_ADVERSARIAL_AUDIT = YES
+READY_FOR_G2_FULL_PYTEST = NO
+READY_FOR_G3_IMPLEMENTATION = NO
+```
+
+未运行 full pytest，未执行 commit、push、tag 或 PR，未进入 G3、Stage3 或 C8。
+下一步只能是第二轮独立敌对审计；不得据此自行登记 `GENERAL_COMPLETE`。
+
+## 20. AUTHORITATIVE_GENERAL_BATCH_V1 — G2 SECOND AUDIT REMEDIATION
+
+### 20.1 历史状态与本轮边界
+
+以下历史结论原样保留，不因 remediation 改写：
+
+```text
+G2_ZHUGEZHAN_IMPLEMENTATION = PASSED
+G2_ZHUGEZHAN_FIRST_ADVERSARIAL_AUDIT = FAILED
+F-G2-001 = CLOSED
+F-G2-002 = CLOSED
+F-G2-003 = CLOSED
+F-G2-004 = CLOSED
+G2_ZHUGEZHAN_FIRST_AUDIT_REMEDIATION = PASSED
+G2_ZHUGEZHAN_SECOND_ADVERSARIAL_AUDIT = FAILED
+ZHU GEZHAN = GENERAL_COMPLETE_CANDIDATE
+```
+
+第二轮审计确认首轮四项 finding 仍为 `CLOSED`，并新增 `F-G2-005`、
+`F-G2-006` 两个 HIGH correctness finding。本节只记录这两项的修复与正式
+targeted proof，不运行 full pytest，不进入 G3 / Stage3 / C8。
+
+### 20.2 F-G2-005 — 统一 END_PHASE 入口
+
+修复前，`_enter_discard_or_end` 在 hand <= limit 时只返回
+`phase=ProductionPhase.END`。正常 `end_play_phase` 与弃牌提交会另行调用
+`_open_end_phase_skill_checkpoint`，但【乐不思蜀】跳过 PLAY 后的 auto-END
+以及【兵粮寸断】+【乐不思蜀】从 `_advance_past_judgment` 直接 END 不会调用，
+导致规则上真实存在的结束阶段没有 `END_PHASE_STARTED` 与【罪论】窗口。
+
+修复后由通用 `_enter_end_phase(state, previous, next_runtime)` 统一提交真实
+END 阶段边界并打开一次 skill checkpoint。当前所有普通生产入口为：
+
+1. 正常 PLAY 结束且 hand <= limit：`PLAY → END`；
+2. 正常 PLAY 结束且 hand > limit：`PLAY → DISCARD → END`；
+3. 判断/摸牌流程跳过 PLAY，摸牌后 hand <= limit：`DRAW → END`；
+4. 判断/摸牌流程跳过 PLAY，摸牌后 hand > limit：`DRAW → DISCARD → END`；
+5. DRAW 与 PLAY 均被延时锦囊跳过：`JUDGMENT → END`。
+
+`DYING_RESCUE` 或多步技能 continuation 返回同一个 END 阶段不是新的阶段
+边界，继续走 continuation 专用恢复路径，因此不会再发第二条
+`END_PHASE_STARTED`；`end_turn` 也不会补发。当前引擎没有正式的全局
+“跳过整个 END_PHASE”能力，该 zero-event 边界为 `NOT_APPLICABLE`，未臆造
+测试夹具。
+
+正式 signed production tests 覆盖：乐命中且手牌恰等于体力上限的 auto-END、
+乐命中且超上限的 DISCARD→END、兵粮+乐直接越过 DRAW/PLAY、普通非跳过
+PLAY→END；每条均断言 END checkpoint exactly once、【罪论】ACTIVATE/PASS
+可见，且 `end_turn` 后事件数不增加。turn facts 仍在原 turn boundary 重置，
+统一入口未提前或重复调用 `on_turn_change`。
+
+### 20.3 F-G2-006 — post-resume live SkillRuntime commit
+
+修复前，`_apply_production_skill_action` 在决策窗口开始时捕获旧
+`skill_runtime`；Jili ACTIVATE 完成摸牌并恢复 card continuation 后，父荫已在
+`_post_target_effect_checkpoint` 写入 `fuyin_consumed_turn`，但末尾仍以旧对象
+执行 `increment_usage` 并整棵写回，覆盖了 live mark。
+
+修复后，handler 与 continuation 全部成功后重新读取
+`self._skill_runtime`，只在该 live runtime 上增量执行 Jili usage commit。该设计
+不依赖 Fuyin 字段，不做武将特判；resume 期间任何其他 owner/skill 的
+marks、usage 或 queued resolution 所形成的 runtime 变化都会保留。
+
+正式 proof 在同一真实 `CARD_USED` 中执行 p2 Shamoke 对 p1 Zhugezhan 的第一张
+Slash、Jili ACTIVATE、Fuyin mandatory target-effect checkpoint 与 continuation
+resume。结束后同时断言：
+
+- `p2/sgs_skill_jili.uses_this_turn == 1`；
+- `p1/sgs_skill_fuyin.marks.fuyin_consumed_turn == live turn_number`；
+- 同回合第二张 Duel 不再增加 Fuyin condition event，也不增加 ineffective event；
+- Fuyin condition=false 时机会仍消费，第二张牌同样不再判定；
+- 注入另一技能的无关 mark 后，Jili usage、Fuyin mark 与该 mark 三者同时保留；
+- continuation 内部在 Fuyin 写 mark 后抛错时，外层 step transaction 将 state、
+  events、Jili usage、Fuyin mark、完整 SkillRuntime 与 continuation authority
+  原子回滚。
+
+Jili PASS 对照、duplicate/stale continuation 与既有 two-phase consumption 合同
+继续由 G1/G2 targeted suites 覆盖。
+
+### 20.4 Replay / deep tamper
+
+乐 skip-PLAY → auto-END → Zuilun PASS 已加入 fresh cold-load strict
+reexecution；记录中必须同时存在一条 `PHASE_SKIPPED(play)` 与恰好一条
+`END_PHASE_STARTED`，live legal-actions/semantic hashes、事件切片、状态和 RNG
+逐步重算一致。
+
+通用 `GeneralProductionReplayEnvelope` 现在认证完整 `skill_runtime_after`，而不只
+认证 primary skill 的 usage/marks。Jili ACTIVATE + Fuyin 同事件 mixed-general
+回放同时记录 Jili usage 与 Fuyin consumed mark；攻击者即使修改其中任一、重算
+`records_identity` 与 `execution_identity`，fresh live reexecution 仍因完整
+SkillRuntime 不一致而失败关闭。回放构造器从第一步 signed semantics 绑定
+`first_player_id`，支持同一双人信封中 p1 Zhugezhan + p2 Shamoke 的真实顺序。
+
+### 20.5 Targeted validation、identity 与门禁
+
+统一 targeted matrix 覆盖 G2 registry/production/replay、END/延时锦囊/phase
+skip、Slash/Duel/Fuyin/Jili、G1 Shamoke production/replay、Skill Runtime
+identity mutation（测试后源码原样恢复）、no-skill isolation、C7 mode-policy
+代表集、privacy/replay projection、source integrity 与 Knowledge：
+
+```text
+collected = 420
+passed = 420
+failed = 0
+deselected = 0
+skipped = 0
+xfail = 0
+duration = 786.50s (0:13:06)
+```
+
+本轮没有运行 full pytest。新的 current development implementation identity / pin：
+
+```text
+7394e4ca25c85f4e9454bad363c707c7a1487d0b027c014c4d8708c176359c66
+```
+
+G1 frozen identity
+`af66c568eb0c4b166139e24349f6e46e2a4735949125a326dde0490b8ade434e`
+与 tag `authoritative-general-batch-v1-g1-shamoke-audited` 未修改。
+
+最终状态：
+
+```text
+F-G2-005 = CLOSED
+F-G2-006 = CLOSED
+G2_ZHUGEZHAN_SECOND_AUDIT_REMEDIATION = PASSED
+ZHU GEZHAN = GENERAL_COMPLETE_CANDIDATE
+READY_FOR_G2_CLOSURE_AUDIT = YES
+READY_FOR_G2_FULL_PYTEST = NO
+READY_FOR_G3_IMPLEMENTATION = NO
+```
+
+未登记 `GENERAL_COMPLETE`；未运行 full pytest；未执行 commit、push、tag 或
+PR；未进入 G3、Stage3 或 C8。下一步只能是 G2 closure audit。
+
+## 21. AUTHORITATIVE_GENERAL_BATCH_V1 — G2 ZHUGEZHAN DOCUMENTATION / STATUS FINALIZATION
+
+本节是 G2 诸葛瞻的当前 authoritative status。§17 的 preflight、§18 的
+implementation、§19 的 first-audit remediation 与 §20 的 second-audit
+remediation 均为历史记录，保留其当时的 `FAILED` / `GENERAL_COMPLETE_CANDIDATE`
+结论；本节不把历史失败改写成“从未失败”。
+
+### 21.1 General metadata 与 rule-source status
+
+| 字段 | authoritative 值 |
+| --- | --- |
+| general key | `zhugezhan` |
+| gender | `MALE` |
+| starting HP / max HP | `3 / 3` |
+| skill IDs | `sgs_skill_zuilun`、`sgs_skill_fuyin` |
+
+- `G2_RULE_SOURCE = COMPLETE`；Knowledge source 已完成并与最终生产语义一致。
+- gender source = user-confirmed historical canonical metadata；它不属于
+  skill rule-source。`MALE` 是 canonical `GeneralDefinition` 的元数据裁定，
+  不是由技能规则文本推导出的事实。
+- `sgs_skill_zuilun` 对应【罪论】，`sgs_skill_fuyin` 对应【父荫】；仓库中没有
+  把【罪论】误写成【罪己】的 authoritative skill ID。
+
+### 21.2 Implementation summary
+
+#### 【罪论】
+
+- 触发点是当前角色真实结束阶段的 `END_PHASE_START`，由真实
+  `END_PHASE_STARTED` checkpoint 打开；不以 `TURN_END` 或
+  `AFTER_TURN_END` 近似，也不在跳过结束阶段后补触发。
+- 发动时从 live production facts 统一计算 `n = 0/1/2/3`：本回合造成伤害、
+  本回合明确弃置过牌、以及手牌数为全场存活角色最少。三项事实按独立 turn
+  identity 重置，不从普通牌移动、使用、打出、重铸、装备替换或被他人获得
+  推导“弃置”。
+- `n > 0` 时私有观看牌堆顶三张，并在私有窗口中恰好选择 `n` 张获得；未选牌
+  以观看时的原始相对顺序回到牌堆顶。`PRIVATE_CARDS_OBSERVED` 的实体牌信息
+  只向技能拥有者投影，public / other-player 视图不泄漏牌 ID、顺序、选择、
+  `window_id` 或 continuation identity。
+- `n = 0` 时按有序链先令诸葛瞻失去 1 点体力，再在游戏尚未结束时通过 signed
+  target choice 令一名其他存活角色失去 1 点体力；两段都复用正式的 dying /
+  death / victory 链。诸葛瞻死亡并结束游戏时严格停止第二段。
+- 【罪论】的观看/获得/回顶不是普通 `DRAW`；相关 decision、牌移动、HP、
+  runtime、continuation、events 与 RNG 均受 authoritative step transaction、
+  strict replay 与 visibility projection 约束。
+
+#### 【父荫】
+
+- 每个 independent turn 只有第一次成为【杀】或【决斗】目标时检查并立即消耗
+  机会；非该类牌不消耗，同回合后续【杀】/【决斗】不再检查，下一独立回合
+  自动恢复。
+- 比较发生在用牌者完成用牌后的 hand count：当用牌者当前手牌数
+  `<=` 诸葛瞻当前手牌数时，只对诸葛瞻这个 target 令该牌效果无效。
+- 该结果是 target-scoped `TARGET_EFFECT_INEFFECTIVE`，不是整张牌的
+  `CARD_INVALIDATED`，也不是 `TARGET_CANCELLED`；比较不成立时机会仍消耗，
+  牌效正常结算且不生成虚假的 ineffective event。
+- 与【蒺藜】共存：同一真实用牌中先完成用牌者的 Jili `ACTIVATE / PASS`
+  continuation，再进入诸葛瞻成为目标后的 Fuyin mandatory checkpoint；live
+  `SkillRuntime` commit 保留双方 usage / mark，不互相覆盖。
+
+### 21.3 Audit history（完整保留）
+
+1. `G2_ZHUGEZHAN_IMPLEMENTATION = PASSED`。
+2. first adversarial audit = `FAILED`，发现：
+   - `F-G2-001`：private top3 leak；
+   - `F-G2-002`：错误生成 false `TARGET_EFFECT_INEFFECTIVE` event；
+   - `F-G2-003`：replay / deep-tamper evidence gap；
+   - `F-G2-004`：production-facts proof gap。
+3. first-audit remediation = `PASSED`；`F-G2-001`、`F-G2-002`、`F-G2-003`、
+   `F-G2-004` 均为 `CLOSED`。
+4. second adversarial audit = `FAILED`，新增：
+   - `F-G2-005`：skip-PLAY auto-END 漏掉真实 `END_PHASE_START`；
+   - `F-G2-006`：Jili `ACTIVATE` 后 stale `SkillRuntime` 覆盖 Fuyin mark。
+5. second-audit remediation = `PASSED`；`F-G2-005`、`F-G2-006` 均为
+   `CLOSED`。
+6. closure audit = `PASSED`；12/12 gates `PROVEN`，诸葛瞻正式达到
+   `GENERAL_COMPLETE`。
+7. final full pytest first run = `FAILED`，原因与规则语义审计分开记录：
+   manifest 中 `scripts/sgs_engine/actions.py` 的 SHA-256 mismatch，以及
+   pytest cleanup 的 `PermissionError [WinError 32]` harness errors。
+8. manifest / harness remediation = `PASSED`；最终 rerun = `3195/3195`
+   passed，未把首次失败改写成“从未失败”。
+
+### 21.4 Closure audit proof matrix
+
+`G2_ZHUGEZHAN_CLOSURE_AUDIT = PASSED`，12/12 gates 均已证明：
+
+| Gate | 最终裁定 |
+| --- | --- |
+| 1. Knowledge / rule source | `PROVEN` |
+| 2. Canonical `GeneralDefinition` | `PROVEN` |
+| 3. Assignment → derived skills | `PROVEN` |
+| 4. 【罪论】count / range / semantics | `PROVEN` |
+| 5. Generic pre-effect target checkpoint | `PROVEN` |
+| 6. Signed continuation authority | `PROVEN` |
+| 7. Card movement / draw / discard transaction | `PROVEN` |
+| 8. Normal turn lifecycle facts | `PROVEN` |
+| 9. Extra-turn | `NOT_APPLICABLE_TO_CURRENT_MODES` |
+| 10. Replay / deep tamper | `PROVEN` |
+| 11. No-skill / legacy transparency | `PROVEN` |
+| 12. Test and claim quality | `PROVEN` |
+
+第 9 项是当前生产模式没有 extra-turn capability 的准确边界，不把“不适用”
+伪造为已实现能力；其余 11 项均为 `PROVEN`，因此 closure audit 的 12/12
+矩阵已闭合。
+
+### 21.5 Frozen identities 与 final full pytest evidence
+
+#### Identity pins
+
+- branch：`codex/authoritative-general-batch-v1-g2-zhugezhan`
+- G1 frozen base commit：`678179214a2260c23c95d03740191b1246024bbc`
+- G1 tag：`authoritative-general-batch-v1-g1-shamoke-audited`
+- G1 tag object：`9eed018b7263c6af41869ee85982db005b2584c1`
+- G1 tag peeled commit：`678179214a2260c23c95d03740191b1246024bbc`
+- G1 frozen identity：
+  `af66c568eb0c4b166139e24349f6e46e2a4735949125a326dde0490b8ade434e`
+- G2 current implementation identity / pin：
+  `7394e4ca25c85f4e9454bad363c707c7a1487d0b027c014c4d8708c176359c66`
+- manifest `scripts/sgs_engine/actions.py` canonical SHA-256：
+  `4f35207296fcac5265ff8c928abf70775b3f995da1570dd0179dbf3a5aa6355b`
+
+#### Full pytest history
+
+首次 final full pytest 必须保留为历史失败：
+
+```text
+command:
+D:\MyGPT\game-analysis-grok-eval\.venv\Scripts\python.exe -B -m pytest -q -p no:cacheprovider --basetemp=D:\MyGPT\basetemp\general-batch-v1-g2-full-20260830-153626-155
+
+exit=1
+collected=3195
+passed=3029
+failed=1
+errors=165
+skipped=0
+xfail=0
+xpass=0
+deselected=0
+```
+
+唯一真实 failure 是
+`tests/test_sgs_audit_remediation_2.py::test_manifest_sha256_inventory_is_true_sha256`，
+`mismatches=['scripts/sgs_engine/actions.py']`。165 个 errors 是日志捕获文件
+被占用导致 pytest 清理 basetemp 时产生的 `PermissionError [WinError 32]`
+harness cleanup issue。
+
+修复后 final rerun 的 exact evidence 为：
+
+```text
+command:
+D:\MyGPT\game-analysis-grok-eval\.venv\Scripts\python.exe -B -m pytest -q -p no:cacheprovider --basetemp=D:\MyGPT\basetemp\general-batch-v1-g2-full-rerun-20260830-172440306
+
+exit=0
+collected=3195
+passed=3195
+failed=0
+errors=0
+skipped=0
+xfail=0
+xpass=0
+deselected=0
+duration=4484.38s (1:14:44)
+```
+
+remediation 同步了 manifest canonical SHA-256，并将 TEMP/TMP、basetemp 与
+日志目录分离；final rerun 的 PRE / POST gate 均稳定：branch、HEAD、merge-base、
+G1 tag peeled commit、computed identity / pin、changed set、staged、unmerged 与
+`git diff --check` 均无漂移。full pytest 只证明当前 G2 implementation identity
+对应的这次全量测试，不改写 G1 frozen identity，也不把 Batch V1 写成 complete。
+
+### 21.6 Documentation finalization validation
+
+本轮文档收尾只运行轻量验证，没有重跑 full pytest：
+
+- targeted Knowledge / docs / source-integrity / manifest / identity-pin 集：
+  `44 passed in 0.53s`，exit `0`；无 failed、errors、skipped、xfail、xpass 或
+  deselected。仓库中未发现针对 `POST_B_DEVELOPMENT_STATUS.md` 的独立
+  status-doc contract test。
+- 实际 source-integrity CLI：`exit=0`，`scanned_file_count=200`、
+  `audit_item_count=190`、`defect_count=0`。
+- `compileall`：`exit=0`；使用仓库外 pycache，仓库内新增
+  `__pycache__` / `.pyc` 数量为 `0`。
+- computed implementation identity =
+  `7394e4ca25c85f4e9454bad363c707c7a1487d0b027c014c4d8708c176359c66`
+  = current pin；文档变更没有改变 implementation identity。
+- 最终 `git diff --check = exit 0`；`staged = 0`；`unmerged = 0`；变更集仍为
+  既有 18 项加 `docs/CHECKPOINT_MANIFEST.json`，共 19 项，无未知路径。
+
+### 21.7 Final status
+
+```text
+G2_ZHUGEZHAN_DOCUMENTATION_FINALIZATION = PASSED
+G2_ZHUGEZHAN_CLOSURE_AUDIT = PASSED
+G2_ZHUGEZHAN_FINAL_FULL_PYTEST = PASSED
+ZHU GEZHAN = GENERAL_COMPLETE
+G2_FREEZE_READY = YES
+AUTHORITATIVE_GENERAL_BATCH_V1 = IN_PROGRESS
+AUTHORITATIVE_GENERAL_BATCH_V1 != COMPLETE
+READY_FOR_G2_FREEZE = YES
+READY_FOR_G3_IMPLEMENTATION = NO
+```
+
+G3 / 王元姬仍未开始，因此 `AUTHORITATIVE_GENERAL_BATCH_V1` 不能写成
+`COMPLETE`。本轮没有 commit、tag、push、PR，没有开始 G3、Stage3 或 C8；
+当前工作停止在 G2 freeze 前，等待用户授权 freeze。

@@ -442,6 +442,31 @@ def _redact_private_hand_event(
         + (list(visible_ids or ()))
     )
     event_type = event.get("event_type")
+    if event_type == "private_cards_observed":
+        owner_id = event.get("skill_owner")
+        if viewer_id is not None and viewer_id == owner_id:
+            return dict(event)
+        payload = event.get("payload", {})
+        safe_payload: dict[str, object] = {
+            "redacted": True,
+            "redacted_by_viewer": viewer_id,
+        }
+        if isinstance(payload, Mapping):
+            for key in ("skill_id", "stage", "choose_count"):
+                if key in payload:
+                    safe_payload[key] = payload[key]
+            observed = payload.get("observed_card_ids")
+            selected = payload.get("selected_card_ids")
+            if isinstance(observed, (list, tuple)):
+                safe_payload["observed_count"] = len(observed)
+            if isinstance(selected, (list, tuple)):
+                safe_payload["selected_count"] = len(selected)
+        redacted = dict(event)
+        redacted["card_instance_id"] = None
+        redacted["card_key"] = None
+        redacted["material_card_instance_ids"] = []
+        redacted["payload"] = safe_payload
+        return redacted
     if event_type == "card_gained":
         payload = event.get("payload", {})
         reason = str(payload.get("reason", "")) if isinstance(payload, Mapping) else ""

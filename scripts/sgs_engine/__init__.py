@@ -342,11 +342,13 @@ from .skill_registry import (
 )
 from .skill_runtime import AuthoritativeSkillRuntime
 from .skill_impl_v1 import (
+    FuyinSkillHandler,
     JiliSkillHandler,
     MingzheSkillHandler,
     MutaoSkillHandler,
     PojiangSkillHandler,
     WeimuSkillHandler,
+    ZuilunSkillHandler,
     create_proof_slice_v1_handlers,
     create_proof_slice_v1_registry,
 )
@@ -647,11 +649,13 @@ __all__ = [
     "SkillRegistryError",
     "create_skill_registry",
     "AuthoritativeSkillRuntime",
+    "FuyinSkillHandler",
     "JiliSkillHandler",
     "MingzheSkillHandler",
     "MutaoSkillHandler",
     "PojiangSkillHandler",
     "WeimuSkillHandler",
+    "ZuilunSkillHandler",
     "create_proof_slice_v1_handlers",
     "create_proof_slice_v1_registry",
     "AuthoritativeGeneralRegistry",

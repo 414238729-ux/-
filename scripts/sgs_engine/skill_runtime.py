@@ -152,6 +152,64 @@ class AuthoritativeSkillRuntime:
         updated[player_id][skill_id] = state.with_usage_increment()
         return AuthoritativeSkillRuntime(self._registry, updated)
 
+    def with_skill_state(
+        self, player_id: str, skill_id: str, state: SkillRuntimeState
+    ) -> AuthoritativeSkillRuntime:
+        """Replace exactly one registered runtime state."""
+
+        current = self.get_skill_state(player_id, skill_id)
+        if state.owner_id != player_id or state.skill_id != skill_id:
+            raise ValueError("替换的技能状态与角色/技能身份不一致")
+        if state.skill_version != current.skill_version:
+            raise ValueError("替换的技能状态版本不一致")
+        updated = {pid: dict(s) for pid, s in self._player_skills.items()}
+        updated[player_id][skill_id] = state
+        return AuthoritativeSkillRuntime(self._registry, updated)
+
+    def resolve_target_effect_after_card_used(
+        self,
+        event: GameEvent,
+        state: GameState,
+        turn_number: int,
+    ) -> tuple[
+        AuthoritativeSkillRuntime,
+        tuple[tuple[str, str, bool, tuple[GameEvent, ...]], ...],
+    ]:
+        """Resolve mandatory ON_BECOME_TARGET handlers in stable order."""
+
+        runtime = self
+        resolved: list[tuple[str, str, bool, tuple[GameEvent, ...]]] = []
+        for player_id, skills_map in sorted(self._player_skills.items()):
+            for skill_id, _original in sorted(skills_map.items()):
+                skill_state = runtime.get_skill_state(player_id, skill_id)
+                if not skill_state.effective:
+                    continue
+                definition = self._registry.get_skill(skill_id)
+                if (
+                    definition.kind is not AuthoritativeSkillKind.TRIGGERED
+                    or not definition.is_mandatory
+                    or SkillTimingWindow.ON_BECOME_TARGET
+                    not in definition.timing_windows
+                ):
+                    continue
+                handler = self._registry.get_handler(skill_id)
+                result = handler.resolve_target_effect_after_card_used(
+                    event=event,
+                    state=state,
+                    skill_state=skill_state,
+                    turn_number=turn_number,
+                )
+                if result is None:
+                    continue
+                next_skill_state, ineffective, events = result
+                runtime = runtime.with_skill_state(
+                    player_id, skill_id, next_skill_state
+                )
+                resolved.append(
+                    (player_id, skill_id, ineffective, tuple(events))
+                )
+        return runtime, tuple(resolved)
+
     def enumerate_active_skill_actions(
         self,
         actor_id: str,
