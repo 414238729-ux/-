@@ -136,6 +136,20 @@ def test_xuyou_section_has_only_correct_base_three_and_mode_four_values() -> Non
     assert "5/5" not in section
 
 
+def test_wangyuanji_qianchong_permission_lifecycle_boundaries_documented() -> None:
+    """G3-CLOSURE-001：【谦冲】牌类许可两条 CURRENT 边界必须写入 Knowledge。"""
+    text = _read(GENERAL_DOC)
+    section = text.split("## 7. 王元姬", maxsplit=1)[1].split("## 8.", maxsplit=1)[0]
+    # A. PLAY_PHASE_START 建立的许可持续整次出牌阶段，中途装备变化不撤销。
+    assert "QIANCHONG_PERMISSION_LIFECYCLE = ESTABLISHED_AT_PLAY_PHASE_START" in section
+    assert "持续到这一次出牌阶段结束" in section
+    assert "都不会撤销已经建立的许可" in section
+    assert "两套独立生命周期" in section
+    # B. 判断时点锁定 PLAY_PHASE_START；后来才变 empty/mixed 不补开选择。
+    assert "判断时点明确为 `PLAY_PHASE_START`" in section
+    assert "不得补开本次出牌阶段已经错过的【谦冲】牌类选择" in section
+
+
 def test_base_terms_define_skill_types_sources_and_separate_loss_from_invalidation() -> None:
     text = _read(BASE_DOC)
     for term in ("锁定技", "限定技", "觉醒技", "使命技", "持恒技", "转换技", "蓄力技"):

@@ -421,7 +421,12 @@ def hand_limit_of(state: GameState, player_id: str) -> int:
     return state.players_by_id[player_id].hp
 
 
-def is_valid_slash_target(state: GameState, attacker_id: str, target_id: str) -> bool:
+def is_valid_slash_target(
+    state: GameState,
+    attacker_id: str,
+    target_id: str,
+    session: Any = None,
+) -> bool:
     """真实执行【杀】系列的目标与距离合法性检查（G-001：拒绝死亡目标）。"""
 
     if attacker_id == target_id:
@@ -432,6 +437,8 @@ def is_valid_slash_target(state: GameState, attacker_id: str, target_id: str) ->
     attacker = state.players_by_id.get(attacker_id)
     if attacker is None or not attacker.alive:
         return False
+    if session is not None and getattr(session, "is_card_distance_bypassed", lambda a, c: False)(attacker_id, "basic"):
+        return True
     return actual_distance(state, attacker_id, target_id) <= attack_range_of(
         state, attacker_id
     )
@@ -726,7 +733,10 @@ def has_target_zone_cards(state: GameState, player_id: str) -> bool:
 
 
 def is_valid_shunshou_target(
-    state: GameState, source_id: str, target_id: str
+    state: GameState,
+    source_id: str,
+    target_id: str,
+    session: Any = None,
 ) -> bool:
     """【顺手牵羊】的真实目标合法性：其他角色且有效距离为 1。
 
@@ -735,6 +745,11 @@ def is_valid_shunshou_target(
 
     if source_id == target_id:
         return False
+    target = state.players_by_id.get(target_id)
+    if target is None or not target.alive:
+        return False
+    if session is not None and getattr(session, "is_card_distance_bypassed", lambda a, c: False)(source_id, "trick"):
+        return True
     return effective_distance(state, source_id, target_id) == 1
 
 
@@ -844,25 +859,28 @@ class SlashAdapter(BasicCardAdapter):
             return ()
         slash_limit = session.normal_play_slash_limit(context.actor_id)
         if session.runtime.slash_used_counts.get(context.actor_id, 0) >= slash_limit:
-            # 达到通常上限：先经过武器技能门禁；诸葛连弩（CP-04P 已实现
-            # “你使用【杀】无次数限制”）继续枚举，其余武器不改变次数。
-            other_targets = PlayerTopology.from_state(
-                state
-            ).all_other_alive_ids(context.actor_id)
-            check_weapon_skill_gate(
-                state,
-                actor_id=context.actor_id,
-                decision="use_slash",
-                target_id=other_targets[0] if other_targets else context.actor_id,
-                slash_used_count=session.runtime.slash_used_counts.get(
-                    context.actor_id, 0
-                ),
-            )
-            if (
-                equipped_weapon_key(state, context.actor_id)
-                != "sgs_weapon_zhugeliannu"
+            if not getattr(session, "is_slash_limit_bypassed", lambda a: False)(
+                context.actor_id
             ):
-                return ()
+                # 达到通常上限：先经过武器技能门禁；诸葛连弩（CP-04P 已实现
+                # “你使用【杀】无次数限制”）继续枚举，其余武器不改变次数。
+                other_targets = PlayerTopology.from_state(
+                    state
+                ).all_other_alive_ids(context.actor_id)
+                check_weapon_skill_gate(
+                    state,
+                    actor_id=context.actor_id,
+                    decision="use_slash",
+                    target_id=other_targets[0] if other_targets else context.actor_id,
+                    slash_used_count=session.runtime.slash_used_counts.get(
+                        context.actor_id, 0
+                    ),
+                )
+                if (
+                    equipped_weapon_key(state, context.actor_id)
+                    != "sgs_weapon_zhugeliannu"
+                ):
+                    return ()
         actions: list[LegalAction] = []
         for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
             card = state.cards_by_id[instance_id]
@@ -879,7 +897,7 @@ class SlashAdapter(BasicCardAdapter):
                     context.actor_id
                 ),
             ):
-                if not is_valid_slash_target(state, context.actor_id, target):
+                if not is_valid_slash_target(state, context.actor_id, target, session=session):
                     continue
                 check_weapon_skill_gate(
                     state,
@@ -1206,7 +1224,11 @@ class WineAdapter(BasicCardAdapter):
         session = self._require_session()
         actions: list[LegalAction] = []
         if session.phase.value == "play":
-            if session.runtime.wine_buff_used_this_play_phase:
+            bypassed = (
+                getattr(session, "is_card_use_count_bypassed", None) is not None
+                and session.is_card_use_count_bypassed(context.actor_id, "basic")
+            )
+            if session.runtime.wine_buff_used_this_play_phase and not bypassed:
                 return ()
             for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
                 card = state.cards_by_id[instance_id]
@@ -1325,6 +1347,13 @@ class WuzhongshengyouAdapter(TrickCardAdapter):
         for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
             card = state.cards_by_id[instance_id]
             if card.card_key != self.card_key:
+                continue
+            if context.actor_id not in _filter_skill_targets(
+                session,
+                context.actor_id,
+                card,
+                (context.actor_id,),
+            ):
                 continue
             actions.append(
                 LegalAction(
@@ -1639,7 +1668,7 @@ class ShunshouQianyangAdapter(TrickCardAdapter):
                 ):
                     try:
                         if not is_valid_shunshou_target(
-                            state, context.actor_id, target_id
+                            state, context.actor_id, target_id, session=session
                         ):
                             continue
                     except UnsupportedRuleError:
@@ -1997,10 +2026,16 @@ class TiesuoLianhuanAdapter(TrickCardAdapter):
         }
 
     def _target_combinations(
-        self, state: GameState, actor_id: str
+        self,
+        state: GameState,
+        actor_id: str,
+        card: CardInstance,
     ) -> tuple[tuple[str, ...], ...]:
-        alive_ids = tuple(
-            player.player_id for player in state.players if player.alive
+        alive_ids = _filter_skill_targets(
+            self._require_session(),
+            actor_id,
+            card,
+            tuple(player.player_id for player in state.players if player.alive),
         )
         combinations: list[tuple[str, ...]] = []
         for size in (1, 2):
@@ -2023,7 +2058,9 @@ class TiesuoLianhuanAdapter(TrickCardAdapter):
             card = state.cards_by_id[instance_id]
             if card.card_key != self.card_key:
                 continue
-            for targets in self._target_combinations(state, context.actor_id):
+            for targets in self._target_combinations(
+                state, context.actor_id, card
+            ):
                 actions.append(
                     LegalAction(
                         action_type=ActionType.USE_CARD,
@@ -2149,6 +2186,13 @@ class WugufengdengAdapter(TrickCardAdapter):
                 card = state.cards_by_id[instance_id]
                 if card.card_key != self.card_key:
                     continue
+                if not session._group_target_sequence(
+                    state,
+                    context.actor_id,
+                    self,
+                    card_instance=card,
+                ):
+                    continue
                 actions.append(
                     LegalAction(
                         action_type=ActionType.USE_CARD,
@@ -2268,17 +2312,20 @@ class GroupTargetTrickAdapter(TrickCardAdapter):
         if session.phase.value == "play":
             if context.actor_id != session.current_player_id:
                 return ()
-            # 与 apply_group_trick_use 的服务器目标快照保持同一前置条件：
-            # 桃园结义在无人受伤时（以及其他群体锦囊确无合法目标时）
-            # 不能先签发一个随后必然被 apply 拒绝的“合法”动作。
-            if not session._group_target_sequence(
-                state, context.actor_id, self
-            ):
-                return ()
             actions: list[LegalAction] = []
             for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
                 card = state.cards_by_id[instance_id]
                 if card.card_key != self.card_key:
+                    continue
+                # 与 apply_group_trick_use 的服务器目标快照保持同一前置条件，
+                # 并使用当前这张实体牌（而不是同名样本）的颜色/花色完成
+                # skill target-legality 过滤。
+                if not session._group_target_sequence(
+                    state,
+                    context.actor_id,
+                    self,
+                    card_instance=card,
+                ):
                     continue
                 actions.append(
                     LegalAction(
@@ -3045,13 +3092,20 @@ class JiedaoSharenAdapter(TrickCardAdapter):
             card = state.cards_by_id[instance_id]
             if card.card_key != self.card_key:
                 continue
-            for first_target in state.players_by_id:
-                if first_target == context.actor_id:
-                    continue
-                if not state.card_ids_in(
-                    ZoneRef.equipment(first_target, "weapon")
-                ):
-                    continue
+            candidates = tuple(
+                first_target
+                for first_target in state.players_by_id
+                if first_target != context.actor_id
+                and bool(
+                    state.card_ids_in(
+                        ZoneRef.equipment(first_target, "weapon")
+                    )
+                )
+            )
+            filtered_first_targets = _filter_skill_targets(
+                session, context.actor_id, card, candidates
+            )
+            for first_target in filtered_first_targets:
                 for second_target in state.players_by_id:
                     if second_target == first_target:
                         continue

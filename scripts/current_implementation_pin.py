@@ -8,5 +8,5 @@ path, so the comparison executes under an ordinary ``pytest`` collection.
 """
 
 POST_B_CURRENT_IMPLEMENTATION_IDENTITY = (
-    "7394e4ca25c85f4e9454bad363c707c7a1487d0b027c014c4d8708c176359c66"
+    "da73a75e195153f61a89012adf9f84b309194e2a71889ef2059fb847dbfa22d1"
 )

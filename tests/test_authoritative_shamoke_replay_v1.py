@@ -27,6 +27,8 @@ from scripts.sgs_engine.production_batch import (
 from scripts.sgs_engine.skill_impl_v1 import create_proof_slice_v1_registry
 from scripts.sgs_engine.skill_replay import (
     GENERAL_PRODUCTION_REPLAY_CONTRACT_IDENTITY_V1,
+    GENERAL_PRODUCTION_REPLAY_CONTRACT_IDENTITY_V2,
+    GENERAL_PRODUCTION_REPLAY_CONTRACT_VERSION_LEGACY,
     GENERAL_PRODUCTION_REPLAY_SCHEMA_V1,
     GeneralProductionReplayEnvelope,
     SkillReplayDivergenceError,
@@ -196,6 +198,27 @@ def test_shamoke_production_replay_clean_pass() -> None:
     assert result.registry_identity_matched
     assert result.state_hashes_matched
     assert result.steps_verified == len(envelope.action_ids)
+
+
+def test_shamoke_true_historical_implicit_legacy_contract_still_loads() -> None:
+    envelope, _ = _record_shamoke_replay()
+    assert (
+        envelope.replay_contract_version
+        == GENERAL_PRODUCTION_REPLAY_CONTRACT_VERSION_LEGACY
+    )
+    assert envelope.required_authority_capabilities == ()
+    historical = copy.deepcopy(envelope.to_dict())
+    historical.pop("replay_contract_version")
+    historical.pop("required_authority_capabilities")
+    _recompute_general_envelope_identities(historical)
+
+    cold_loaded = GeneralProductionReplayEnvelope.from_dict(historical)
+    result = reexecute_general_production_replay(
+        cold_loaded,
+        create_authoritative_general_batch_v1_registry(),
+        create_proof_slice_v1_registry(),
+    )
+    assert result.verified
 
 
 def test_shamoke_replay_adversarial_general_registry_tampering() -> None:
@@ -574,3 +597,52 @@ def test_general_preflight_rejects_before_any_session_constructor(
             tampered, registry, skill_registry
         )
     assert calls == 0
+
+
+def test_shamoke_v2_identity_marker_fails_closed_in_constructor_and_from_dict() -> None:
+    """Historical envelope explicitly providing V2 contract_identity must fail-closed."""
+    envelope, _ = _record_shamoke_replay()
+
+    # 1. Direct constructor with V2 identity on historical content -> latches strict -> rejects missing participants / version / caps
+    kwargs = {
+        "seed": envelope.seed,
+        "session_id": envelope.session_id,
+        "session_secret_hex": envelope.session_secret_hex,
+        "initial_hand_count": envelope.initial_hand_count,
+        "general_registry_identity": envelope.general_registry_identity,
+        "general_profile_identities": dict(envelope.general_profile_identities),
+        "general_semantic_payloads": dict(envelope.general_semantic_payloads),
+        "general_assignments": dict(envelope.general_assignments),
+        "skill_registry_identity": envelope.skill_registry_identity,
+        "skill_profile_identities": dict(envelope.skill_profile_identities),
+        "derived_skill_assignments": dict(envelope.derived_skill_assignments),
+        "primary_general_key": envelope.primary_general_key,
+        "owner_id": envelope.owner_id,
+        "trigger_event_sequence": envelope.trigger_event_sequence,
+        "trigger_event_type": envelope.trigger_event_type,
+        "usage_before": dict(envelope.usage_before),
+        "usage_after": dict(envelope.usage_after),
+        "marks_before": dict(envelope.marks_before),
+        "marks_after": dict(envelope.marks_after),
+        "skill_runtime_after": envelope.skill_runtime_after,
+        "continuation_identity": envelope.continuation_identity,
+        "action_ids": envelope.action_ids,
+        "legal_set_hashes": envelope.legal_set_hashes,
+        "chosen_action_semantics": envelope.chosen_action_semantics,
+        "event_slice": envelope.event_slice,
+        "state_hash_before": envelope.state_hash_before,
+        "state_hash_after": envelope.state_hash_after,
+        "rng_hash": envelope.rng_hash,
+        "contract_identity": GENERAL_PRODUCTION_REPLAY_CONTRACT_IDENTITY_V2,
+    }
+    with pytest.raises(SkillReplayDivergenceError):
+        GeneralProductionReplayEnvelope(**kwargs)
+
+    # 2. from_dict with explicit V2 identity in historical payload -> fails closed
+    historical = copy.deepcopy(envelope.to_dict())
+    historical.pop("replay_contract_version", None)
+    historical.pop("required_authority_capabilities", None)
+    historical["contract_identity"] = GENERAL_PRODUCTION_REPLAY_CONTRACT_IDENTITY_V2
+    _recompute_general_envelope_identities(historical)
+    with pytest.raises(SkillReplayDivergenceError):
+        GeneralProductionReplayEnvelope.from_dict(historical)

@@ -768,8 +768,85 @@ class FuyinSkillHandler(SkillHandler):
         return updated, ineffective, tuple(events)
 
 
+class QianchongSkillHandler(SkillHandler):
+    """【谦冲】：锁定技，如果你的装备区所有牌均为黑色，则你拥有技能“帷幕”；
+    如果你的装备区所有牌均为红色，则你拥有技能“明哲”。
+    出牌阶段开始时，若你不满足上述条件，则你选择一种类型的牌，此阶段使用此类型的牌无次数和距离限制。
+    """
+
+    def __init__(self) -> None:
+        self._definition = SkillDefinition(
+            skill_id="sgs_skill_qianchong",
+            skill_name="谦冲",
+            version="1.0.0",
+            kind=AuthoritativeSkillKind.TRIGGERED,
+            tags=frozenset({AuthoritativeSkillTag.LOCKED}),
+            timing_windows=frozenset({SkillTimingWindow.PLAY_PHASE_START}),
+            is_mandatory=True,
+            description="锁定技，如果你的装备区所有牌均为黑色，则你拥有技能“帷幕”；如果你的装备区所有牌均为红色，则你拥有技能“明哲”。出牌阶段开始时，若你不满足上述条件，则你选择一种类型的牌，此阶段使用此类型的牌无次数和距离限制。",
+        )
+
+    @property
+    def definition(self) -> SkillDefinition:
+        return self._definition
+
+    def evaluate_trigger(
+        self,
+        context: SkillTriggerContext,
+        state: GameState,
+        skill_state: SkillRuntimeState,
+    ) -> bool:
+        if context.turn_player_id != skill_state.owner_id:
+            return False
+        eq_card_ids: list[str] = []
+        for slot in ("weapon", "armor", "attack_horse", "defense_horse", "treasure"):
+            eq_card_ids.extend(state.card_ids_in(ZoneRef.equipment(skill_state.owner_id, slot)))
+        eq_cards = [
+            state.cards_by_id[cid]
+            for cid in eq_card_ids
+            if cid in state.cards_by_id
+        ]
+        if not eq_cards:
+            return True
+        colors = {c.color for c in eq_cards}
+        if colors == {"黑"} or colors == {"红"}:
+            return False
+        return True
+
+
+class ShangjianSkillHandler(SkillHandler):
+    """【尚俭】：锁定技，一名角色的结束阶段，若你于此回合失去牌的数量小于等于你的体力值，则你摸等同于失去数量的牌。"""
+
+    def __init__(self) -> None:
+        self._definition = SkillDefinition(
+            skill_id="sgs_skill_shangjian",
+            skill_name="尚俭",
+            version="1.0.0",
+            kind=AuthoritativeSkillKind.TRIGGERED,
+            tags=frozenset({AuthoritativeSkillTag.LOCKED}),
+            timing_windows=frozenset({SkillTimingWindow.END_PHASE_START}),
+            is_mandatory=True,
+            description="锁定技，一名角色的结束阶段，若你于此回合失去牌的数量小于等于你的体力值，则你摸等同于失去数量的牌。",
+        )
+
+    @property
+    def definition(self) -> SkillDefinition:
+        return self._definition
+
+    def evaluate_trigger(
+        self,
+        context: SkillTriggerContext,
+        state: GameState,
+        skill_state: SkillRuntimeState,
+    ) -> bool:
+        player = state.players_by_id.get(skill_state.owner_id)
+        if player is None or not player.alive:
+            return False
+        return True
+
+
 def create_proof_slice_v1_handlers() -> tuple[SkillHandler, ...]:
-    """V1 production proof handlers, including Batch V1 G1/G2 generals."""
+    """V1 production proof handlers, including Batch V1 G1/G2/G3 generals."""
     return (
         PojiangSkillHandler(),
         MingzheSkillHandler(),
@@ -777,6 +854,8 @@ def create_proof_slice_v1_handlers() -> tuple[SkillHandler, ...]:
         JiliSkillHandler(),
         ZuilunSkillHandler(),
         FuyinSkillHandler(),
+        QianchongSkillHandler(),
+        ShangjianSkillHandler(),
     )
 
 

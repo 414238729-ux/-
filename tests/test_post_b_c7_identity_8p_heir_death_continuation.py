@@ -10,7 +10,12 @@ from typing import Any
 import pytest
 
 from scripts.sgs_engine.events import EventType
-from scripts.sgs_engine.model import DISCARD_PILE, PROCESSING_ZONE, ZoneRef
+from scripts.sgs_engine.model import (
+    DISCARD_PILE,
+    DRAW_PILE,
+    PROCESSING_ZONE,
+    ZoneRef,
+)
 from scripts.sgs_engine.mode_identity import StandardIdentityRole
 from scripts.sgs_engine.mode_identity_heir import (
     FormalHeirAndSpyChoiceIdentityConfiguration,
@@ -279,6 +284,39 @@ def test_c7_succession_updates_current_lord_without_reseating() -> None:
     assert game.state.players_by_id[lord].alive is False
     if not game.is_finished:
         assert game.winner_id is None
+
+
+def test_c7_succession_equipment_gain_uses_authoritative_movement_seam() -> None:
+    game = _session(6)
+    lord = game.lord_player_id
+    successor = _players_of_role(game, StandardIdentityRole.LOYALIST)[0]
+    equipment_id = next(
+        card.instance_id
+        for card in game.state.cards
+        if card.card_type == "装备牌"
+        and card.equipment_slot == "weapon"
+        and game.state.location_of(card.instance_id) in (DRAW_PILE, DISCARD_PILE)
+    )
+    game._state = game.state.move_card(
+        equipment_id, ZoneRef.equipment(lord, "weapon")
+    )
+    game._variant.heir_player_id = successor
+    game._variant.heir_selection_used = True
+
+    _kill(game, successor, lord)
+    assert game.phase is ProductionPhase.SUCCESSION_CARD_CHOICE
+    _step(game, "succession_obtain_card", zone="equipment:weapon")
+
+    assert game.state.location_of(equipment_id) == ZoneRef.hand(successor)
+    entry = next(
+        item
+        for item in game.turn_loss_ledger.entries
+        if item.card_instance_id == equipment_id
+    )
+    assert entry.source_zone == "equipment:weapon"
+    assert entry.destination_zone == "hand"
+    assert entry.semantic_reason == "succession_obtain"
+    assert entry.counts_as_loss is True
 
 
 def test_c7_converted_loyalist_can_succeed() -> None:

@@ -3,7 +3,8 @@
 > 状态标签：`AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`、`AUDITED_PASSED`
 > （CURRENT：`AUTHORITATIVE_GENERAL_BATCH_V1` 的 G1 / `shamoke` 已完成；
 > G2 / 诸葛瞻已完成 closure audit、final full pytest 与 documentation
-> finalization；G3 / 王元姬尚未开始；Batch V1 仍为 `IN_PROGRESS`）
+> finalization 并已 frozen；G3 / 王元姬已完成 final closure、final full pytest
+> 与 documentation finalization，正在等待独立 freeze；Batch V1 仍为 `IN_PROGRESS`）
 >
 > 本文件是 POST-B 开发轨（deepseek-post-milestone-b-development）的新增状态文档，
 > 未登记进 `docs/CHECKPOINT_MANIFEST.json`，也不修改任何已登记文档
@@ -62,10 +63,14 @@
   `G2_ZHUGEZHAN_FIRST_ADVERSARIAL_AUDIT = FAILED` 与
   `G2_ZHUGEZHAN_SECOND_ADVERSARIAL_AUDIT = FAILED` 均作为历史结论保留，
   后续 findings 已关闭并完成 closure audit 与 final full pytest；
-  G3 / 王元姬尚未开始。Batch V1 不得登记为
-  `COMPLETE`、`AUDITED_PASSED` 或 frozen complete。当前 implementation identity / pin =
-  `7394e4ca25c85f4e9454bad363c707c7a1487d0b027c014c4d8708c176359c66`，
-  见 §16–§21。）
+  G3 / 王元姬 = `GENERAL_COMPLETE`，historical failed audits 全部保留，最终
+  `G3_WANGYUANJI_FINAL3_CURRENT_CONTRACT_LATCH_CLOSURE_AUDIT = PASSED`，
+  final full pytest = `3360 passed in 5803.79s (1:36:43)`，documentation
+  finalization = `PASSED`，正在等待 freeze。Batch V1 不得登记为
+  `COMPLETE`、`AUDITED_PASSED` 或 frozen complete。当前 G3 implementation
+  identity / pin =
+  `da73a75e195153f61a89012adf9f84b309194e2a71889ef2059fb847dbfa22d1`，
+  见 §16–§22。）
 - `F-003` = `CLOSED`
 - `F-004` = `CLOSED`
 - `F-005` = `CLOSED`
@@ -2365,3 +2370,194 @@ READY_FOR_G3_IMPLEMENTATION = NO
 G3 / 王元姬仍未开始，因此 `AUTHORITATIVE_GENERAL_BATCH_V1` 不能写成
 `COMPLETE`。本轮没有 commit、tag、push、PR，没有开始 G3、Stage3 或 C8；
 当前工作停止在 G2 freeze 前，等待用户授权 freeze。
+
+## 22. AUTHORITATIVE_GENERAL_BATCH_V1 — G3 WANGYUANJI DOCUMENTATION / STATUS FINALIZATION
+
+本节是 G3 王元姬的当前 authoritative status。此前 implementation、各轮
+adversarial audit、remediation、closure 与 re-closure 结论均为不可覆盖的历史
+记录；本节保留当时的 `FAILED`，不把历史失败改写成“从未失败”。G1 / G2 的
+frozen 证据也不由本节改写。
+
+### 22.1 Canonical `GeneralDefinition`
+
+| 字段 | authoritative 值 |
+| --- | --- |
+| general key | `wangyuanji` |
+| gender | `FEMALE` |
+| starting HP / max HP | `3 / 3` |
+| base skill IDs | `sgs_skill_qianchong`、`sgs_skill_shangjian` |
+
+`sgs_skill_weimu` 与 `sgs_skill_mingzhe` 只由【谦冲】按 live equipment state
+动态授予，不是王元姬的 base skills。registry、assignment-derived skill set 与
+Knowledge 均采用这一口径。
+
+### 22.2 Canonical production semantics
+
+#### 【谦冲】
+
+- 装备区非空且全黑时动态拥有【帷幕】，非空且全红时动态拥有【明哲】；空装备
+  与红黑混合均不获得这两个动态技能。
+- 只有 `PLAY_PHASE_START` 当下为空或混合时，才通过 signed choice 选择
+  `basic` / `trick` / `equipment`。所选类别在本次 PLAY 中使用时不受次数与
+  距离限制，但不改变 `attack_range`。
+- 许可一旦在 PLAY 开始建立，就贯穿整次 PLAY；中途装备变化不撤销。若 PLAY
+  开始时已全红或全黑，则当时不开放选择，中途后来变为空或混合也不 late-open。
+- phase permission 与 live【帷幕】/【明哲】grant 是两套独立生命周期；equipment
+  state 与 chosen card type 都是公开状态。choice、continuation、authority
+  snapshot 与 replay 均认证 signed action semantics。
+
+#### 【尚俭】
+
+- 无选择的锁定技，在任意角色真实 `END_PHASE_START` 检查。`L` 是王元姬在
+  当前真实回合累计的 countable lost cards；`H` 是该拥有者实际 END resolution
+  时的 live current HP。`L <= H` 时摸 `L`，否则摸 `0`；`L = 0` 时摸 `0`。
+- 手牌区、装备区的 countable departure 一般计数；判定区 source departure
+  不计。延时锦囊从手牌使用离开仍计一次；被获得、被弃置及旧装备同槽替换均计；
+  同一实体牌在不同 root 再次离开可再次计数。
+- 正常装备使用的 `HAND -> PROCESSING -> SELF_EQUIPMENT` root 对尚俭
+  `L = 0`；同槽旧装备离开 `+1`。这一 root 的 `HAND -> PROCESSING` 仍是
+  【明哲】的 actual loss node，二者不共享粗糙 loss 布尔值。
+- END checkpoint 之后的 loss 仍记入当前 turn ledger，但不追溯已结算的尚俭；
+  ledger 维持到 true turn boundary。多个王元姬从当前回合玩家的后座开始按
+  座次逐个完整结算，后一座次读取 live state。
+
+#### 【明哲】exact-loss-node 与【贯石斧】
+
+- 仅回合外、红牌、因使用／打出／弃置而失去时触发；普通获得或其他 generic
+  movement 不触发。同一 root 有 `N` 张 qualifying cards 时，产生确定顺序的
+  `#0..#N-1` 独立 optional triggers。
+- `HAND -> PROCESSING` 是 use/play actual loss node，按当时 effective skill
+  set 判断；不得因之后装备进入自己的装备区而追溯补触发。
+- `EQUIPMENT -> OUT` 先提交 movement，再执行【谦冲】reconcile，然后以
+  resulting effective set 判断该 actual loss node 的【明哲】；这一 snapshot
+  规则只冻结给当前动态技能边界，不泛化成所有技能的全局规则。
+- 【贯石斧】弃两张红牌时，先在 actual loss node 发现【明哲】`#0/#1`；父级
+  强制命中伤害由 generic `_PendingCardContinuation` 暂停，队列 drain 后恢复并
+  恰好造成一次伤害。没有 revision hack，也没有把 discovery 后移到 damage 后。
+- 真实 signed production proof 覆盖【贯石斧】同 root 两牌；内部 `N = 3`
+  scaling test 只证明 contract seam 的 trigger-index 扩展性，不冒充 real signed
+  production proof。
+
+### 22.3 Replay / authority contract
+
+- schema：`sgs-authoritative-general-production-replay-v1`。
+- current G3 version：`general-production-replay.v2.g3-authority-required`。
+- current G3 contract identity：
+  `00b1d664d05a82364c44170d7ccb37d1b5544554c191e50b8d49be27b5ecb0db`。
+- 三人 participant list 正式支持；`pending_skill_decision_queue` 与 card
+  continuation semantic kind 都属于 required authority snapshot。
+- constructor、`from_dict` 与 factory 对 current required fields 保持一致并
+  fail closed。V2 version、V2 contract identity、任一 G3 current capability 或
+  G3 content classifier 中任何一个 marker 都会 latch current strict；marker
+  conflict 必须 fail closed。
+- historical implicit legacy defaults 只允许在不存在任何 current marker 且内容
+  不是 G3 时使用；删除 authority 字段不能把 current G3 envelope 降级成 legacy。
+- 24-axis semantic deep-tamper matrix 与【贯石斧】continuation tamper matrix 均已
+  闭合，并覆盖 rehashed outer identities 后的 cold-load / fresh reexecution 拒绝。
+
+### 22.4 Audit history（完整保留）
+
+```text
+G3_WANGYUANJI_IMPLEMENTATION = PASSED
+G3_WANGYUANJI_FIRST_ADVERSARIAL_AUDIT = FAILED
+G3_WANGYUANJI_FIRST_AUDIT_REMEDIATION = PASSED
+G3_WANGYUANJI_SECOND_ADVERSARIAL_AUDIT = FAILED
+G3_WANGYUANJI_SECOND_AUDIT_REMEDIATION = PASSED
+G3_WANGYUANJI_CLOSURE_AUDIT = FAILED
+G3_WANGYUANJI_CLOSURE_REMEDIATION = PASSED
+G3_WANGYUANJI_RE_CLOSURE_AUDIT = FAILED
+G3_WANGYUANJI_FINAL_RE_CLOSURE_AUDIT = FAILED
+G3_WANGYUANJI_FINAL_RE_CLOSURE_REMEDIATION = PASSED
+G3_WANGYUANJI_FINAL_RE_CLOSURE_AUDIT_V2 = FAILED
+G3_WANGYUANJI_FINAL2_REPLAY_CONSTRUCTOR_REMEDIATION = PASSED
+G3_WANGYUANJI_FINAL2_CONSTRUCTOR_CLOSURE_AUDIT = FAILED
+G3_WANGYUANJI_FINAL3_CURRENT_CONTRACT_LATCH_REMEDIATION = PASSED
+G3_WANGYUANJI_FINAL3_CURRENT_CONTRACT_LATCH_CLOSURE_AUDIT = PASSED
+```
+
+最终 closure 状态：
+
+```text
+G3-FINAL-001 = CLOSED
+G3-FINAL-002 = CLOSED
+G3-FINAL2-001 = CLOSED
+G3-FINAL3-001 = CLOSED
+WANG YUANJI = GENERAL_COMPLETE
+```
+
+### 22.5 Final full pytest evidence
+
+本轮 documentation finalization 没有重跑 full pytest；沿用并冻结当前
+implementation identity 对应的唯一 final run：
+
+```text
+started=2026-08-31 23:59:52
+finished=2026-09-01 01:36:43
+exit=0
+collected=3360
+passed=3360
+failed=0
+errors=0
+skipped=0
+xfail=0
+xpass=0
+deselected=0
+duration=5803.79s (1:36:43)
+stderr_bytes=0
+```
+
+最终 summary 为 `3360 passed in 5803.79s (1:36:43)`；无 failed、error、
+skipped 或 warning summary。stdout log 为仓库外
+`D:\MyGPT\g3-wangyuanji-final-full-pytest-20260831-235426\logs\pytest-stdout.log`，
+stderr log 同目录且为 0 bytes。运行后 branch、HEAD、staged 与 dirty baseline
+均无漂移，computed implementation identity 仍为：
+
+```text
+da73a75e195153f61a89012adf9f84b309194e2a71889ef2059fb847dbfa22d1
+```
+
+并与 `scripts/current_implementation_pin.py` 的 current pin 完全一致。
+
+### 22.6 Documentation finalization validation
+
+- Knowledge、G3 registry、implementation identity pin、整份 G3 replay
+  contract / deep-tamper 与既有 source-integrity tests：`121 passed in 35.25s`，
+  exit `0`；无 failed、errors、skipped、xfail、xpass 或 deselected。
+- 实际 source-integrity CLI：exit `0`；`scanned_file_count=203`、
+  `audit_item_count=190`、`defect_count=0`。
+- `compileall -q scripts tests`：exit `0`；TEMP/TMP、basetemp 与 pycache 全部使用
+  仓库外目录。
+- documentation finalization 后 computed implementation identity / pin 仍为
+  `da73a75e195153f61a89012adf9f84b309194e2a71889ef2059fb847dbfa22d1`。
+- 最终 `git diff --check = exit 0`；`staged = 0`；`unmerged = 0`；没有新增
+  `.workbuddy`、log、basetemp、cache 或 pyc dirty path。
+
+### 22.7 Frozen predecessors 与 G3 freeze baseline
+
+- G1 tag：`authoritative-general-batch-v1-g1-shamoke-audited`；tag object =
+  `9eed018b7263c6af41869ee85982db005b2584c1`；peeled commit =
+  `678179214a2260c23c95d03740191b1246024bbc`。
+- G2 tag：`authoritative-general-batch-v1-g2-zhugezhan-audited`；tag object =
+  `99ec1b62c6f5069a6ecc1d74830b1b06b1137997`；peeled commit =
+  `cbc16cb3e9d4e10d2661b0eb25993379a0e690ad`；frozen identity =
+  `7394e4ca25c85f4e9454bad363c707c7a1487d0b027c014c4d8708c176359c66`。
+- G3 branch：`codex/authoritative-general-batch-v1-g3-wangyuanji`；freeze baseline
+  HEAD = `cbc16cb3e9d4e10d2661b0eb25993379a0e690ad`；current implementation
+  identity / pin =
+  `da73a75e195153f61a89012adf9f84b309194e2a71889ef2059fb847dbfa22d1`。
+
+### 22.8 Final status
+
+```text
+G3_WANGYUANJI_DOCUMENTATION_FINALIZATION = PASSED
+G3_WANGYUANJI_FINAL_FULL_PYTEST = PASSED
+WANG YUANJI = GENERAL_COMPLETE
+READY_FOR_G3_FREEZE = YES
+AUTHORITATIVE_GENERAL_BATCH_V1 = IN_PROGRESS
+AUTHORITATIVE_GENERAL_BATCH_V1 != COMPLETE
+```
+
+G1 沙摩柯与 G2 诸葛瞻保持 frozen；G3 王元姬已经完成当前 scope，但尚未执行
+freeze。Batch V1 因此仍为 `IN_PROGRESS`，不得宣称 complete。本轮没有
+commit、tag、push、PR，没有修改 production semantics 或 tests 逻辑，也没有
+开始 G4、Stage3 或 C8；工作在 G3 freeze 前停止，等待下一轮独立授权。

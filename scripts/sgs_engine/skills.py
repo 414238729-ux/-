@@ -73,6 +73,7 @@ class SkillTimingWindow(str, Enum):
     RESPONSE_WINDOW = "response_window"
     PHASE_CHANGE = "phase_change"
     TURN_CHANGE = "turn_change"
+    PLAY_PHASE_START = "play_phase_start"
     END_PHASE_START = "end_phase_start"
 
 
@@ -94,6 +95,7 @@ _TRIGGER_WINDOWS = frozenset(
         SkillTimingWindow.ON_BECOME_TARGET,
         SkillTimingWindow.PHASE_CHANGE,
         SkillTimingWindow.TURN_CHANGE,
+        SkillTimingWindow.PLAY_PHASE_START,
         SkillTimingWindow.END_PHASE_START,
         SkillTimingWindow.RESPONSE_WINDOW,
     }
@@ -359,6 +361,73 @@ class SkillRuntimeState:
             "uses_this_game": self.uses_this_game,
             "uses_this_phase": self.uses_this_phase,
             "uses_this_turn": self.uses_this_turn,
+        }
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DynamicSkillGrant:
+    """An authoritative source-tracked dynamic skill grant."""
+
+    grant_id: str
+    owner_id: str
+    source_skill_id: str
+    target_skill_id: str
+    source_instance_id: str | None = None
+    lifetime_kind: str = "conditional"
+    condition_identity: str = ""
+    created_turn_number: int = 1
+    created_phase: str = "prepare"
+    active: bool = True
+    revoke_reason: str | None = None
+    revoke_turn_number: int | None = None
+    revoke_phase: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "grant_id", _require_nonempty_str(self.grant_id, "grant_id"))
+        object.__setattr__(self, "owner_id", _require_nonempty_str(self.owner_id, "owner_id"))
+        object.__setattr__(self, "source_skill_id", _require_nonempty_str(self.source_skill_id, "source_skill_id"))
+        object.__setattr__(self, "target_skill_id", _require_nonempty_str(self.target_skill_id, "target_skill_id"))
+        if self.source_instance_id is not None:
+            object.__setattr__(self, "source_instance_id", _require_nonempty_str(self.source_instance_id, "source_instance_id"))
+        object.__setattr__(self, "lifetime_kind", _require_nonempty_str(self.lifetime_kind, "lifetime_kind"))
+        if not isinstance(self.condition_identity, str):
+            raise TypeError("condition_identity 必须是字符串")
+        object.__setattr__(self, "created_turn_number", _require_non_negative_int(self.created_turn_number, "created_turn_number"))
+        object.__setattr__(self, "created_phase", _require_nonempty_str(self.created_phase, "created_phase"))
+        if not isinstance(self.active, bool):
+            raise TypeError("active 必须是布尔值")
+        if self.revoke_reason is not None:
+            object.__setattr__(self, "revoke_reason", _require_nonempty_str(self.revoke_reason, "revoke_reason"))
+        if self.revoke_turn_number is not None:
+            object.__setattr__(self, "revoke_turn_number", _require_non_negative_int(self.revoke_turn_number, "revoke_turn_number"))
+        if self.revoke_phase is not None:
+            object.__setattr__(self, "revoke_phase", _require_nonempty_str(self.revoke_phase, "revoke_phase"))
+
+    def revoke(self, reason: str, turn_number: int, phase: str) -> DynamicSkillGrant:
+        """Return a revoked copy of this grant."""
+        return replace(
+            self,
+            active=False,
+            revoke_reason=_require_nonempty_str(reason, "revoke_reason"),
+            revoke_turn_number=_require_non_negative_int(turn_number, "revoke_turn_number"),
+            revoke_phase=_require_nonempty_str(phase, "revoke_phase"),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "grant_id": self.grant_id,
+            "owner_id": self.owner_id,
+            "source_skill_id": self.source_skill_id,
+            "target_skill_id": self.target_skill_id,
+            "source_instance_id": self.source_instance_id,
+            "lifetime_kind": self.lifetime_kind,
+            "condition_identity": self.condition_identity,
+            "created_turn_number": self.created_turn_number,
+            "created_phase": self.created_phase,
+            "active": self.active,
+            "revoke_reason": self.revoke_reason,
+            "revoke_turn_number": self.revoke_turn_number,
+            "revoke_phase": self.revoke_phase,
         }
 
 
