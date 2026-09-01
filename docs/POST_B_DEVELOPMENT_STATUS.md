@@ -1,10 +1,10 @@
 # POST-B 开发状态（POST_B_DEVELOPMENT_STATUS）
 
 > 状态标签：`AUDITED_SCOPE_READY_FOR_NEXT_DEVELOPMENT_STAGE`、`AUDITED_PASSED`
-> （CURRENT：`AUTHORITATIVE_GENERAL_BATCH_V1` 的 G1 / `shamoke` 已完成；
-> G2 / 诸葛瞻已完成 closure audit、final full pytest 与 documentation
-> finalization 并已 frozen；G3 / 王元姬已完成 final closure、final full pytest
-> 与 documentation finalization，正在等待独立 freeze；Batch V1 仍为 `IN_PROGRESS`）
+> （CURRENT：`AUTHORITATIVE_GENERAL_BATCH_V1` 的 G1 / 沙摩柯、G2 / 诸葛瞻、
+> G3 / 王元姬均已完成 closure audit、final full pytest、documentation
+> finalization 与 audited freeze；Batch V1 final overall closure audit 已通过，
+> `AUTHORITATIVE_GENERAL_BATCH_V1 = COMPLETE`。见 §16–§23。）
 >
 > 本文件是 POST-B 开发轨（deepseek-post-milestone-b-development）的新增状态文档，
 > 未登记进 `docs/CHECKPOINT_MANIFEST.json`，也不修改任何已登记文档
@@ -54,23 +54,14 @@
   `2460d3ac6998746a4aa5c13cf84321d652b965d9a462d325b41519625116c949`。
   不等于 all generals / full skill roster / FULL_GAME_READY / RELEASE_READY /
   formal win-rate ready / AI ready。见 §15。）
-- `AUTHORITATIVE_GENERAL_BATCH_V1` = `IN_PROGRESS`
-  （G1 / `shamoke` = `GENERAL_COMPLETE`；
-  `G1_SHAMOKE_SIXTH_CLOSURE_AUDIT = PASSED`；
-  `G1_SHAMOKE_FINAL_FULL_PYTEST = PASSED`；
-  G2 / 诸葛瞻 = `GENERAL_COMPLETE`，且
-  `G2_ZHUGEZHAN_DOCUMENTATION_FINALIZATION = PASSED`；
-  `G2_ZHUGEZHAN_FIRST_ADVERSARIAL_AUDIT = FAILED` 与
-  `G2_ZHUGEZHAN_SECOND_ADVERSARIAL_AUDIT = FAILED` 均作为历史结论保留，
-  后续 findings 已关闭并完成 closure audit 与 final full pytest；
-  G3 / 王元姬 = `GENERAL_COMPLETE`，historical failed audits 全部保留，最终
-  `G3_WANGYUANJI_FINAL3_CURRENT_CONTRACT_LATCH_CLOSURE_AUDIT = PASSED`，
-  final full pytest = `3360 passed in 5803.79s (1:36:43)`，documentation
-  finalization = `PASSED`，正在等待 freeze。Batch V1 不得登记为
-  `COMPLETE`、`AUDITED_PASSED` 或 frozen complete。当前 G3 implementation
-  identity / pin =
-  `da73a75e195153f61a89012adf9f84b309194e2a71889ef2059fb847dbfa22d1`，
-  见 §16–§22。）
+- `AUTHORITATIVE_GENERAL_BATCH_V1` = `COMPLETE`
+  （G1 / 沙摩柯、G2 / 诸葛瞻、G3 / 王元姬均为 `GENERAL_COMPLETE` 与
+  `FROZEN_AUDITED`；三个 frozen commit、annotated tag、historical
+  implementation identity 与 final full pytest evidence 已在 final overall
+  closure audit 中逐项复核，14/14 overall gates 均为 `PROVEN`。G1/G2/G3
+  的 historical `FAILED → remediation → PASSED` 链与各阶段
+  `AUTHORITATIVE_GENERAL_BATCH_V1 = IN_PROGRESS` 记录继续保留，不因当前
+  `COMPLETE` 被改写。见 §16–§23。）
 - `F-003` = `CLOSED`
 - `F-004` = `CLOSED`
 - `F-005` = `CLOSED`
@@ -2532,7 +2523,7 @@ da73a75e195153f61a89012adf9f84b309194e2a71889ef2059fb847dbfa22d1
 - 最终 `git diff --check = exit 0`；`staged = 0`；`unmerged = 0`；没有新增
   `.workbuddy`、log、basetemp、cache 或 pyc dirty path。
 
-### 22.7 Frozen predecessors 与 G3 freeze baseline
+### 22.7 Frozen predecessors、G3 freeze baseline 与 freeze outcome
 
 - G1 tag：`authoritative-general-batch-v1-g1-shamoke-audited`；tag object =
   `9eed018b7263c6af41869ee85982db005b2584c1`；peeled commit =
@@ -2545,8 +2536,14 @@ da73a75e195153f61a89012adf9f84b309194e2a71889ef2059fb847dbfa22d1
   HEAD = `cbc16cb3e9d4e10d2661b0eb25993379a0e690ad`；current implementation
   identity / pin =
   `da73a75e195153f61a89012adf9f84b309194e2a71889ef2059fb847dbfa22d1`。
+- G3 frozen commit：`a820c3594e92438b5e4aa50aaf3cf27b018e219c`；其唯一 parent 为上述
+  G2 frozen commit。
+- G3 annotated tag：`authoritative-general-batch-v1-g3-wangyuanji-audited`；
+  tag object = `3ca4f4171bd820af51b28616b1b511d941f815f3`；peeled commit =
+  `a820c3594e92438b5e4aa50aaf3cf27b018e219c`。local / remote object 与 peel
+  均已在 Batch final overall closure audit 现场复核一致。
 
-### 22.8 Final status
+### 22.8 Documentation-finalization status（HISTORICAL PRE-FREEZE）
 
 ```text
 G3_WANGYUANJI_DOCUMENTATION_FINALIZATION = PASSED
@@ -2557,7 +2554,143 @@ AUTHORITATIVE_GENERAL_BATCH_V1 = IN_PROGRESS
 AUTHORITATIVE_GENERAL_BATCH_V1 != COMPLETE
 ```
 
-G1 沙摩柯与 G2 诸葛瞻保持 frozen；G3 王元姬已经完成当前 scope，但尚未执行
-freeze。Batch V1 因此仍为 `IN_PROGRESS`，不得宣称 complete。本轮没有
-commit、tag、push、PR，没有修改 production semantics 或 tests 逻辑，也没有
-开始 G4、Stage3 或 C8；工作在 G3 freeze 前停止，等待下一轮独立授权。
+以上状态是 G3 documentation finalization 完成后、freeze 执行前的历史快照；
+其中 `IN_PROGRESS`、`READY_FOR_G3_FREEZE = YES` 与“尚未 freeze”不得被解释为
+当前状态。随后 G3 已按 §22.7 的 commit / annotated tag 完成 audited freeze；
+历史快照本身不改写。
+
+### 22.9 G3 frozen status（CURRENT）
+
+```text
+G3_WANGYUANJI_FREEZE = PASSED
+WANG YUANJI = GENERAL_COMPLETE
+G3 = COMMITTED_TAGGED_PUSHED_AUDITED
+G3 = FROZEN_AUDITED
+```
+
+## 23. AUTHORITATIVE_GENERAL_BATCH_V1 — FINAL OVERALL CLOSURE AUDIT
+
+### 23.1 Audit baseline 与严格 freeze chain
+
+- PRE branch：`codex/authoritative-general-batch-v1-g3-wangyuanji`。
+- PRE HEAD：`a820c3594e92438b5e4aa50aaf3cf27b018e219c`。
+- PRE working tree = clean；staged = `0`；unmerged = `0`；
+  `git diff --check` = exit `0`。
+- remote = `github`，fetch / push URL 均为
+  `https://github.com/414238729-ux/-.git`。
+- 严格 commit chain 只有：
+  `678179214a2260c23c95d03740191b1246024bbc`（G1）→
+  `cbc16cb3e9d4e10d2661b0eb25993379a0e690ad`（G2）→
+  `a820c3594e92438b5e4aa50aaf3cf27b018e219c`（G3）。G2 的唯一 parent
+  是 G1，G3 的唯一 parent 是 G2；`rev-list --ancestry-path` 没有发现中间
+  隐藏 commit。
+
+### 23.2 Local / remote annotated tag integrity
+
+| General | local / remote tag object | local / remote peeled commit |
+| --- | --- | --- |
+| G1 沙摩柯 | `9eed018b7263c6af41869ee85982db005b2584c1` | `678179214a2260c23c95d03740191b1246024bbc` |
+| G2 诸葛瞻 | `99ec1b62c6f5069a6ecc1d74830b1b06b1137997` | `cbc16cb3e9d4e10d2661b0eb25993379a0e690ad` |
+| G3 王元姬 | `3ca4f4171bd820af51b28616b1b511d941f815f3` | `a820c3594e92438b5e4aa50aaf3cf27b018e219c` |
+
+远端 G3 branch 也指向 G3 frozen commit。任一 tag 的 local object、local peel、
+remote object、remote peel 均无 mismatch。
+
+### 23.3 Historical implementation identities 与 full pytest evidence
+
+每个 identity 均从对应 frozen commit 的独立 shadow tree 现场重算，不使用当前
+工作树代替历史 tree；computed identity 与该 tree 自带 pin 精确一致。
+
+| General | frozen implementation identity | final full pytest |
+| --- | --- | --- |
+| G1 沙摩柯 | `af66c568eb0c4b166139e24349f6e46e2a4735949125a326dde0490b8ade434e` | `3111 passed in 4657.65s (1:17:37)` |
+| G2 诸葛瞻 | `7394e4ca25c85f4e9454bad363c707c7a1487d0b027c014c4d8708c176359c66` | `3195 passed in 4484.38s (1:14:44)` |
+| G3 王元姬 | `da73a75e195153f61a89012adf9f84b309194e2a71889ef2059fb847dbfa22d1` | `3360 passed in 5803.79s (1:36:43)` |
+
+三组记录都是各自 final frozen identity 的无过滤 full suite，不是 targeted 数量。
+G2 首次 final full pytest 的 manifest mismatch / harness cleanup failure 继续按 §21.3
+与 §21.5 保留；表中 G2 数字是 remediation 后唯一 final rerun。G3 final full
+pytest 前后 identity / pin 未变化，exit = `0`，stderr = `0` bytes。
+
+### 23.4 Historical audit chain preservation
+
+- G1 的五次 adversarial `FAILED`、对应 remediation `PASSED` 与 sixth closure
+  `PASSED` 按 §16.3 原样保留。
+- G2 first / second adversarial `FAILED`、对应 remediation `PASSED`、closure
+  `PASSED`，以及首次 final full pytest `FAILED` 与最终 rerun `PASSED` 按
+  §21.3 / §21.5 原样保留。
+- G3 从 `FIRST_ADVERSARIAL_AUDIT = FAILED` 到
+  `FINAL3_CURRENT_CONTRACT_LATCH_CLOSURE_AUDIT = PASSED` 的完整链按 §22.4
+  原样保留；没有洗成“全部一次通过”。
+
+### 23.5 Cross-generation representative regression
+
+本轮没有重跑 full pytest。现场只运行跨代窄回归，覆盖：
+
+- G1 signed production、strict replay 与 true historical implicit legacy
+  cold-load；
+- G2 signed production 的 `n = 0/1/2/3` 与 7 条 Zhugezhan cold-load replay；
+- G3 三人【贯石斧】pause/resume replay、`G3-FINAL3-001` exploit regression 与
+  current marker latch；
+- no-skill isolation、no-skill V1 replay compatibility / V2 wrapper；
+- frozen Batch V1 registry 包含 G1/G2/G3。
+
+exact result：`21 collected / 21 passed / 0 failed / 0 errors / 0 deselected /
+0 skipped / 0 xfail / 0 xpass`，duration = `28.27s`，exit = `0`。
+
+### 23.6 Exact Batch scope
+
+Batch V1 的 frozen scope exactly 是：G1 沙摩柯（`shamoke`）、G2 诸葛瞻
+（`zhugezhan`）、G3 王元姬（`wangyuanji`）。production registry 的构造清单
+也只有这三个 definition。旧版曹纯、鲍信、傅佥、谋·公孙瓒及其他候选不属于
+本 Batch；Knowledge 中存在其规则资料或未来候选记录，不等于进入 Batch V1。
+
+### 23.7 Documentation finalization validation
+
+- exact changed-path set 只有 `docs/POST_B_DEVELOPMENT_STATUS.md`；没有修改
+  production、tests 或 Knowledge semantics。
+- post-write Knowledge / registry / source-integrity / implementation-pin narrow
+  gates：`48 collected / 48 passed / 0 failed / 0 errors / 0 deselected /
+  0 skipped / 0 xfail / 0 xpass`，duration = `1.08s`，exit = `0`。
+- source-integrity scan：exit = `0`；`scanned_file_count = 203`、
+  `audit_item_count = 190`、`defect_count = 0`。
+- `compileall -q scripts tests`：exit = `0`；pycache 位于仓库外。
+- post-write computed implementation identity / pin 仍为
+  `da73a75e195153f61a89012adf9f84b309194e2a71889ef2059fb847dbfa22d1`。
+- `git diff --check` = exit `0`；staged = `0`；unmerged = `0`；没有新增
+  `.workbuddy`、repo-local log、basetemp、cache 或 pyc dirty path。
+
+### 23.8 Overall gates
+
+| # | Overall gate | 最终裁定 |
+| --- | --- | --- |
+| 1 | Batch scope frozen and exact | `PROVEN` |
+| 2 | G1 freeze integrity | `PROVEN` |
+| 3 | G2 freeze integrity | `PROVEN` |
+| 4 | G3 freeze integrity | `PROVEN` |
+| 5 | Commit parent chain integrity | `PROVEN` |
+| 6 | Local / remote tag integrity | `PROVEN` |
+| 7 | Implementation identity chain integrity | `PROVEN` |
+| 8 | Full pytest evidence integrity | `PROVEN` |
+| 9 | Historical audit chain preservation | `PROVEN` |
+| 10 | G1/G2 non-regression under G3 infrastructure | `PROVEN` |
+| 11 | Replay legacy/current compatibility across generations | `PROVEN` |
+| 12 | Documentation consistency | `PROVEN` |
+| 13 | Repository hygiene | `PROVEN` |
+| 14 | No unresolved current blocker | `PROVEN` |
+
+### 23.9 Final status 与 lifecycle boundary
+
+```text
+AUTHORITATIVE_GENERAL_BATCH_V1_FINAL_CLOSURE = PASSED
+G1 = FROZEN_AUDITED
+G2 = FROZEN_AUDITED
+G3 = FROZEN_AUDITED
+AUTHORITATIVE_GENERAL_BATCH_V1 = COMPLETE
+```
+
+本次 final overall closure 只最终化本权威状态文档，不修改 production / tests /
+Knowledge semantics，不重跑 full pytest，不创建 PR，不进入 G4、Stage3 或 C8。
+既有 milestone 惯例支持 docs-only closure commit；现有 Batch V1 tag 惯例是每个
+General 各自一个 audited annotated tag，没有既定 overall Batch tag 名。因此本轮
+可创建并推送 docs-only closure commit，但不猜测或新增 overall tag。
