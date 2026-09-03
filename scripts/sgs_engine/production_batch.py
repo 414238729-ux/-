@@ -3332,12 +3332,6 @@ class ProductionBasicCardBatch:
         # adapter.audit_state() is snapshotted at registration time.
         self._skill_runtime = None
         self._qianchong_phase_permission: QianchongPhasePermission | None = None
-        initial_first_id = (
-            prepared_player_ids[0] if first_player_id is None else first_player_id
-        )
-        self._turn_loss_ledger = TurnLossLedger(
-            turn_number=1, turn_player_id=initial_first_id
-        )
         self._card_movement_authority: tuple[
             CardMovementAuthorityEntry, ...
         ] = ()
@@ -3388,6 +3382,9 @@ class ProductionBasicCardBatch:
         if first_player_id is None:
             first_player_id = self._rng.choice(prepared_player_ids)
         self._first_player_id = first_player_id
+        self._turn_loss_ledger = TurnLossLedger(
+            turn_number=1, turn_player_id=first_player_id
+        )
         ordered_ids = [record.instance_id for record in records]
         if shuffle:
             self._rng.shuffle(ordered_ids)
@@ -5222,6 +5219,10 @@ class ProductionBasicCardBatch:
             raise ProductionBatchError(
                 "终止不变量失败：FINISHED 时技能 continuation 必须清空"
             )
+        if self._end_phase_dispatch_state is not None:
+            raise ProductionBatchError(
+                "终止不变量失败：FINISHED 时 _end_phase_dispatch_state 必须为 None"
+            )
         if runtime.phase is not ProductionPhase.FINISHED:
             raise ProductionBatchError(
                 "终止不变量只能在FINISHED后执行"
@@ -6861,6 +6862,8 @@ class ProductionBasicCardBatch:
     ) -> None:
         if self._skill_runtime is not None:
             self._sync_skill_lifecycle(previous, next_runtime)
+        if next_runtime.phase is ProductionPhase.FINISHED:
+            self._end_phase_dispatch_state = None
         previous_entry = (
             previous.turn_number,
             previous.current_player_id,
@@ -7070,6 +7073,9 @@ class ProductionBasicCardBatch:
         immediately. When resumed after the decision is resolved, evaluation continues
         from the recorded cursor and evaluates subsequent skills live at resolution time.
         """
+        if self.is_finished or self._runtime.phase is ProductionPhase.FINISHED:
+            self._end_phase_dispatch_state = None
+            return state
         current_state = state
         while self._end_phase_dispatch_state is not None:
             dispatch = self._end_phase_dispatch_state
@@ -20378,6 +20384,7 @@ class ProductionBasicCardBatch:
         )
         events.extend(reveal_events)
         self._events.extend(tuple(events))
+        self._end_phase_dispatch_state = None
         next_runtime = replace(
             cleanup_finished_transient_runtime(runtime),
             phase=ProductionPhase.FINISHED,

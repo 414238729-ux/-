@@ -2694,3 +2694,78 @@ Knowledge semantics，不重跑 full pytest，不创建 PR，不进入 G4、Stag
 既有 milestone 惯例支持 docs-only closure commit；现有 Batch V1 tag 惯例是每个
 General 各自一个 audited annotated tag，没有既定 overall Batch tag 名。因此本轮
 可创建并推送 docs-only closure commit，但不猜测或新增 overall tag。
+
+## 24. SKILL-AWARE FIXED-ASSIGNMENT FULL-GAME BRIDGE V1 — AUDITED LOCAL FREEZE
+
+### 24.1 Final authority 与 formal acceptance
+
+- final implementation identity =
+  `ba3838692ad9e1954f8759ea9f51260796fe011e7cc881747f74018e0c42c2e6`；
+  current / global pin 与之精确一致。
+- final formal artifact root =
+  `D:\MyGPT\basetemp\bridge-h-formal-acceptance\20260903T131637Z`。
+- formal matrix = `18_BASELINE_PLUS_0_SENTINEL`：exact ordered
+  `B18-001`…`B18-018` 共 18 个 baseline cell，sentinel cell 为 0；
+  `MINIMAL_REQUIRED_SENTINELS = []`，`SENTINEL_DISCOVERY = NOT_REQUIRED`。
+
+```text
+BRIDGE_V1_FINAL_EXTERNAL_ARTIFACT_AUDIT = PASSED
+BRIDGE_V1_ACCEPTANCE = AUDITED_PASSED
+BRIDGE_H = AUDITED_PASSED
+BASELINE_18 = AUDITED_PASSED
+BRIDGE_V1_FREEZE_READINESS = YES
+```
+
+### 24.2 Final external artifact audit 与 B18-010 记录
+
+Final formal artifact external audit 由 GLM-5.3 MAX 以独立、只读敌对审计执行；
+最终只有 4 个 `INFO` finding，没有 `CRITICAL` / `HIGH` / `MEDIUM` finding，
+不存在 freeze blocker。
+
+B18-010 的 discovery artifact、formal artifact、formal post-validation 与 raw
+terminal events 重派生 winner 均为 `p2`。先前 formal prose 中的 `winner=p1`
+只是 `REPORT_ONLY` 笔误（`INFO`），不得改写或覆盖 machine artifact truth；该
+裁定没有触发 natural game 重跑。
+
+### 24.3 Historical pre-freeze full pytest 与治理闭环
+
+当前 final identity `ba383869...c2e6` 下的 pre-freeze full pytest 只运行过一次，
+历史结果必须保留为：
+
+```text
+BRIDGE_V1_PRE_FREEZE_FULL_PYTEST = FAILED
+3797 passed, 2 failed, 0 errors in 6337.95s
+exit code = 1
+log SHA-256 = a3ca5a8088644d3f036b811f52d55ab81bcebcbd3c0f2a08506a03890fd5f8f5
+```
+
+两个 failure 均在 old current pin
+`da73a75e195153f61a89012adf9f84b309194e2a71889ef2059fb847dbfa22d1`
+与 live identity 不一致处失败，随后均裁定为
+`EXPECTED_PRE_FREEZE_GOVERNANCE_FAILURE`；它们不是 gameplay、Bridge semantics
+或 replay failure，也没有削弱测试断言。
+
+最小治理 remediation 只修改 `scripts/current_implementation_pin.py`，将 current
+pin 更新为 `ba383869...c2e6`。pin 位于 67-file implementation identity hash
+domain 之外，remediation 前后 computed implementation identity 均保持
+`ba383869...c2e6`，没有 identity churn。随后 exact directly relevant
+identity / R8 / pin guards 为 `9 passed in 2.84s`，`compileall = PASS`，
+working-tree 与 cached diff checks 均为 `PASS`。
+
+因此 `FULL_PYTEST_RERUN_REQUIRED = NO`，同一 implementation identity 下没有
+运行第二次 full pytest；不得把上述历史 full pytest 描述成 all green。
+
+### 24.4 Local freeze lifecycle boundary
+
+本节随 exact 18-path Bridge V1 changeset 进入本地 freeze commit，并由 annotated
+tag
+`post-authoritative-general-batch-v1-skill-aware-fixed-assignment-full-game-bridge-v1-audited`
+固化。该 lifecycle 只覆盖本地 audited freeze；不包含 remote publication，且不
+授权任何额外 long test、sentinel discovery 或后续 mode 实现。
+
+```text
+BRIDGE_V1_FREEZE_SCOPE = LOCAL_COMMIT_AND_ANNOTATED_TAG_ONLY
+BRIDGE_V1_FREEZE_CHANGESET_PATH_COUNT = 18
+PUSH = NOT_RUN
+C8 = UNSELECTED / NOT_STARTED
+```
