@@ -357,14 +357,14 @@ def test_skill_runtime_active_enumeration_and_usage_limit() -> None:
 # ---------------------------------------------------------------------------
 
 def test_implementation_identity_matches_pin() -> None:
-    """Computed implementation_identity must strictly match POST_B_CURRENT pin."""
-    from scripts.current_implementation_pin import (
-        POST_B_CURRENT_IMPLEMENTATION_IDENTITY,
+    """Computed identity must strictly match the current C8 development pin."""
+    from scripts.current_c8_implementation_pin import (
+        C8_CURRENT_IMPLEMENTATION_IDENTITY,
     )
     from scripts.sgs_engine.formal_duel import implementation_identity
 
     actual = implementation_identity()
-    assert actual == POST_B_CURRENT_IMPLEMENTATION_IDENTITY
+    assert actual == C8_CURRENT_IMPLEMENTATION_IDENTITY
 
 
 @pytest.mark.parametrize(

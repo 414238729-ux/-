@@ -254,7 +254,7 @@ class CanonicalNoSkillModeV1:
 
         return f"{AUTHORITATIVE_NO_SKILL_FULL_GAME_V1_CONTRACT_ID}:{self.mode_id}"
 
-    def create_session(self, seed: int) -> ProductionBasicCardBatch:
+    def create_session(self, seed: int, *, session_id: str | None = None) -> ProductionBasicCardBatch:
         seed = _require_seed(seed)
         configuration_factory = getattr(self.configuration_type, "formal_profile", None)
         if not callable(configuration_factory):  # defensive registry integrity check
@@ -262,10 +262,14 @@ class CanonicalNoSkillModeV1:
                 f"{self.mode_id}缺少trusted canonical formal_profile工厂"
             )
         configuration = configuration_factory()
+        # Optional public run identity; signing secret remains freshly generated
+        # by the canonical session constructor and is never supplied by a driver.
+        identity_args = {} if session_id is None else {"session_id": session_id}
         session = self.session_type(
             seed=seed,
             configuration=configuration,
             analysis_only=False,
+            **identity_args,
         )
         if type(session) is not self.session_type or session.mode_id != self.mode_id:
             raise AuthoritativeNoSkillFullGameError(

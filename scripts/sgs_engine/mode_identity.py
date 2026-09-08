@@ -1261,6 +1261,33 @@ class FormalEightPlayerIdentitySession(_FormalStandardIdentitySession):
             len(self.phase_history),
         )
 
+    def _capture_authoritative_transaction_extension_v1(self) -> object:
+        """Keep C6 façade integrity state inside the production transaction."""
+
+        return (
+            self._formal_runtime_integrity_valid,
+            self._formal_runtime_integrity_anchor,
+        )
+
+    def _restore_authoritative_transaction_extension_v1(
+        self, extension_snapshot: object
+    ) -> None:
+        if (
+            type(extension_snapshot) is not tuple
+            or len(extension_snapshot) != 2
+            or type(extension_snapshot[0]) is not bool
+            or type(extension_snapshot[1]) is not tuple
+            or len(extension_snapshot[1]) != 6
+            or any(type(value) is not int for value in extension_snapshot[1])
+        ):
+            raise TypeError("C6 authoritative transaction integrity快照不匹配")
+        valid, anchor = extension_snapshot
+        if self._current_execution_integrity_anchor() != anchor:
+            self._formal_runtime_integrity_valid = False
+            raise RuntimeError("C6 authoritative transaction restore integrity漂移")
+        self._formal_runtime_integrity_valid = valid
+        self._formal_runtime_integrity_anchor = anchor
+
     def step(self, controller: Any = None) -> Any:
         """合法 step 更新 C6 integrity anchor；外部预突变永久撤销正式资格。"""
 

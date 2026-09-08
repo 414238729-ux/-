@@ -515,6 +515,35 @@ class _AuthoritativeMutationSnapshot:
     end_phase_dispatch_state: _EndPhaseDispatchState | None = None
 
 
+class _AuthoritativeTransactionCapabilityV1:
+    """Opaque live transaction capability; raw authority stays in its owner."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "<opaque-authoritative-transaction-capability-v1>"
+
+    def __copy__(self) -> object:
+        raise TypeError("authoritative transaction capability禁止复制")
+
+    def __deepcopy__(self, memo: object) -> object:
+        raise TypeError("authoritative transaction capability禁止深复制")
+
+    def __reduce__(self) -> object:
+        raise TypeError("authoritative transaction capability禁止序列化")
+
+    def __reduce_ex__(self, protocol: int) -> object:
+        raise TypeError("authoritative transaction capability禁止序列化")
+
+
+@dataclass(frozen=True, slots=True)
+class _AuthoritativeTransactionCapabilityRecordV1:
+    capability: _AuthoritativeTransactionCapabilityV1
+    capability_identity: str
+    authoritative_snapshot: _AuthoritativeMutationSnapshot
+    extension_snapshot: object
+
+
 @dataclass(frozen=True, slots=True)
 class BatchPhaseEntry:
     turn_number: int
@@ -3370,6 +3399,12 @@ class ProductionBasicCardBatch:
         self._deck_path = deck_path
         self._session_id = session_id
         self._session_secret = session_secret
+        # Public transaction calls receive only opaque, owner-bound capabilities.
+        # Raw authoritative snapshots remain exclusively in this live session.
+        self.__transaction_capability_records_v1: dict[
+            int, _AuthoritativeTransactionCapabilityRecordV1
+        ] = {}
+        self.__next_transaction_capability_sequence_v1 = 0
         if _internal_rng is None:
             self._rng = DeterministicRNG(seed)
         else:
@@ -4399,6 +4434,120 @@ class ProductionBasicCardBatch:
             card_movement_authority=self._card_movement_authority,
             end_phase_dispatch_state=self._end_phase_dispatch_state,
         )
+
+    def _capture_authoritative_transaction_extension_v1(self) -> object:
+        """Subclass-only integrity state stored beside, never inside, the token."""
+
+        return None
+
+    def _restore_authoritative_transaction_extension_v1(
+        self, extension_snapshot: object
+    ) -> None:
+        if extension_snapshot is not None:
+            raise ProductionBatchError("未知authoritative transaction扩展快照")
+
+    def _authoritative_transaction_record_v1(
+        self, capability: object
+    ) -> _AuthoritativeTransactionCapabilityRecordV1:
+        if type(capability) is not _AuthoritativeTransactionCapabilityV1:
+            raise ProductionBatchError(
+                "authoritative transaction capability必须是strict live opaque token"
+            )
+        record = self.__transaction_capability_records_v1.get(id(capability))
+        if record is None or record.capability is not capability:
+            raise ProductionBatchError(
+                "authoritative transaction capability不是current session签发或已消费"
+            )
+        return record
+
+    def capture_authoritative_transaction_v1(self) -> object:
+        """Capture one opaque, owner-bound transaction rollback capability.
+
+        The capability is process-local, non-serializable and one-shot.  It
+        contains no raw snapshot; the existing private snapshot remains in the
+        issuing session's private registry.
+        """
+
+        sequence = self.__next_transaction_capability_sequence_v1
+        snapshot = self._snapshot_authoritative_mutation_state()
+        extension = self._capture_authoritative_transaction_extension_v1()
+        material = {
+            "schema": "production-authoritative-transaction-capability-v1",
+            "contract_version": 1,
+            "mode_id": self.mode_id,
+            "session_binding_identity": sha256_value(
+                {
+                    "schema": "production-session-binding-v1",
+                    "mode_id": self.mode_id,
+                    "session_id": self._session_id,
+                }
+            ),
+            "capture_sequence": sequence,
+            "authoritative_state_identity": self.execution_hash,
+            "raw_snapshot_exposed": False,
+            "serializable_authority": False,
+            "one_shot": True,
+        }
+        capability_identity = hmac.new(
+            self._session_secret,
+            canonical_json(material).encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        capability = _AuthoritativeTransactionCapabilityV1()
+        self.__transaction_capability_records_v1[id(capability)] = (
+            _AuthoritativeTransactionCapabilityRecordV1(
+                capability=capability,
+                capability_identity=capability_identity,
+                authoritative_snapshot=snapshot,
+                extension_snapshot=extension,
+            )
+        )
+        self.__next_transaction_capability_sequence_v1 += 1
+        return capability
+
+    def authoritative_transaction_token_identity_v1(
+        self, capability: object
+    ) -> str:
+        """Return only the commitment of one live token, never its snapshot."""
+
+        return self._authoritative_transaction_record_v1(
+            capability
+        ).capability_identity
+
+    def restore_authoritative_transaction_v1(self, capability: object) -> None:
+        """Consume one live capability and restore the existing private truth."""
+
+        record = self._authoritative_transaction_record_v1(capability)
+        # Burn before restore so an exception can never revive the capability.
+        del self.__transaction_capability_records_v1[id(capability)]
+        backup = self._snapshot_authoritative_mutation_state()
+        backup_extension = self._capture_authoritative_transaction_extension_v1()
+        try:
+            self._restore_authoritative_mutation_state(
+                record.authoritative_snapshot
+            )
+            self._restore_authoritative_transaction_extension_v1(
+                record.extension_snapshot
+            )
+        except Exception as exc:
+            try:
+                self._restore_authoritative_mutation_state(backup)
+                self._restore_authoritative_transaction_extension_v1(
+                    backup_extension
+                )
+            except Exception as recovery_exc:
+                raise ProductionBatchError(
+                    "authoritative transaction restore与backup recovery均失败"
+                ) from recovery_exc
+            raise ProductionBatchError(
+                "authoritative transaction restore失败；current state已恢复"
+            ) from exc
+
+    def commit_authoritative_transaction_v1(self, capability: object) -> None:
+        """Consume one live capability without changing gameplay state."""
+
+        self._authoritative_transaction_record_v1(capability)
+        del self.__transaction_capability_records_v1[id(capability)]
 
     def _restore_authoritative_mutation_state(
         self,
