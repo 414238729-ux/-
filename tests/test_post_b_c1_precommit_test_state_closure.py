@@ -22,8 +22,8 @@ from pathlib import Path
 
 import scripts.sgs_engine.formal_duel as formal_duel_module
 import scripts.sgs_formal_runner as formal_runner
-# C8-F 仍按字节固定 Bridge pin；当前身份断言使用独立的 C8 开发 pin。
-from scripts.current_c8_implementation_pin import C8_CURRENT_IMPLEMENTATION_IDENTITY
+# Bridge/R8/C8 历史 pin 保留；本开发树使用独立 POST-C8 pin。
+from scripts.current_post_c8_implementation_pin import POST_C8_CURRENT_IMPLEMENTATION_IDENTITY
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _ACCEPTANCE_ARTIFACT_PATH = (
@@ -59,7 +59,7 @@ def test_frozen_r8_artifact_identity_differs_from_c1_current_identity() -> None:
         == FROZEN_R8_IMPLEMENTATION_IDENTITY
     )
     current_identity = formal_duel_module.implementation_identity()
-    assert current_identity == C8_CURRENT_IMPLEMENTATION_IDENTITY
+    assert current_identity == POST_C8_CURRENT_IMPLEMENTATION_IDENTITY
     assert current_identity != artifact["implementation_identity"]
 
 

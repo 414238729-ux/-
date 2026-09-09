@@ -1,0 +1,17 @@
+{
+  "game": {
+    "mode": "2v2",
+    "control": "AI_VS_AI",
+    "selection": "fixed",
+    "enabled_generals": ["shamoke", "zhugezhan", "wangyuanji"],
+    "fixed_generals": ["shamoke", "zhugezhan", "wangyuanji", "shamoke"],
+    "seed": 0,
+    "ai_seed": 10,
+    "ai_version": "production-heuristic-v1.1",
+    "ai_parameters": {"aggression": 1.0, "preservation": 1.0, "tie_randomness": 1.0},
+    "max_steps": 20000
+  },
+  "games": 20,
+  "seeds": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+  "workers": 4
+}

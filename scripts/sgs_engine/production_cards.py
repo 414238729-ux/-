@@ -1388,8 +1388,8 @@ class WuxiekejiAdapter(TrickCardAdapter):
     递增循环询问，连续一整轮无人响应后窗口关闭并按最终生效状态结算。
     每张响应事件的 ``response_to`` 指向当前直接响应对象（第一张指向
     原锦囊，之后逐张指向前一张【无懈可击】），``root_trick_instance_id``
-    始终指向原锦囊实体。当前生产批次只实现双人座次响应链，不代表军八、
-    2v2或斗地主多人响应链已经完成。
+    始终指向原锦囊实体。响应人数与存活座次读取所组装生产会话的响应顺序；
+    具体模式的实现与审计范围仍须依据该模式入口及实际测试，不能由适配器名称扩大。
     """
 
     def __init__(self, session: "ProductionBasicCardBatch | None" = None) -> None:
@@ -1431,23 +1431,34 @@ class WuxiekejiAdapter(TrickCardAdapter):
             "production_adapter": self.production_adapter,
         }
 
-    def enumerate_legal_actions(
-        self, state: GameState, context: ActionContext
-    ) -> tuple[LegalAction, ...]:
+    def usable_card_ids(self, state: GameState, player_id: str) -> tuple[str, ...]:
+        """正式窗口的实体无懈资格；供枚举器及可信公开读条观察复用。
+
+        本方法不打开窗口，不向控制器导出牌实体。当前完整生产武将没有
+        转化无懈技能；新增此类规则时须同步扩展这里及对应观察测试。
+        """
         session = self._require_session()
         if session.phase.value not in (
             "trick_response",
             "judgment_wuxie",
         ):
             return ()
+        if (session.runtime.pending_trick is None
+                or player_id not in session.runtime.trick_response_order
+                or not state.players_by_id[player_id].alive):
+            return ()
+        return tuple(cid for cid in state.card_ids_in(ZoneRef.hand(player_id))
+                     if state.cards_by_id[cid].card_key == self.card_key)
+
+    def enumerate_legal_actions(
+        self, state: GameState, context: ActionContext
+    ) -> tuple[LegalAction, ...]:
+        session = self._require_session()
         trick = session.runtime.pending_trick
         if trick is None:
             return ()
         actions: list[LegalAction] = []
-        for instance_id in state.card_ids_in(ZoneRef.hand(context.actor_id)):
-            card = state.cards_by_id[instance_id]
-            if card.card_key != self.card_key:
-                continue
+        for instance_id in self.usable_card_ids(state, context.actor_id):
             direct_response_to = session.runtime.trick_direct_response_to
             if direct_response_to is None:
                 direct_response_to = trick.trick_instance_id

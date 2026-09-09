@@ -1,0 +1,11 @@
+{
+  "mode": "2v2",
+  "control": "ALL_HUMAN",
+  "selection": "candidates",
+  "enabled_generals": ["shamoke", "zhugezhan", "wangyuanji"],
+  "candidate_count": 3,
+  "seed": 0,
+  "ai_seed": 10,
+  "max_steps": 20000,
+  "omniscient_debug": false
+}

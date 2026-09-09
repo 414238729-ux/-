@@ -1,0 +1,13 @@
+{
+  "mode": "doudizhu",
+  "control": "HUMAN_VS_AI",
+  "human_seats": [1],
+  "landlord_seat": null,
+  "selection": "candidates",
+  "enabled_generals": ["shamoke", "zhugezhan", "wangyuanji"],
+  "candidate_count": 3,
+  "mulligan": true,
+  "seed": 0,
+  "ai_seed": 10,
+  "max_steps": 20000
+}

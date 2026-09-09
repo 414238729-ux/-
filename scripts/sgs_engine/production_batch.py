@@ -282,6 +282,9 @@ class _PendingCardContinuation:
     window_revision: int
     expected_revision: int
     callback: Callable[[GameState], GameState]
+    # 实体材料属于已验证的虚拟动作，技能暂停期间也必须有明确挂起归属。
+    material_ids: tuple[str, ...] = ()
+    movement_sequence_at_creation: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -3289,6 +3292,9 @@ class ProductionBasicCardBatch:
         # and full skill sets into SkillRuntime without manual skill stitching.
         general_registry: AuthoritativeGeneralRegistry | None = None,
         general_assignments: Mapping[str, str] | None = None,
+        # POST-C8 playable: pre-game mode modifiers, separate from base General
+        # authority. Old formal/Bridge factories omit this opt-in argument.
+        initial_hp_bonuses: Mapping[str, int] | None = None,
         # POST-B C5：仅供正式身份会话在完成身份牌 shuffle 后注入同一
         # DeterministicRNG。不是公开 RNG 注入口；传入对象不能授予
         # formal authority。C1-C4 不传此参数，RNG 消费顺序保持不变。
@@ -3317,6 +3323,12 @@ class ProductionBasicCardBatch:
             if hp > max_hp:
                 raise ValueError(f"第{index}名角色的初始体力不能高于体力上限")
         prepared_player_ids = self._prepare_player_ids(player_hp, player_ids)
+        bonuses = dict(initial_hp_bonuses or {})
+        if any(pid not in prepared_player_ids for pid in bonuses) or any(
+            type(value) is not int or value not in (0, 1)
+            for value in bonuses.values()
+        ):
+            raise ValueError("开局模式体力加成必须引用已注册角色，且为0或1")
         if outcome_policy is not None and not isinstance(
             outcome_policy, OutcomePolicy
         ):
@@ -3479,8 +3491,8 @@ class ProductionBasicCardBatch:
                 PlayerState(
                     pid,
                     index + 1,
-                    hp,
-                    max_hp,
+                    hp + bonuses.get(pid, 0),
+                    max_hp + bonuses.get(pid, 0),
                     character=char_meta,
                 )
             )
@@ -4335,6 +4347,15 @@ class ProductionBasicCardBatch:
                     or source_event.card_instance_id not in state.cards_by_id
                     else state.location_of(source_event.card_instance_id)
                 )
+                material_ids = (
+                    tuple(action.virtual_card.material_card_instance_ids)
+                    if action.virtual_card is not None else ()
+                )
+                if material_ids and (
+                    source_event.card_instance_id != action.card_instance_id
+                    or any(state.location_of(cid) != PROCESSING_ZONE for cid in material_ids)
+                ):
+                    raise UnsupportedRuleError("虚拟卡牌 continuation 材料绑定或牌区无效")
                 identity_payload = {
                     "session_id": self._session_id,
                     "source_event_sequence": source_event.sequence,
@@ -4347,6 +4368,8 @@ class ProductionBasicCardBatch:
                     "expected_phase": self.phase.value,
                     "expected_pending_dying_id": self._runtime.pending_dying_id,
                     "window_revision": state.revision,
+                    "material_ids": list(material_ids),
+                    "movement_sequence_at_creation": len(self._card_movement_authority),
                 }
                 continuation_id = sha256_value(identity_payload)
                 if continuation_id in self._consumed_card_continuations:
@@ -4367,6 +4390,8 @@ class ProductionBasicCardBatch:
                     window_revision=state.revision,
                     expected_revision=state.revision,
                     callback=target_continuation,
+                    material_ids=material_ids,
+                    movement_sequence_at_creation=len(self._card_movement_authority),
                 )
                 return state
         return target_continuation(state)
@@ -4634,8 +4659,11 @@ class ProductionBasicCardBatch:
             assert pending.card_instance_id is not None
             if pending.card_instance_id not in state.cards_by_id:
                 raise UnsupportedRuleError("card continuation 引用实体牌已不存在，失败关闭")
-            if state.location_of(pending.card_instance_id) != pending.required_card_zone:
+            if (state.location_of(pending.card_instance_id) != pending.required_card_zone
+                    and not self._spent_continuation_card_was_recycled(state, pending)):
                 raise UnsupportedRuleError("card continuation 实体牌已离开预期牌区，失败关闭")
+        if any(state.location_of(cid) != PROCESSING_ZONE for cid in pending.material_ids):
+            raise UnsupportedRuleError("card continuation 虚拟材料已离开 PROCESSING，失败关闭")
         for target_id in pending.target_ids:
             target = state.players_by_id.get(target_id)
             if target is None or not target.alive:
@@ -4710,6 +4738,11 @@ class ProductionBasicCardBatch:
                 "expected_pending_dying_id": item.expected_pending_dying_id,
                 "window_revision": item.window_revision,
                 "expected_revision": item.expected_revision,
+                "material_ids": list(item.material_ids),
+                "movement_sequence_at_creation": item.movement_sequence_at_creation,
+                "required_card_zone": (
+                    None if item.required_card_zone is None else _zone_payload(item.required_card_zone)
+                ),
                 "consumed": item.continuation_id in self._consumed_card_continuations,
             }
         private_selection = None
@@ -4775,6 +4808,38 @@ class ProductionBasicCardBatch:
                 )
             ],
         }
+
+    def _spent_continuation_card_was_recycled(
+        self, state: GameState, pending: _PendingCardContinuation
+    ) -> bool:
+        """已消耗的响应牌可随技能摸牌重洗；未结算实体仍要求原位置。
+
+        只接受创建后权威移动账本证明的 discard→draw→可选 hand 链，
+        不能凭最终位置、公开事件自述或改写 required_card_zone 放行。
+        """
+        if (pending.continuation_kind != "post_card_semantic_trigger"
+                or pending.required_card_zone != DISCARD_PILE):
+            return False
+        entries = [entry for entry in self._card_movement_authority
+                   if entry.movement_sequence > pending.movement_sequence_at_creation
+                   and entry.card_instance_id == pending.card_instance_id]
+        if not entries or len(entries) > 2:
+            return False
+        first = entries[0]
+        if (first.source_zone, first.destination_zone, first.movement_kind,
+                first.semantic_reason, first.source_owner_id, first.destination_owner_id) != (
+                "discard", "draw_pile", "reshuffle", "reshuffle", None, None):
+            return False
+        destination = DRAW_PILE
+        if len(entries) == 2:
+            draw = entries[1]
+            if (draw.source_zone != "draw_pile" or draw.source_owner_id is not None
+                    or draw.destination_zone != "hand" or not draw.destination_owner_id
+                    or draw.movement_kind != "draw"
+                    or not draw.semantic_reason.startswith("sgs_skill_")):
+                return False
+            destination = ZoneRef.hand(draw.destination_owner_id)
+        return state.location_of(pending.card_instance_id) == destination
 
     @property
     def session_id(self) -> str:
@@ -5332,6 +5397,11 @@ class ProductionBasicCardBatch:
                     accounted.add(value)
         if self._skill_pending is not None and self._skill_pending.card_instance_id:
             accounted.add(self._skill_pending.card_instance_id)
+        continuation = self._pending_card_continuation
+        if continuation is not None:
+            accounted.update(continuation.material_ids)
+            if any(cid not in processing_ids for cid in continuation.material_ids):
+                raise ProductionBatchError("解析不变量失败：continuation 虚拟材料悬空")
         for q in self._skill_trigger_queue:
             if q.card_instance_id:
                 accounted.add(q.card_instance_id)
@@ -7901,11 +7971,22 @@ class ProductionBasicCardBatch:
                 ),
             )
         base_payload = self._canonical_pending_skill_decision_payload(state, pending)
+        virtual_card = None
+        continuation = self._pending_card_continuation
+        if (pending.card_instance_id is not None
+                and pending.card_instance_id not in state.cards_by_id):
+            if (continuation is None or continuation.card_instance_id != pending.card_instance_id
+                    or not continuation.material_ids):
+                raise UnsupportedRuleError("技能窗口的虚拟卡牌缺少已验证材料 continuation")
+            virtual_card = VirtualCardReference(
+                card_key="sgs_basic_sha", conversion_rule_id="zhangba",
+                material_card_instance_ids=continuation.material_ids)
         activate = LegalAction(
             action_type=ActionType.ACTIVATE_SKILL,
             actor_id=pending.actor_id,
             skill_id=pending.skill_id,
             card_instance_id=pending.card_instance_id,
+            virtual_card=virtual_card,
             payload={**base_payload, "operation": "activate_skill", "decision": "activate"},
         )
         decline = LegalAction(
@@ -7913,6 +7994,7 @@ class ProductionBasicCardBatch:
             actor_id=pending.actor_id,
             skill_id=pending.skill_id,
             card_instance_id=pending.card_instance_id,
+            virtual_card=virtual_card,
             payload={**base_payload, "operation": "pass_skill", "decision": "pass"},
         )
         return (activate, decline)
@@ -8120,6 +8202,7 @@ class ProductionBasicCardBatch:
         if live_runtime is None:
             raise ProductionBatchError("技能结算后 live SkillRuntime 丢失")
         self._skill_runtime = live_runtime.increment_usage(actor_id, skill_id)
+        next_state = self._resume_hanbing_after_skill_checkpoint(next_state)
         next_state.assert_card_conservation()
         return next_state
 
@@ -8162,7 +8245,24 @@ class ProductionBasicCardBatch:
                 )
             elif self._end_phase_dispatch_state is not None:
                 next_state = self._run_end_phase_dispatcher(state)
-        return next_state
+        return self._resume_hanbing_after_skill_checkpoint(next_state)
+
+    def _resume_hanbing_after_skill_checkpoint(self, state: GameState) -> GameState:
+        """逐张弃置间的技能结束后，再以正式最新状态签发下一次选择。"""
+        runtime = self._runtime
+        pending = runtime.pending_hanbing_discard
+        if (runtime.phase is not ProductionPhase.HANBING_DISCARD or pending is None
+                or self._skill_pending is not None or self._skill_trigger_queue):
+            return state
+        remaining = state.card_ids_in(ZoneRef.hand(pending.target_id)) + tuple(
+            cid for slot in EQUIPMENT_SLOTS
+            for cid in state.card_ids_in(ZoneRef.equipment(pending.target_id, slot)))
+        if not remaining:
+            state, next_runtime = self._finish_hanbing_prevent(state, runtime)
+        else:
+            state, next_runtime = self._enter_hanbing_discard_step(state, runtime, step=pending.step)
+        self._commit_runtime(runtime, next_runtime)
+        return state
 
     def _open_next_queued_skill_decision(self, state: GameState) -> None:
         if not self._skill_trigger_queue:
@@ -20758,6 +20858,12 @@ class ProductionBasicCardBatch:
 
         policy = self._mode_policy
         if policy is None or not hasattr(policy, "_mode_decision_queue"):
+            return runtime
+        if (self._skill_pending is not None or self._skill_trigger_queue
+                or self._pending_card_continuation is not None
+                or self._pending_private_card_selection is not None
+                or self._pending_skill_hp_loss is not None):
+            # 先完成真实阶段内的技能及其分支，再允许异步模式窗口抢占。
             return runtime
         if runtime.pending_mode_decision is not None:
             return runtime

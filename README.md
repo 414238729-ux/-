@@ -4,6 +4,10 @@
 
 它不是需要普通用户手动配置参数的 EXE，也不是独立网页应用。第一版不包含在线服务、外部 API 或自定义 Action 后端。
 
+POST-C8开发分支另提供可运行的三国杀生产后端、中文交互CLI、启发式AI与Windows多进程模拟。
+启动方式、实际开放模式／三名完整武将、配置样例与独立验证状态见
+[可玩运行层报告](docs/POST_C8_PLAYABLE_REPORT.md)。第二轮长测已通过，最终审查及冻结状态见[最终验收](docs/POST_C8_FINAL_ACCEPTANCE.md)；旧C8冻结结论不扩张到新入口。
+
 ## 目录用途
 
 ```text
@@ -317,7 +321,7 @@ results = rank_items(
 
 OpenAI 的[GPT Actions 配置说明](https://help.openai.com/en/articles/9442513-configuring-actions-in-gpts)明确要求外部 API 信息和 OpenAPI Schema。第一版仓库没有这些服务，因此不能仅靠现有 Python 文件成为真正的在线 Action。
 
-## 第一版限制
+## 第一版历史限制（POST-C8新增能力见当前报告）
 
 - 三国杀模式规则来自用户个人总结与游戏内观察，主要适用平台已确认为三国杀移动版；其他服务器或桌游版只在对应章节明确说明时适用；
 - 基础机制与通常卡牌效果按本项目的三国杀移动版用户确认规则集使用，但不是官方统一规则原文；
@@ -334,3 +338,12 @@ OpenAI 的[GPT Actions 配置说明](https://help.openai.com/en/articles/9442513
 - 95% 区间描述抽样误差，不包含规则或数据误差；
 - 没有稀有事件加速、并行模拟、持久缓存或可视化前端；
 - 没有在线 API、认证、数据库或自定义 Action。
+
+
+## POST-C8 可玩运行层与生产AI
+
+当前生产入口支持duel、2v2、斗地主、五人身份、普通八人身份及八人立储/择途变体，提供全手控、人对AI和AI自对弈、交互CLI及多进程统计。完整武将范围为沙摩柯、诸葛瞻、王元姬；其余规则/策略条目不自动成为可玩武将。
+
+启动命令、信息边界和验收状态见 [POST-C8当前报告](docs/POST_C8_PLAYABLE_REPORT.md)，独立审查及冻结记录见 [最终验收](docs/POST_C8_FINAL_ACCEPTANCE.md)。本阶段沿用真实production engine，启发式模拟胜率只反映指定AI和配置。
+
+冻结C8合约测试在固定commit的独立源码副本执行，部分历史证明测试仍需要本机已固定的repo-external历史输入；不能把缺失输入替换成自造proof。当前开发测试使用独立POST-C8 identity。原始长测/审计日志保留本机且不提交，仓库报告提供路径、摘要和SHA256。

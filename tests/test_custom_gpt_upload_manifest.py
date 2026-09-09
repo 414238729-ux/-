@@ -8,6 +8,7 @@ KNOWLEDGE = ROOT / "knowledge"
 MANIFEST = ROOT / "CUSTOM_GPT_UPLOAD_MANIFEST.md"
 
 EXPECTED_KNOWLEDGE = {
+    "三国杀AI信息规则.md",
     "三国杀模拟规范.md",
     "三国杀模式规则.md",
     "三国杀基础术语与通用机制.md",
@@ -32,11 +33,13 @@ def test_knowledge_root_has_one_unique_formal_copy_per_manifest_entry() -> None:
             path
             for path in ROOT.rglob(name)
             if not any(part in {".git", ".pytest_cache", "__pycache__"} for part in path.parts)
+            and ".pt" not in path.relative_to(ROOT).parts
+            and not path.is_relative_to(ROOT / "docs/post_c8_evidence")
         ]
         assert matches == [KNOWLEDGE / name]
 
 
-def test_manifest_upload_section_lists_only_the_twelve_formal_files() -> None:
+def test_manifest_upload_section_lists_only_the_current_formal_files() -> None:
     text = MANIFEST.read_text(encoding="utf-8")
     upload_section = text.split("## 2. 上传到 Knowledge", 1)[1].split(
         "## 3. 更新现有自定义 GPT", 1

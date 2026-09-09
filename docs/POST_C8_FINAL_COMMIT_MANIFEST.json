@@ -1,0 +1,234 @@
+{
+  "schema": "POST_C8_FINAL_COMMIT_MANIFEST_V1",
+  "state": "FINAL_AUDIT_PASSED_READY_TO_COMMIT",
+  "base_commit": "9991abc8091943e7316875734bae2e5967cc6e64",
+  "branch": "codex/post-c8-playable-runtime-ai-parallel-v1",
+  "remote": "github",
+  "remote_url": "https://github.com/414238729-ux/-.git",
+  "proposed_tag": "post-c8-playable-runtime-ai-parallel-v1-audited",
+  "files": {
+    ".gitignore": {
+      "sha256": "b69b2cab9f1b6d52ff3f2e715f10120c8d242233ab070b5ac7ced746ca06440d",
+      "bytes": 346
+    },
+    "CUSTOM_GPT_UPLOAD_MANIFEST.md": {
+      "sha256": "d64c569136b4834c24bb0776d4a4da3938ead85a44eeccd2f30e78ac800db067",
+      "bytes": 4436
+    },
+    "README.md": {
+      "sha256": "4912764de2091929896fb149add5b1050b9182d425ece8cad31b79fc2f21a6fb",
+      "bytes": 21992
+    },
+    "UPLOAD_GUIDE.md": {
+      "sha256": "fd133336615ec9750f31db93f5e00d75229439ecebebd1f8eb4e48fb531ccb11",
+      "bytes": 15161
+    },
+    "docs/FULL_PYTEST_FAILURE_CLASSIFICATION.md": {
+      "sha256": "8d551cfdd3c2f615e1f95d8efe61d37dbe6a182fe03188b57f952edff5820696",
+      "bytes": 15881
+    },
+    "docs/POST_C8_FINAL_ACCEPTANCE.md": {
+      "sha256": "44ab0eefff8e0cae7b2cd79e4778fc7752d1662c874104105457f5034640a74a",
+      "bytes": 21106
+    },
+    "docs/POST_C8_GROK_REVIEW.md": {
+      "sha256": "f77cda5af178448666cab532f50274475957c9290fe26528c8a1ad1a5ec6d1b2",
+      "bytes": 3944
+    },
+    "docs/POST_C8_LONG_TEST_HANDOFF.md": {
+      "sha256": "d37f96e0da185d825edfdd9deb8e3fa730c3077398ce11d518153f05a393d4fa",
+      "bytes": 16929
+    },
+    "docs/POST_C8_LONG_TEST_ROUND2_VERIFICATION.json": {
+      "sha256": "f7bb985ca6142adaa783d1c9a1413c41e93638dfeef9b65eba9c5ff01e5f63e9",
+      "bytes": 223029
+    },
+    "docs/POST_C8_PLAYABLE_GAP_MATRIX.md": {
+      "sha256": "1e95cb13bcbcbc1aaa3aa37173a2ce34a8e24b74b066ba56db46345aac75dfe5",
+      "bytes": 8684
+    },
+    "docs/POST_C8_PLAYABLE_REPORT.md": {
+      "sha256": "2a7827b1cf325e23dfd27f618178db508edddf077b09772501d901618e28d1e7",
+      "bytes": 29275
+    },
+    "examples/post_c8/ai_vs_ai.json": {
+      "sha256": "333d4d86caecd67c4373238969efcd3f638d47d33270b0c63109ef9ff81a463b",
+      "bytes": 424
+    },
+    "examples/post_c8/all_human.json": {
+      "sha256": "24578ff49e403b8dc7bb553b6bf6baa5f90df2347882d05545a3261486fb4924",
+      "bytes": 242
+    },
+    "examples/post_c8/human_vs_ai.json": {
+      "sha256": "b83348b60e4ea6bc599d1f2565c439a2073137c63e3a19ef8c19f4e7eccb4b79",
+      "bytes": 287
+    },
+    "examples/post_c8/parallel_simulation.json": {
+      "sha256": "0cbd62a25aac8edb319a23a1ebf68a7953c4134c4d10b6d232fb73914ae046cb",
+      "bytes": 533
+    },
+    "knowledge/三国杀AI信息规则.md": {
+      "sha256": "b3bb947cb2a93ae6b2b2c271fa9c631cbdfb4f1023972976ad0d3c3d3c134d29",
+      "bytes": 7709
+    },
+    "knowledge/三国杀基础术语与通用机制.md": {
+      "sha256": "d4e884cbbf5db24967269d3c708ee779635c5a4140fd9176adfd3fa6e34f0c44",
+      "bytes": 79657
+    },
+    "knowledge/三国杀模式规则.md": {
+      "sha256": "4fe0e2ae97e159c9572dfbe7bb524ad4d27d49ee1636006a33f3f1bcb7da6e27",
+      "bytes": 65897
+    },
+    "knowledge/三国杀模拟规范.md": {
+      "sha256": "b6d913ef076deee9930ea25640b1f92b997ec9a4c7451148441fadfee683bf4e",
+      "bytes": 113508
+    },
+    "knowledge/三国杀武将规则补充.md": {
+      "sha256": "19546df2e74152515030d492734046164ba68621ea95c2238ff24c2d4e11f14d",
+      "bytes": 148163
+    },
+    "scripts/current_post_c8_implementation_pin.py": {
+      "sha256": "f13dd5c3dec9e4deae9718d4e7580235cf8289d3da717f6c2b59e954dfc261c4",
+      "bytes": 398
+    },
+    "scripts/post_c8_validation.py": {
+      "sha256": "952b9b38232a837074268146b57b0a469f8b6a9dc34509a31d5d97de3ff7ad7e",
+      "bytes": 13124
+    },
+    "scripts/sgs_engine/mode_identity_heir.py": {
+      "sha256": "15aed2779fdb8967faf49a2740fc36cacb6e977e601fec84dae4e9506bca74e5",
+      "bytes": 64837
+    },
+    "scripts/sgs_engine/playable_communication.py": {
+      "sha256": "096d0b457a337fcb8f7999c463f647240826bfeb2db3b7bade9c3f5391b7c7e3",
+      "bytes": 9195
+    },
+    "scripts/sgs_engine/playable_config.py": {
+      "sha256": "ad1596fd6ecd0d2097b4a5f31bc0f7a6fa779ab2730abce3695a74242a1ce849",
+      "bytes": 7771
+    },
+    "scripts/sgs_engine/playable_game.py": {
+      "sha256": "8708adf66ca41f609c7984891a70f7aeeb9b2c952e635c0a0654e6f0308fa770",
+      "bytes": 17272
+    },
+    "scripts/sgs_engine/playable_information.py": {
+      "sha256": "dfe9432ab01ef9b9c6e671dff8c490a8a20a59279d3f121113c8aef1a4366bd7",
+      "bytes": 9602
+    },
+    "scripts/sgs_engine/playable_runtime.py": {
+      "sha256": "b4a63cbd31633a3120978060bbe6fb6db26454a4adac7b9fc7be77344c7078ee",
+      "bytes": 27299
+    },
+    "scripts/sgs_engine/playable_simulator.py": {
+      "sha256": "4af07a7040f49cd9d7a2335f158976afcf368c8d208efee4c499d67fa04cdadc",
+      "bytes": 13696
+    },
+    "scripts/sgs_engine/playable_view.py": {
+      "sha256": "28c1747d98a374d8f5896e17c64e932ff4e28f4f1356ec90329330fa55b3a139",
+      "bytes": 19849
+    },
+    "scripts/sgs_engine/production_ai.py": {
+      "sha256": "1871a37ed349a81d7d7f3cf8ce932f095c29ac26fd6ee1cc7e05c78a0d400d8d",
+      "bytes": 38495
+    },
+    "scripts/sgs_engine/production_batch.py": {
+      "sha256": "cf88570501a44359742da13f6c41fd3db744b5552cc0fb0378497b419c360679",
+      "bytes": 935457
+    },
+    "scripts/sgs_engine/production_cards.py": {
+      "sha256": "c094f083738ca22c721f481f87af62ba00cfd8259e12dbe637a355a2841c18be",
+      "bytes": 143737
+    },
+    "scripts/sgs_playable.py": {
+      "sha256": "0f55f23f22ec95d26c5659e7f38c0f33cb9f948b30279e0d96ef08023a9c2801",
+      "bytes": 9915
+    },
+    "scripts/sgs_team_strategy.py": {
+      "sha256": "956493eef349dc81e88d5d3201db02cdd05ffe707779d97e93fb89b0436f0179",
+      "bytes": 26532
+    },
+    "tests/conftest.py": {
+      "sha256": "7e9a10c4b353a0d912f927958ba1133e5c323038390d5f8269713691f7dbaa15",
+      "bytes": 5108
+    },
+    "tests/post_c8_frozen_source.py": {
+      "sha256": "07cf1e272dc7be4f4e7f63c062ecc83711fb9b2525f6be5345aaaa001da887e6",
+      "bytes": 5634
+    },
+    "tests/test_authoritative_skill_runtime_v1.py": {
+      "sha256": "c2f9cd35593c642e1e06cd59ef710123c758b0897067728f02ddb761f046ea6e",
+      "bytes": 15100
+    },
+    "tests/test_custom_gpt_upload_manifest.py": {
+      "sha256": "9d3c163311d71dd1785d968c306e36c7c9accdbec293def3e40484b2a68b4216",
+      "bytes": 2526
+    },
+    "tests/test_post_b_c1_precommit_test_state_closure.py": {
+      "sha256": "3638b222180997e41e22c01386f455cbd451ef330e0c10728611e2bcb47f4e4d",
+      "bytes": 8379
+    },
+    "tests/test_post_c8_information.py": {
+      "sha256": "eb911f0a98c4042b1bb1658c50009a0a4ec1ed7724d9a70ce478939178022bde",
+      "bytes": 24776
+    },
+    "tests/test_post_c8_playable_cli.py": {
+      "sha256": "9a71dac94ef7fcb0d755d15f754985e1be54d72923d82853daf75b4759b80ed8",
+      "bytes": 1730
+    },
+    "tests/test_post_c8_playable_config.py": {
+      "sha256": "bdcbbb1e38854927da1245bb7d7218afd6e30effe7b6824f828f0268a11bad41",
+      "bytes": 3393
+    },
+    "tests/test_post_c8_playable_runtime.py": {
+      "sha256": "bb2b77421d9337935b9d6f344030331f7b98187cde722579fe1742426d94783b",
+      "bytes": 9483
+    },
+    "tests/test_post_c8_playable_simulator.py": {
+      "sha256": "6af83e3410bcfb74cc18ca3b2934dc1fae5e31d77aa447836aa2a18e0c3b2c3a",
+      "bytes": 8004
+    },
+    "tests/test_post_c8_production_ai.py": {
+      "sha256": "7dd7fcbf21950dcb9e4e2cf48788107750b24d29e59dfd008174fabddb4bd440",
+      "bytes": 8699
+    },
+    "tests/test_post_c8_round1_remediation.py": {
+      "sha256": "e34bf73c25130f4d9aadd6df4e05b71d90eec10408ff15c39c59cea56d3128ce",
+      "bytes": 9324
+    },
+    "tests/test_sgs_comprehensive_strategy_docs.py": {
+      "sha256": "765ff9b6798ce49481766ce39334325e775de6214b4ce511b6e7befcf1315281",
+      "bytes": 6882
+    },
+    "tests/test_sgs_second_increment_attachment_merge.py": {
+      "sha256": "eef6c3d21ac82bc83c303ed50ca69ad2c9de882898eaaa9b92b0fe1d004f7495",
+      "bytes": 4462
+    }
+  },
+  "manifest_self_excluded": true,
+  "post_audit_metadata_files": [
+    "README.md",
+    "docs/FULL_PYTEST_FAILURE_CLASSIFICATION.md",
+    "docs/POST_C8_FINAL_ACCEPTANCE.md",
+    "docs/POST_C8_FINAL_COMMIT_MANIFEST.json"
+  ],
+  "excluded": [
+    "docs/post_c8_evidence/**: 本机原始日志/历史证据/临时运行资料，全部保留",
+    "D:/t/**: 仓库外长测原件，不上传",
+    "C:/Users/ASUS/.codex/visualizations/**: 仓库外审计/运行原件，不上传",
+    ".pt/**: basetemp，不上传"
+  ],
+  "unexplained_files": [],
+  "audit_gate": {
+    "POST_C8_FINAL_INDEPENDENT_AUDIT": "PASSED",
+    "PRODUCTION_ACTION_PATH": "PASSED",
+    "PRIVATE_INFORMATION_BOUNDARY": "PASSED",
+    "AI_STRATEGY_WIRING": "PASSED",
+    "MODE_RUNTIME_INTEGRATION": "PASSED",
+    "PARALLEL_SIMULATION_DETERMINISM": "PASSED",
+    "HISTORICAL_FAILURE_PRESERVATION": "PASSED",
+    "ALLOW_POST_C8_FINAL_COMMIT_AND_PUSH": "YES"
+  },
+  "audit_public_response_sha256": "40d3b7372cc002f387c84a30e1d16ae2e5d5ecc28d4eff3e9c18e689010407b9",
+  "audit_input_manifest_sha256": "e9e37492ca16e66e6759b49499336ad460cc0622e11b33b4cf6651141e5c28be",
+  "staging_eol_policy": "core.autocrlf=false; staged blob SHA256 must equal exact audited/current report bytes"
+}

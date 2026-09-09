@@ -21,3 +21,7 @@ output/
 Thumbs.db
 
 .pytest-temp/
+.pt/
+
+# POST-C8 本机原始证据、日志与临时审查包；不随正式提交上传。
+docs/post_c8_evidence/

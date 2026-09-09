@@ -70,8 +70,10 @@ def test_mode_visibility_and_team_rescue_boundaries_are_explicit() -> None:
     simulation = SIMULATION.read_text(encoding="utf-8")
     assert "同阵营队友可以查看彼此当前实际手牌" in modes
     assert "敌方不能查看这些手牌" in modes
-    assert "送花、砸蛋" in modes
-    assert "不公开精确张数、其他牌种、花色、点数或完整手牌" in modes
+    assert "花=YES、蛋=NO" in modes
+    assert "公开语境和答案向地主及双农民一致公开" in modes
+    assert "无懈保护建议只回答本次是否需要保护" in modes
+    assert "不是私密手牌共享" in modes
     assert "非濒死队友的【酒】不能救人" in simulation
     assert "默认必须救援" in simulation
 
@@ -79,12 +81,16 @@ def test_mode_visibility_and_team_rescue_boundaries_are_explicit() -> None:
 def test_nullification_timer_knowledge_is_dynamic_and_limited() -> None:
     simulation = SIMULATION.read_text(encoding="utf-8")
     mechanics = MECHANICS.read_text(encoding="utf-8")
-    assert "第一张锦囊出手前不得预读具体持有者" in simulation
-    assert "knowledge_source=response_timer" in simulation
-    assert "每个新响应窗口重新刷新集合" in simulation
-    assert "不能断言没有第二张" in simulation
-    assert "精确张数始终未知" in simulation
-    assert "响应读条" in mechanics
+    information = (SIMULATION.parent / "三国杀AI信息规则.md").read_text(encoding="utf-8")
+    assert "三国杀AI信息规则" in simulation
+    assert "首次真正进入无懈响应窗口前" in information
+    assert "KNOWN_USABLE` / `KNOWN_NONE" in information
+    assert "不消耗牌，也不自动变成`KNOWN_NONE`" in information
+    assert "实际使用一张只确认这一张被使用" in information
+    assert "公开摘要不含精确张数" in information
+    assert "读取视图、AI评分、普通轮询或普通阶段转换不产生观察" in information
+    assert "真实无懈响应窗口出现时" in mechanics
+    assert "三国杀AI信息规则" in mechanics
 
 
 def test_card_decision_strategies_stay_in_simulation_layer() -> None:

@@ -53,7 +53,7 @@ def _ensure_bool(value: object, name: str) -> bool:
 
 
 class FarmerPeachSignal(str, Enum):
-    """斗地主农民通过客户端交互表达的【桃】信息。"""
+    """历史分析数据兼容枚举，不是当前运行层自动共享桃的权限。"""
 
     HAS_PEACH = "has_peach"
     NO_PEACH = "no_peach"
@@ -75,7 +75,7 @@ def _coerce_farmer_signal(
 
 @dataclass(frozen=True)
 class FarmerPeachKnowledge:
-    """一名农民当前公开表达的【桃】知识。
+    """历史独立分析对象；production改用绑定语境的公开YES/NO问答。
 
     ``has_peach`` 只证明至少一张，不公开精确数量或其他手牌。
     """
@@ -116,10 +116,10 @@ class FarmerPeachKnowledge:
 
 @dataclass(frozen=True)
 class FarmerSlashCountKnowledge:
-    """斗地主农民通过客户端交互表达的当前【杀】精确数量。
+    """历史分析的精确数量容器，保留以兼容旧计算资料和测试。
 
-    该信号只公开按“当前卡名”口径得到的数量，不公开实体牌名、花色、
-    点数或其余手牌。调用方应在手牌改变后重新取得信号。
+    当前规则禁止通用农民杀数查询/共享；不能把本类型存在视为权限。
+    鲍信只允许具体公开方案命题，详见 knowledge/三国杀AI信息规则.md。
     """
 
     player_id: PlayerId
@@ -157,7 +157,7 @@ class FarmerSlashCountKnowledge:
 
 @dataclass(frozen=True)
 class FarmerCoordinationKnowledge:
-    """只合并已确认的桃有无信号与【杀】当前数量信号。"""
+    """历史分析容器；当前production不导入此自动资源合并模型。"""
 
     peach: FarmerPeachKnowledge
     slash: FarmerSlashCountKnowledge
@@ -591,6 +591,16 @@ class NullificationKnowledgeState:
             knowledge_time,
             current.window_id,
         )
+
+
+    def record_public_nullification_gained(self, player_id: PlayerId, *, knowledge_time: str) -> None:
+        """只接受可信调用者确认的公开区域取牌事实，不探测未知摸牌牌面。"""
+        current = self.knowledge_for(player_id)
+        if not isinstance(knowledge_time, str) or not knowledge_time.strip():
+            raise ValueError("无懈知识时间不能为空")
+        self._knowledge[player_id] = NullificationPlayerKnowledge(
+            player_id, NullificationAvailability.KNOWN_USABLE,
+            "公开获得无懈，精确总量未知", knowledge_time, current.window_id)
 
 
 @dataclass(frozen=True)

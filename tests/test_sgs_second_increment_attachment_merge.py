@@ -95,6 +95,7 @@ def test_candidate_pool_has_thirteen_unique_slots_and_excludes_unselected_names(
 
 def test_only_one_formal_file_exists_for_each_sgs_knowledge_kind() -> None:
     expected = {
+        "三国杀AI信息规则.md",
         "三国杀模拟规范.md",
         "三国杀模式规则.md",
         "三国杀基础术语与通用机制.md",

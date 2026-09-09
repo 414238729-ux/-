@@ -1,0 +1,12 @@
+{
+  "mode": "identity8",
+  "control": "AI_VS_AI",
+  "selection": "fixed",
+  "enabled_generals": ["shamoke", "zhugezhan", "wangyuanji"],
+  "fixed_generals": ["shamoke", "zhugezhan", "wangyuanji", "shamoke", "zhugezhan", "wangyuanji", "shamoke", "zhugezhan"],
+  "identities": ["lord", "loyalist", "loyalist", "rebel", "rebel", "rebel", "rebel", "spy"],
+  "mulligan": true,
+  "seed": 0,
+  "ai_seed": 10,
+  "max_steps": 20000
+}

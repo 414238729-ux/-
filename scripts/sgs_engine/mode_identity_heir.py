@@ -1039,7 +1039,7 @@ class HeirAndSpyChoiceModePolicy:
             variant.spy_path_pending = False
             return state, runtime
         path = variant.spy_path_choice
-        apply_fn = getattr(session, "_apply_c7_spy_conversion")
+        apply_fn = getattr(session, "_c7_apply_spy_conversion")
         return apply_fn(state, runtime, chooser_id, path)
 
     def pre_confirmed_death_hook(
@@ -1054,7 +1054,7 @@ class HeirAndSpyChoiceModePolicy:
         heir_id = self.legal_heir_id(state)
         if heir_id is None:
             return state, runtime
-        open_window = getattr(session, "_open_c7_succession_window")
+        open_window = getattr(session, "_c7_open_succession_window")
         return open_window(state, runtime, dying_id, heir_id)
 
     def post_confirmed_death_pre_outcome_hook(
@@ -1079,7 +1079,7 @@ class HeirAndSpyChoiceModePolicy:
         lord = state.players_by_id.get(lord_id)
         if lord is None or not lord.alive:
             return state, runtime
-        lose_hp = getattr(session, "_apply_c7_lose_hp")
+        lose_hp = getattr(session, "_c7_apply_lose_hp")
         return lose_hp(
             state,
             runtime,
@@ -1112,7 +1112,7 @@ class HeirAndSpyChoiceModePolicy:
         if credit is not None:
             killer_role = self.role_of(credit)
             if killer_role is HeirAndSpyChoiceRole.AMBITIONIST:
-                open_reward = getattr(session, "_open_c7_ambitionist_reward")
+                open_reward = getattr(session, "_c7_open_ambitionist_reward")
                 return open_reward(state, runtime, credit, dying_id)
         if role is HeirAndSpyChoiceRole.REBEL:
             if credit is None:
